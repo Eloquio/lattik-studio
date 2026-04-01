@@ -1,11 +1,28 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Bot, Pencil } from "lucide-react";
 
-export function ChatPanel() {
-  const { messages, sendMessage, status } = useChat();
+interface ChatPanelProps {
+  activeExtensionId: string | null;
+  onCanvasStateChange: (state: unknown) => void;
+  onExtensionChange: (id: string | null) => void;
+}
+
+export function ChatPanel({ activeExtensionId, onCanvasStateChange, onExtensionChange }: ChatPanelProps) {
+  const extensionIdRef = useRef(activeExtensionId);
+  extensionIdRef.current = activeExtensionId;
+
+  const [transport] = useState(
+    () =>
+      new DefaultChatTransport({
+        body: () => ({ extensionId: extensionIdRef.current }),
+      })
+  );
+
+  const { messages, sendMessage, status } = useChat({ transport });
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isLoading = status === "submitted" || status === "streaming";
@@ -13,6 +30,47 @@ export function ChatPanel() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Handle handoff tool calls — switch to the target agent
+  useEffect(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role !== "assistant") continue;
+      for (const part of msg.parts) {
+        if (
+          part.type === "tool-handoff" &&
+          "state" in part &&
+          "input" in part &&
+          part.state === "input-available"
+        ) {
+          const input = part.input as { agentId: string };
+          if (input.agentId && input.agentId !== activeExtensionId) {
+            onExtensionChange(input.agentId);
+          }
+          return;
+        }
+      }
+    }
+  }, [messages, activeExtensionId, onExtensionChange]);
+
+  // Extract canvas state from tool results
+  useEffect(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role !== "assistant") continue;
+      for (const part of msg.parts) {
+        if (
+          part.type === "tool-updatePipeline" &&
+          "state" in part &&
+          part.state === "output-available" &&
+          "output" in part
+        ) {
+          onCanvasStateChange(part.output);
+          return;
+        }
+      }
+    }
+  }, [messages, onCanvasStateChange]);
 
   const handleSubmit = () => {
     if (!input.trim() || isLoading) return;
@@ -26,7 +84,9 @@ export function ChatPanel() {
       <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-5" style={{ height: "49px" }}>
         <div className="flex items-center gap-2">
           <Bot className="h-4 w-4 text-[#e0a96e]" />
-          <span className="text-sm font-medium text-white/70">AI Assistant</span>
+          <span className="text-sm font-medium text-white/70">
+            {activeExtensionId === "data-architect" ? "Data Architect" : "Lattik Studio Assistant"}
+          </span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="text-sm text-white/50">New Chat</span>
@@ -41,7 +101,7 @@ export function ChatPanel() {
         {messages.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3">
             <h2 className="text-2xl font-bold text-white tracking-tight">
-              <span style={{ fontFamily: "var(--font-display), cursive" }}>AI<span className="text-[#e0a96e]"> Chat</span></span>
+              <span style={{ fontFamily: "var(--font-display), cursive" }}>Lattik<span className="text-[#e0a96e]"> Studio</span></span>
             </h2>
             <p className="text-sm text-white/50">Start a conversation...</p>
           </div>
@@ -52,21 +112,28 @@ export function ChatPanel() {
                 key={message.id}
                 className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
               >
-                <div
-                  className={`rounded-2xl px-4 py-2.5 text-sm ${
-                    message.role === "user"
-                      ? "max-w-[80%] bg-white/15 text-white"
-                      : "w-full text-white/90"
-                  }`}
-                >
-                  {message.parts.map((part, i) =>
-                    part.type === "text" ? (
-                      <p key={i} className="whitespace-pre-wrap">
-                        {part.text}
-                      </p>
-                    ) : null
-                  )}
-                </div>
+                {message.role === "user" ? (
+                  <div className="max-w-[80%] rounded-2xl bg-white/15 px-4 py-2.5 text-sm text-white">
+                    {message.parts.map((part, i) =>
+                      part.type === "text" ? (
+                        <p key={i} className="whitespace-pre-wrap">{part.text}</p>
+                      ) : null
+                    )}
+                  </div>
+                ) : (
+                  <div className="w-full">
+                    <span className="text-xs font-semibold text-[#e0a96e]">
+                      {activeExtensionId === "data-architect" ? "Data Architect" : "Assistant"}
+                    </span>
+                    <div className="mt-1 border-l-2 border-[#e0a96e]/40 pl-4 text-sm text-white/90">
+                      {message.parts.map((part, i) =>
+                        part.type === "text" ? (
+                          <p key={i} className="whitespace-pre-wrap">{part.text}</p>
+                        ) : null
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
             <div ref={messagesEndRef} />
@@ -92,7 +159,7 @@ export function ChatPanel() {
           />
           <button
             type="button"
-            onClick={handleSubmit}
+            onClick={() => handleSubmit()}
             disabled={isLoading || !input.trim()}
             className="absolute right-3 bottom-3 flex h-7 w-7 items-center justify-center rounded-lg border border-white/20 bg-white/10 text-white/60 transition-colors hover:bg-white/20 hover:text-white disabled:opacity-30"
           >

@@ -14,6 +14,7 @@ function loadState() {
 export function useCanvas() {
   const [isOpen, setIsOpen] = useState(() => loadState().isOpen);
   const [width, setWidth] = useState(() => loadState().width);
+  const [canvasState, setCanvasState] = useState<unknown>(null);
 
   useEffect(() => {
     localStorage.setItem("canvas-state", JSON.stringify({ isOpen, width }));
@@ -23,5 +24,5 @@ export function useCanvas() {
   const close = useCallback(() => setIsOpen(false), []);
   const toggle = useCallback(() => setIsOpen((prev: boolean) => !prev), []);
 
-  return { isOpen, width, setWidth, open, close, toggle };
+  return { isOpen, width, setWidth, open, close, toggle, canvasState, setCanvasState };
 }

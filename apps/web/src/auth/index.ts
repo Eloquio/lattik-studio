@@ -15,5 +15,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => {
       verificationTokensTable: schema.verificationTokens,
     }),
     providers: [Google],
+    pages: {
+      signIn: "/sign-in",
+    },
+    callbacks: {
+      authorized({ auth }) {
+        return !!auth?.user;
+      },
+    },
   };
 });

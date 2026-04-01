@@ -3,12 +3,15 @@
 import { useCallback, useRef } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { DataArchitectCanvas } from "@/extensions/data-architect/canvas/data-architect-canvas";
 
 interface CanvasPanelProps {
   isOpen: boolean;
   width: number;
   onWidthChange: (width: number) => void;
   onClose: () => void;
+  activeExtensionId: string | null;
+  canvasState: unknown;
 }
 
 export function CanvasPanel({
@@ -16,6 +19,8 @@ export function CanvasPanel({
   width,
   onWidthChange,
   onClose,
+  activeExtensionId,
+  canvasState,
 }: CanvasPanelProps) {
   const isDragging = useRef(false);
 
@@ -69,14 +74,19 @@ export function CanvasPanel({
             <X className="h-4 w-4" />
           </Button>
         </div>
-        <div
-          className="flex flex-1 flex-col overflow-y-auto p-4 rounded-bl-xl"
-          style={{
-            backgroundImage:
-              "linear-gradient(#e8d5b7 1px, transparent 1px), linear-gradient(90deg, #e8d5b7 1px, transparent 1px)",
-            backgroundSize: "20px 20px",
-          }}
-        >
+        <div className="flex flex-1 flex-col overflow-y-auto rounded-bl-xl">
+          {activeExtensionId === "data-architect" ? (
+            <DataArchitectCanvas state={canvasState} />
+          ) : (
+            <div
+              className="flex flex-1 flex-col p-4"
+              style={{
+                backgroundImage:
+                  "linear-gradient(#e8d5b7 1px, transparent 1px), linear-gradient(90deg, #e8d5b7 1px, transparent 1px)",
+                backgroundSize: "20px 20px",
+              }}
+            />
+          )}
         </div>
       </div>
     </div>

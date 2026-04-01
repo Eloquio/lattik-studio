@@ -20,8 +20,8 @@ const homemadeApple = Homemade_Apple({
 });
 
 export const metadata: Metadata = {
-  title: "AI Chat",
-  description: "AI chat application with glassmorphic UI",
+  title: "Lattik Studio",
+  description: "Lattik Studio — AI chat with glassmorphic UI",
 };
 
 export default function RootLayout({
