@@ -6,6 +6,7 @@ import { DefaultChatTransport } from "ai";
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Bot, Pencil, Plus, Trash2 } from "lucide-react";
 import Markdown from "react-markdown";
+import { ToolResult } from "./tool-result";
 import { saveConversation, deleteConversation } from "@/lib/actions/conversations";
 
 interface ChatPanelProps {
@@ -49,6 +50,22 @@ export function ChatPanel({
   const isLoading = status === "submitted" || status === "streaming";
   const wasLoadingRef = useRef(false);
 
+  // Track which agent owns each assistant message
+  const messageAgentMap = useRef<Map<string, string | null>>(new Map());
+  useEffect(() => {
+    for (const msg of messages) {
+      if (msg.role === "assistant" && !messageAgentMap.current.has(msg.id)) {
+        messageAgentMap.current.set(msg.id, extensionIdRef.current);
+      }
+    }
+  }, [messages]);
+
+  function getAgentLabel(messageId: string) {
+    const agentId = messageAgentMap.current.get(messageId);
+    if (agentId === "data-architect") return "Data Architect";
+    return "Assistant";
+  }
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -71,7 +88,12 @@ export function ChatPanel({
     wasLoadingRef.current = isLoading;
   }, [status, messages, chatId, isLoading, onConversationChange]);
 
-  // Handle handoff tool calls — switch to the target agent
+  // Handle handoff: detect handoff tool, switch agent, wait for stream to finish, then continue
+  const handoffProcessedRef = useRef<Set<string>>(new Set());
+  const pendingHandoffRef = useRef<boolean>(false);
+  const CONTINUE_MARKER = "[continue]";
+
+  // Detect handoff and mark pending
   useEffect(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
@@ -80,12 +102,16 @@ export function ChatPanel({
         if (
           part.type === "tool-handoff" &&
           "state" in part &&
-          "input" in part &&
-          part.state === "input-available"
+          "output" in part &&
+          part.state === "output-available" &&
+          !handoffProcessedRef.current.has(msg.id)
         ) {
-          const input = part.input as { agentId: string };
-          if (input.agentId && input.agentId !== activeExtensionId) {
-            onExtensionChange(input.agentId);
+          const toolOutput = part.output as { handedOffTo: string };
+          if (toolOutput.handedOffTo && toolOutput.handedOffTo !== activeExtensionId) {
+            handoffProcessedRef.current.add(msg.id);
+            pendingHandoffRef.current = true;
+            extensionIdRef.current = toolOutput.handedOffTo;
+            onExtensionChange(toolOutput.handedOffTo);
           }
           return;
         }
@@ -93,17 +119,25 @@ export function ChatPanel({
     }
   }, [messages, activeExtensionId, onExtensionChange]);
 
-  // Extract canvas state from tool results
+  // Once stream finishes, send hidden continue message to trigger the new agent
+  useEffect(() => {
+    if (status === "ready" && pendingHandoffRef.current) {
+      pendingHandoffRef.current = false;
+      requestAnimationFrame(() => sendMessage({ text: CONTINUE_MARKER }));
+    }
+  }, [status, sendMessage]);
+
+  // Extract canvas state from tool results (updatePipeline or renderCanvas)
   useEffect(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
       if (msg.role !== "assistant") continue;
       for (const part of msg.parts) {
         if (
-          part.type === "tool-updatePipeline" &&
           "state" in part &&
           part.state === "output-available" &&
-          "output" in part
+          "output" in part &&
+          (part.type === "tool-updatePipeline" || part.type === "tool-renderCanvas")
         ) {
           onCanvasStateChange(part.output);
           return;
@@ -173,7 +207,17 @@ export function ChatPanel({
           </div>
         ) : (
           <div className="flex w-full flex-col gap-4">
-            {messages.map((message) => (
+            {messages.map((message) => {
+              // Hide the continue marker message
+              if (
+                message.role === "user" &&
+                message.parts.some(
+                  (p) => p.type === "text" && "text" in p && p.text === CONTINUE_MARKER
+                )
+              ) {
+                return null;
+              }
+              return (
               <div
                 key={message.id}
                 className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
@@ -189,19 +233,33 @@ export function ChatPanel({
                 ) : (
                   <div className="w-full">
                     <span className="text-xs font-semibold text-[#e0a96e]">
-                      {activeExtensionId === "data-architect" ? "Data Architect" : "Assistant"}
+                      {getAgentLabel(message.id)}
                     </span>
                     <div className="mt-1 border-l-2 border-[#e0a96e]/40 pl-4 text-sm text-white/90 prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-headings:text-white prose-strong:text-white prose-code:text-[#e0a96e] prose-code:bg-white/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-pre:bg-white/5 prose-pre:border prose-pre:border-white/10">
-                      {message.parts.map((part, i) =>
-                        part.type === "text" ? (
-                          <Markdown key={i}>{part.text}</Markdown>
-                        ) : null
-                      )}
+                      {message.parts.map((part, i) => {
+                        if (part.type === "text") {
+                          return <Markdown key={i}>{part.text}</Markdown>;
+                        }
+                        if (part.type.startsWith("tool-") && "state" in part) {
+                          const p = part as { state: string; input?: unknown; output?: unknown };
+                          return (
+                            <ToolResult
+                              key={i}
+                              toolName={part.type.slice(5)}
+                              state={p.state}
+                              input={p.input}
+                              output={p.output}
+                            />
+                          );
+                        }
+                        return null;
+                      })}
                     </div>
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
             <div ref={messagesEndRef} />
           </div>
         )}
