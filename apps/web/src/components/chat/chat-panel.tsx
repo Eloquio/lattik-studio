@@ -5,6 +5,7 @@ import type { UIMessage } from "ai";
 import { DefaultChatTransport } from "ai";
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Bot, Pencil, Plus, Trash2 } from "lucide-react";
+import Markdown from "react-markdown";
 import { saveConversation, deleteConversation } from "@/lib/actions/conversations";
 
 interface ChatPanelProps {
@@ -190,10 +191,10 @@ export function ChatPanel({
                     <span className="text-xs font-semibold text-[#e0a96e]">
                       {activeExtensionId === "data-architect" ? "Data Architect" : "Assistant"}
                     </span>
-                    <div className="mt-1 border-l-2 border-[#e0a96e]/40 pl-4 text-sm text-white/90">
+                    <div className="mt-1 border-l-2 border-[#e0a96e]/40 pl-4 text-sm text-white/90 prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-headings:text-white prose-strong:text-white prose-code:text-[#e0a96e] prose-code:bg-white/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-pre:bg-white/5 prose-pre:border prose-pre:border-white/10">
                       {message.parts.map((part, i) =>
                         part.type === "text" ? (
-                          <p key={i} className="whitespace-pre-wrap">{part.text}</p>
+                          <Markdown key={i}>{part.text}</Markdown>
                         ) : null
                       )}
                     </div>
@@ -210,6 +211,7 @@ export function ChatPanel({
       <div className="p-4">
         <div className="relative rounded-2xl border border-white/15 bg-white/10 backdrop-blur-md">
           <textarea
+            autoFocus
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Type something..."

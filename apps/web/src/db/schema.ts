@@ -1,4 +1,5 @@
 import {
+  boolean,
   integer,
   jsonb,
   pgTable,
@@ -60,6 +61,40 @@ export const conversations = pgTable("conversation", {
   createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
   updatedAt: timestamp("updatedAt", { mode: "date" }).notNull().defaultNow(),
 });
+
+export const agents = pgTable("agent", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  icon: text("icon").notNull(),
+  category: text("category").notNull(),
+  type: text("type").$type<"first-party" | "third-party">().notNull(),
+  config: jsonb("config").$type<{
+    system_prompt?: string;
+    knowledge?: string[];
+    tools?: string[];
+  }>(),
+  authorId: text("authorId").references(() => users.id),
+  published: boolean("published").notNull().default(true),
+  createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt", { mode: "date" }).notNull().defaultNow(),
+});
+
+export const userAgents = pgTable(
+  "user_agent",
+  {
+    userId: text("userId")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    agentId: text("agentId")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    enabledAt: timestamp("enabledAt", { mode: "date" }).notNull().defaultNow(),
+  },
+  (ua) => [
+    primaryKey({ columns: [ua.userId, ua.agentId] }),
+  ]
+);
 
 export const verificationTokens = pgTable(
   "verificationToken",

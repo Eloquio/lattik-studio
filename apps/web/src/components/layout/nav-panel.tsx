@@ -32,6 +32,7 @@ export function NavPanel({ historyOpen, onChatClick }: NavPanelProps) {
       <Tooltip>
         <TooltipTrigger
           className="flex h-10 w-10 items-center justify-center rounded-md text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+          onClick={() => window.location.href = "/marketplace"}
         >
           <Store className="h-5 w-5" />
         </TooltipTrigger>

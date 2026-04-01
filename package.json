@@ -7,7 +7,8 @@
     "lint": "turbo lint",
     "db:start": "kind create cluster --name lattik --config k8s/kind-config.yaml && kubectl apply -f k8s/postgres.yaml && kubectl wait --for=condition=ready pod -l app=postgres --timeout=60s",
     "db:stop": "kind delete cluster --name lattik",
-    "db:push": "cd apps/web && npx drizzle-kit push"
+    "db:push": "cd apps/web && npx drizzle-kit push",
+    "db:seed": "cd apps/web && pnpm tsx src/db/seed.ts"
   },
   "devDependencies": {
     "turbo": "^2"
