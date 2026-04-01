@@ -1,6 +1,6 @@
 import {
-  boolean,
   integer,
+  jsonb,
   pgTable,
   primaryKey,
   text,
@@ -48,6 +48,17 @@ export const sessions = pgTable("session", {
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   expires: timestamp("expires", { mode: "date" }).notNull(),
+});
+
+export const conversations = pgTable("conversation", {
+  id: text("id").primaryKey(),
+  userId: text("userId")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  messages: jsonb("messages").notNull().$type<unknown[]>().default([]),
+  createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt", { mode: "date" }).notNull().defaultNow(),
 });
 
 export const verificationTokens = pgTable(
