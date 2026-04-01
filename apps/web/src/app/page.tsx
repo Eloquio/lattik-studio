@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { NavPanel } from "@/components/layout/nav-panel";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { CanvasPanel } from "@/components/canvas/canvas-panel";
@@ -7,6 +8,7 @@ import { useCanvas } from "@/hooks/use-canvas";
 
 export default function Home() {
   const canvas = useCanvas();
+  const [activeExtensionId, setActiveExtensionId] = useState<string | null>(null);
 
   return (
     <div className="relative flex h-screen w-screen overflow-hidden">
@@ -23,7 +25,11 @@ export default function Home() {
       <div className="relative z-10 flex flex-1 overflow-hidden">
         {/* Chat panel */}
         <div className="flex flex-1 flex-col overflow-hidden">
-          <ChatPanel />
+          <ChatPanel
+            activeExtensionId={activeExtensionId}
+            onCanvasStateChange={canvas.setCanvasState}
+            onExtensionChange={setActiveExtensionId}
+          />
         </div>
 
         {/* Canvas toggle button (visible when canvas is closed) */}
@@ -43,6 +49,8 @@ export default function Home() {
           width={canvas.width}
           onWidthChange={canvas.setWidth}
           onClose={canvas.close}
+          activeExtensionId={activeExtensionId}
+          canvasState={canvas.canvasState}
         />
       </div>
     </div>
