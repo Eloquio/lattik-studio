@@ -1,17 +1,33 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
+import type { UIMessage } from "ai";
 import { DefaultChatTransport } from "ai";
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Bot, Pencil } from "lucide-react";
+import { ArrowUp, Bot, Pencil, Plus, Trash2 } from "lucide-react";
+import { saveConversation, deleteConversation } from "@/lib/actions/conversations";
 
 interface ChatPanelProps {
+  chatId: string;
+  initialMessages?: UIMessage[];
+  savedTitle?: string;
   activeExtensionId: string | null;
   onCanvasStateChange: (state: unknown) => void;
   onExtensionChange: (id: string | null) => void;
+  onConversationChange?: () => void;
+  onNewChat?: () => void;
 }
 
-export function ChatPanel({ activeExtensionId, onCanvasStateChange, onExtensionChange }: ChatPanelProps) {
+export function ChatPanel({
+  chatId,
+  initialMessages,
+  savedTitle,
+  activeExtensionId,
+  onCanvasStateChange,
+  onExtensionChange,
+  onConversationChange,
+  onNewChat,
+}: ChatPanelProps) {
   const extensionIdRef = useRef(activeExtensionId);
   extensionIdRef.current = activeExtensionId;
 
@@ -22,14 +38,37 @@ export function ChatPanel({ activeExtensionId, onCanvasStateChange, onExtensionC
       })
   );
 
-  const { messages, sendMessage, status } = useChat({ transport });
+  const { messages, sendMessage, status } = useChat({
+    id: chatId,
+    messages: initialMessages,
+    transport,
+  });
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isLoading = status === "submitted" || status === "streaming";
+  const wasLoadingRef = useRef(false);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Auto-save conversation when assistant finishes responding
+  useEffect(() => {
+    if (wasLoadingRef.current && status === "ready" && messages.length > 0) {
+      const firstUserMsg = messages.find((m) => m.role === "user");
+      const title = firstUserMsg
+        ? firstUserMsg.parts
+            .filter((p): p is { type: "text"; text: string } => p.type === "text")
+            .map((p) => p.text)
+            .join(" ")
+            .slice(0, 100) || "New Chat"
+        : "New Chat";
+
+      saveConversation({ id: chatId, title, messages });
+      onConversationChange?.();
+    }
+    wasLoadingRef.current = isLoading;
+  }, [status, messages, chatId, isLoading, onConversationChange]);
 
   // Handle handoff tool calls — switch to the target agent
   useEffect(() => {
@@ -78,6 +117,14 @@ export function ChatPanel({ activeExtensionId, onCanvasStateChange, onExtensionC
     setInput("");
   };
 
+  const handleDelete = async () => {
+    await deleteConversation(chatId);
+    onConversationChange?.();
+    onNewChat?.();
+  };
+
+  const displayTitle = savedTitle || "New Chat";
+
   return (
     <div className="flex h-full flex-1 flex-col">
       {/* Chat title */}
@@ -89,10 +136,28 @@ export function ChatPanel({ activeExtensionId, onCanvasStateChange, onExtensionC
           </span>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="text-sm text-white/50">New Chat</span>
-          <button className="text-white/30 transition-colors hover:text-white/60">
+          <span className="text-sm text-white/50 truncate max-w-[200px]">{displayTitle}</span>
+          <button className="flex h-7 w-7 items-center justify-center rounded-md text-white/30 transition-colors hover:bg-white/10 hover:text-white/60" title="Edit title">
             <Pencil className="h-3 w-3" />
           </button>
+          {messages.length > 0 && (
+            <>
+              <button
+                onClick={onNewChat}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-white/30 transition-colors hover:bg-white/10 hover:text-white/60"
+                title="New Chat"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={handleDelete}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-white/30 transition-colors hover:bg-white/10 hover:text-red-400"
+                title="Delete conversation"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </>
+          )}
         </div>
       </div>
 

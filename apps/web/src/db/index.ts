@@ -1,16 +1,18 @@
-import { neon } from "@neondatabase/serverless";
-import { drizzle, type NeonHttpDatabase } from "drizzle-orm/neon-http";
+import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 
 import * as schema from "./schema";
 
-let _db: NeonHttpDatabase<typeof schema>;
+const globalForDb = globalThis as unknown as {
+  db: PostgresJsDatabase<typeof schema>;
+};
 
 export function getDb() {
-  if (!_db) {
-    const sql = neon(process.env.DATABASE_URL!);
-    _db = drizzle(sql, { schema });
+  if (!globalForDb.db) {
+    const client = postgres(process.env.DATABASE_URL!);
+    globalForDb.db = drizzle(client, { schema });
   }
-  return _db;
+  return globalForDb.db;
 }
 
-export type Database = NeonHttpDatabase<typeof schema>;
+export type Database = PostgresJsDatabase<typeof schema>;

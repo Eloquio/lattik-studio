@@ -77,16 +77,7 @@ export function CanvasPanel({
         <div className="flex flex-1 flex-col overflow-y-auto rounded-bl-xl">
           {activeExtensionId === "data-architect" ? (
             <DataArchitectCanvas state={canvasState} />
-          ) : (
-            <div
-              className="flex flex-1 flex-col p-4"
-              style={{
-                backgroundImage:
-                  "linear-gradient(#e8d5b7 1px, transparent 1px), linear-gradient(90deg, #e8d5b7 1px, transparent 1px)",
-                backgroundSize: "20px 20px",
-              }}
-            />
-          )}
+          ) : null}
         </div>
       </div>
     </div>
