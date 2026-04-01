@@ -1,4 +1,12 @@
-import { streamText, gateway, UIMessage, zodSchema } from "ai";
+import {
+  streamText,
+  gateway,
+  UIMessage,
+  zodSchema,
+  createAgentUIStreamResponse,
+  ToolLoopAgent,
+  stepCountIs,
+} from "ai";
 import { z } from "zod";
 import { getExtensionAgent } from "@/extensions/agents";
 import { listEnabledAgents } from "@/lib/actions/agents";
@@ -33,19 +41,34 @@ export async function POST(req: Request) {
   const { messages, extensionId }: { messages: UIMessage[]; extensionId?: string } =
     await req.json();
 
+  // Use the extension's ToolLoopAgent if available
   const agent = extensionId ? getExtensionAgent(extensionId) : undefined;
 
-  // For the default assistant, build the prompt from the user's enabled agents
-  let systemPrompt = agent?.systemPrompt;
-  if (!agent) {
-    const enabledAgents = await listEnabledAgents();
-    systemPrompt = buildAssistantPrompt(enabledAgents);
+  if (agent) {
+    // Strip tool parts from other agents (e.g. handoff) to avoid schema validation errors
+    const cleanMessages = messages.map((msg) => ({
+      ...msg,
+      parts: msg.parts.filter((part) => {
+        if (part.type.startsWith("tool-") && "toolCallId" in part) {
+          const toolName = part.type.slice(5);
+          return toolName in (agent.tools ?? {});
+        }
+        return true;
+      }),
+    }));
+
+    return createAgentUIStreamResponse({
+      agent,
+      uiMessages: cleanMessages,
+    });
   }
 
-  const result = streamText({
-    model: gateway(agent?.modelId ?? "anthropic/claude-sonnet-4"),
-    system: systemPrompt,
-    tools: agent?.tools ?? {
+  // Default assistant with handoff
+  const enabledAgents = await listEnabledAgents();
+  const assistantAgent = new ToolLoopAgent({
+    model: gateway("anthropic/claude-sonnet-4"),
+    instructions: buildAssistantPrompt(enabledAgents),
+    tools: {
       handoff: {
         description:
           "Hand off the conversation to a specialized agent. Use this when the user's request matches an available agent.",
@@ -55,17 +78,17 @@ export async function POST(req: Request) {
             reason: z.string().describe("Brief reason for the handoff"),
           })
         ),
+        execute: async (input: { agentId: string; reason: string }) => ({
+          handedOffTo: input.agentId,
+          reason: input.reason,
+        }),
       },
     },
-    messages: messages.map((msg) => ({
-      role: msg.role,
-      content:
-        msg.parts
-          ?.filter((p): p is { type: "text"; text: string } => p.type === "text")
-          .map((p) => p.text)
-          .join("\n") ?? "",
-    })),
+    stopWhen: stepCountIs(5),
   });
 
-  return result.toUIMessageStreamResponse();
+  return createAgentUIStreamResponse({
+    agent: assistantAgent,
+    uiMessages: messages,
+  });
 }

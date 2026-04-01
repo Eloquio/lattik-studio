@@ -1,11 +1,12 @@
-import { zodSchema } from "ai";
+import { ToolLoopAgent, zodSchema, gateway, stepCountIs } from "ai";
+import { z } from "zod";
 import {
   pipelineDefinitionSchema,
 } from "../data-architect/schema";
 import type { PipelineDefinition } from "../data-architect/schema";
 import type { ExtensionAgent } from "../types";
 
-const systemPrompt = `You are the Data Architect agent in Lattik Studio. You help users design data pipeline architectures for their Data Lake (S3 + Iceberg).
+const instructions = `You are the Data Architect agent in Lattik Studio. You help users understand and manage their data pipelines, tables, and schemas. Be concise and helpful. When discussing tables or data, use precise terminology. You have tools available — use them when relevant.
 
 You work with three types of artifacts:
 
@@ -37,13 +38,22 @@ All artifacts are bundled into a PipelineDefinition (version 1):
 { version: 1, entities: [...], log_tables: [...], tables: [...] }
 \`\`\`
 
+## Canvas Rendering
+You can render visual components on the canvas panel using the renderCanvas tool. Available components:
+- CanvasTitle: props { title: string, subtitle?: string } — a heading for the canvas content
+- DataTable: props { title?: string, columns: [{key, label}], rows: [{key: value}] } — a data table
+- PipelineView: props { pipeline: PipelineDefinition } — the full pipeline visualization
+
+When showing table schemas, column listings, or summaries, use renderCanvas with DataTable. When designing a complete pipeline, use renderCanvas with PipelineView.
+
 ## Your Workflow
 1. Discuss the user's data needs and understand their use case.
 2. Identify the entities (dimensions) involved.
 3. Design logger tables for raw event capture.
 4. Design lattik tables for aggregations and derived metrics.
-5. Call the updatePipeline tool with the complete pipeline definition whenever you make changes. This renders the pipeline on the canvas for the user to review.
-6. Iterate based on user feedback.
+5. Use renderCanvas to visualize the pipeline or table schemas on the canvas.
+6. Use updatePipeline to save the complete pipeline definition for structured export.
+7. Iterate based on user feedback.
 
 ## Guidelines
 - Always define entities before referencing them in tables.
@@ -54,10 +64,10 @@ All artifacts are bundled into a PipelineDefinition (version 1):
 - When the user seems satisfied, offer to generate the YAML export.`;
 
 export function dataArchitectAgent(): ExtensionAgent {
-  return {
+  return new ToolLoopAgent({
     id: "data-architect",
-    name: "Data Architect",
-    systemPrompt,
+    model: gateway("anthropic/claude-sonnet-4"),
+    instructions,
     tools: {
       updatePipeline: {
         description:
@@ -65,6 +75,27 @@ export function dataArchitectAgent(): ExtensionAgent {
         inputSchema: zodSchema(pipelineDefinitionSchema),
         execute: async (pipeline: PipelineDefinition) => pipeline,
       },
+      renderCanvas: {
+        description:
+          "Render a visual component on the canvas panel. Use this to show table schemas, data summaries, or pipeline visualizations.",
+        inputSchema: zodSchema(
+          z.object({
+            type: z.enum(["CanvasTitle", "DataTable", "PipelineView"]).describe("Component type to render"),
+            propsJson: z.string().describe("JSON string of the component props"),
+          })
+        ),
+        execute: async (input: { type: string; propsJson: string }) => {
+          const props = JSON.parse(input.propsJson);
+          return {
+            spec: {
+              root: "root",
+              elements: { root: { type: input.type, props } },
+            },
+            rendered: true,
+          };
+        },
+      },
     },
-  };
+    stopWhen: stepCountIs(5),
+  });
 }
