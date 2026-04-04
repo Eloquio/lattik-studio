@@ -9,6 +9,7 @@ export async function saveConversation(data: {
   id: string;
   title: string;
   messages: unknown[];
+  canvasState?: unknown;
 }) {
   const user = await requireUser();
   const db = getDb();
@@ -31,6 +32,7 @@ export async function saveConversation(data: {
       .set({
         title: data.title,
         messages: messagesJson,
+        canvasState: data.canvasState ?? undefined,
         updatedAt: new Date(),
       })
       .where(eq(schema.conversations.id, data.id));
@@ -40,6 +42,7 @@ export async function saveConversation(data: {
       userId: user.id!,
       title: data.title,
       messages: messagesJson,
+      canvasState: data.canvasState ?? undefined,
     });
   }
 }

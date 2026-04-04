@@ -41,6 +41,9 @@ export default function Home() {
             initialMessages: conv.messages as UIMessage[],
             savedTitle: conv.title,
           });
+          if (conv.canvasState) {
+            canvas.setCanvasState(conv.canvasState);
+          }
         }
       }).catch(() => {});
     }
@@ -66,7 +69,7 @@ export default function Home() {
         initialMessages: conv.messages as UIMessage[],
         savedTitle: conv.title,
       }));
-      canvas.setCanvasState(null);
+      canvas.setCanvasState(conv.canvasState ?? null);
       setActiveExtensionId(null);
     }
   }, [canvas]);
@@ -107,6 +110,7 @@ export default function Home() {
             initialMessages={chat.initialMessages}
             savedTitle={chat.savedTitle}
             activeExtensionId={activeExtensionId}
+            canvasState={canvas.canvasState}
             onCanvasStateChange={canvas.setCanvasState}
             onExtensionChange={setActiveExtensionId}
             onConversationChange={handleConversationChange}
@@ -133,6 +137,7 @@ export default function Home() {
           onClose={canvas.close}
           activeExtensionId={activeExtensionId}
           canvasState={canvas.canvasState}
+          onCanvasStateChange={canvas.setCanvasState}
         />
       </div>
     </div>

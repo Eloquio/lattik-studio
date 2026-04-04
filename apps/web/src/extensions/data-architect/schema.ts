@@ -14,8 +14,9 @@ export const columnTypeSchema = z.enum([
 
 export const entitySchema = z.object({
   name: z.string(),
-  type: z.enum(["string", "int32", "int64"]),
-  description: z.string().optional(),
+  description: z.string(),
+  id_field: z.string(),
+  id_type: z.enum(["int64", "string"]),
 });
 
 export const loggerColumnSchema = z.object({
@@ -70,6 +71,26 @@ export const lattikTableSchema = z.object({
   derived_columns: z.array(derivedColumnSchema).optional(),
 });
 
+export const dimensionSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  entity: z.string(),
+  source_table: z.string(),
+  source_column: z.string(),
+  data_type: columnTypeSchema,
+});
+
+export const metricCalculationSchema = z.object({
+  expression: z.string(),
+  source_table: z.string(),
+});
+
+export const metricSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  calculations: z.array(metricCalculationSchema),
+});
+
 export const pipelineDefinitionSchema = z.object({
   version: z.literal(1),
   entities: z.array(entitySchema),
@@ -82,4 +103,7 @@ export type LoggerColumn = z.infer<typeof loggerColumnSchema>;
 export type LoggerTable = z.infer<typeof loggerTableSchema>;
 export type ColumnFamily = z.infer<typeof columnFamilySchema>;
 export type LattikTable = z.infer<typeof lattikTableSchema>;
+export type Dimension = z.infer<typeof dimensionSchema>;
+export type MetricCalculation = z.infer<typeof metricCalculationSchema>;
+export type Metric = z.infer<typeof metricSchema>;
 export type PipelineDefinition = z.infer<typeof pipelineDefinitionSchema>;

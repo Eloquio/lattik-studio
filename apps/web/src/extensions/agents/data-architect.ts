@@ -1,101 +1,105 @@
 import { ToolLoopAgent, zodSchema, gateway, stepCountIs } from "ai";
 import { z } from "zod";
-import {
-  pipelineDefinitionSchema,
-} from "../data-architect/schema";
+import { pipelineDefinitionSchema } from "../data-architect/schema";
 import type { PipelineDefinition } from "../data-architect/schema";
-import type { ExtensionAgent } from "../types";
+import type { ExtensionAgent, AgentOptions } from "../types";
+import { skills } from "../data-architect/skills";
+import {
+  getSkillTool,
+  renderCanvasTool,
+  createReadCanvasStateTool,
+  reviewDefinitionTool,
+  staticCheckTool,
+  updateDefinitionTool,
+  submitPRTool,
+  listDefinitionsTool,
+  getDefinitionTool,
+} from "../data-architect/tools";
 
-const instructions = `You are the Data Architect agent in Lattik Studio. You help users understand and manage their data pipelines, tables, and schemas. Be concise and helpful. When discussing tables or data, use precise terminology. You have tools available — use them when relevant.
+const skillList = skills
+  .map((s) => `- **${s.id}**: ${s.description}`)
+  .join("\n");
 
-You work with three types of artifacts:
+const instructions = `You are the Data Architect agent in Lattik Studio. You help users define and manage data pipeline concepts: Entities, Dimensions, Logger Tables, Lattik Tables, and Metrics.
 
-## 1. Entities (Canonical Dimensions)
-Entities are the semantic glue of the pipeline. They represent business concepts used as join keys across tables.
-- Each entity has a name, type (string, int32, or int64), and optional description.
-- Examples: user_id (int64), session_id (string), product_id (int64)
+## Available Skills
+Before starting any definition workflow, use the getSkill tool to load the relevant skill document and follow its steps.
 
-## 2. Logger Tables
-Raw, append-only event tables that capture events as they happen.
-- Each logger table has columns with primitive types (string, int32, int64, float, double, boolean, timestamp, date, json).
-- Must designate an event_timestamp column.
-- Has a primary_key where each key column maps to an Entity.
-- Optional retention (e.g. "90d") and dedup_window (e.g. "1h").
-- Columns can optionally reference an Entity (marking them as join keys).
+${skillList}
 
-## 3. Lattik Tables
-Derived/aggregated tables built from Logger Tables or other Lattik Tables via Column Families.
-- Each Lattik Table has a primary_key (entity-backed, same as Logger Tables).
-- Column Families define how data flows in:
-  - source: name of the source table
-  - key_mapping: maps this table's PK columns to the source's columns (e.g. { "user_id": "actor_id" })
-  - columns: each has either an aggregation (agg like "count()", "sum(amount)") with a merge strategy (sum, max, min, replace), or an expression (expr like "last(status)")
-- Derived columns: computed columns on the table itself (name, expr, description)
+## How to Work
+1. Understand what the user wants to define or modify.
+2. Use getSkill to load the appropriate skill document.
+3. Follow the workflow steps in the skill document.
+4. Collaborate with the user through chat and canvas — render forms and previews using renderCanvas.
+5. Use readCanvasState to read what the user has filled in on the canvas.
+6. When the user asks to review, use reviewDefinition then render suggestions as ReviewCard components.
+7. After review, run staticCheck to validate the definition.
+8. Use updateDefinition to save the draft, then submitPR when ready.
 
-## Pipeline Definition
-All artifacts are bundled into a PipelineDefinition (version 1):
-\`\`\`
-{ version: 1, entities: [...], log_tables: [...], tables: [...] }
-\`\`\`
+## Progress Disclosure
+When following a skill workflow, announce each step before executing it:
 
-## Canvas Rendering
-You can render visual components on the canvas panel using the renderCanvas tool. Available components:
-- CanvasTitle: props { title: string, subtitle?: string } — a heading for the canvas content
-- DataTable: props { title?: string, columns: [{key, label}], rows: [{key: value}] } — a data table
-- PipelineView: props { pipeline: PipelineDefinition } — the full pipeline visualization
+**Step N of M: [Step Title]**
+[Brief description of what you're doing]
 
-When showing table schemas, column listings, or summaries, use renderCanvas with DataTable. When designing a complete pipeline, use renderCanvas with PipelineView.
+Use renderCanvas to include a StatusBadge component at the top of the canvas showing the current workflow stage (draft, reviewing, checks-passed, checks-failed, pr-submitted). This gives the user clear visibility into where you are in the process.
 
-## Your Workflow
-1. Discuss the user's data needs and understand their use case.
-2. Identify the entities (dimensions) involved.
-3. Design logger tables for raw event capture.
-4. Design lattik tables for aggregations and derived metrics.
-5. Use renderCanvas to visualize the pipeline or table schemas on the canvas.
-6. Use updatePipeline to save the complete pipeline definition for structured export.
-7. Iterate based on user feedback.
+## Canvas Components
+Use renderCanvas with a full RenderSpec JSON. Available component types:
+- Heading: { title, subtitle? }
+- DataTable: { title?, columns: [{key, label}], rows: [{key: value}] }
+- TextInput: { label, field, placeholder?, required?, multiline?, defaultValue? }
+- Select: { label, field, options: [{value, label}], required?, defaultValue? }
+- Checkbox: { label, field, defaultValue? }
+- Section: { title?, children: [elementId, ...] }
+- ColumnList: { label?, field, typeOptions? }
+- MockedTablePreview: { title?, columns: [{name, type}], rowCount? }
+- ReviewCard: { suggestionId, title, description, severity: "info"|"warning"|"error" }
+- StatusBadge: { status, label?, step? }
+- ExpressionEditor: { label, field, placeholder?, required?, columns?: [{name, type}] }
+- PipelineView: { pipeline: PipelineDefinition }
+
+## Updating Existing Definitions
+You can also update existing definitions. Use listDefinitions to see what exists, and getDefinition to load one.
+When updating, follow the same skill workflow (review, static checks, PR). Some fields are immutable after merge:
+- **Entity:** name, id_type immutable
+- **Logger Table:** name, primary_key, event_timestamp immutable
+- **Lattik Table:** name, primary_key immutable
+- **Dimension:** name, entity immutable
+- **Metric:** name immutable
 
 ## Guidelines
-- Always define entities before referencing them in tables.
+- Always define entities before referencing them in tables or dimensions.
 - Every primary key column must map to an entity.
 - Use clear, descriptive names (snake_case).
-- When you update the pipeline, always send the COMPLETE definition (all entities, all tables), not just the changes.
-- Proactively suggest best practices for retention, deduplication, and aggregation strategies.
-- When the user seems satisfied, offer to generate the YAML export.`;
+- When updating the pipeline, always send the COMPLETE definition.
+- Proactively suggest best practices for retention, deduplication, and aggregation.`;
 
-export function dataArchitectAgent(): ExtensionAgent {
+export function dataArchitectAgent(options?: AgentOptions): ExtensionAgent {
   return new ToolLoopAgent({
     id: "data-architect",
     model: gateway("anthropic/claude-sonnet-4"),
     instructions,
     tools: {
+      getSkill: getSkillTool,
+      renderCanvas: renderCanvasTool,
+      readCanvasState: createReadCanvasStateTool(
+        () => options?.canvasState
+      ),
+      reviewDefinition: reviewDefinitionTool,
+      staticCheck: staticCheckTool,
+      updateDefinition: updateDefinitionTool,
+      submitPR: submitPRTool,
+      listDefinitions: listDefinitionsTool,
+      getDefinition: getDefinitionTool,
       updatePipeline: {
         description:
-          "Update the pipeline definition displayed on the canvas. Call this whenever the pipeline design changes. Always send the complete definition.",
+          "Update the pipeline definition displayed on the canvas. Always send the complete definition.",
         inputSchema: zodSchema(pipelineDefinitionSchema),
         execute: async (pipeline: PipelineDefinition) => pipeline,
       },
-      renderCanvas: {
-        description:
-          "Render a visual component on the canvas panel. Use this to show table schemas, data summaries, or pipeline visualizations.",
-        inputSchema: zodSchema(
-          z.object({
-            type: z.enum(["CanvasTitle", "DataTable", "PipelineView"]).describe("Component type to render"),
-            propsJson: z.string().describe("JSON string of the component props"),
-          })
-        ),
-        execute: async (input: { type: string; propsJson: string }) => {
-          const props = JSON.parse(input.propsJson);
-          return {
-            spec: {
-              root: "root",
-              elements: { root: { type: input.type, props } },
-            },
-            rendered: true,
-          };
-        },
-      },
     },
-    stopWhen: stepCountIs(5),
+    stopWhen: stepCountIs(10),
   });
 }

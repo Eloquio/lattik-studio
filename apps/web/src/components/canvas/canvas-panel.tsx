@@ -3,7 +3,7 @@
 import { useCallback, useRef } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { DataArchitectCanvas } from "@/extensions/data-architect/canvas/data-architect-canvas";
+import { getExtension } from "@/extensions/registry";
 
 interface CanvasPanelProps {
   isOpen: boolean;
@@ -12,6 +12,7 @@ interface CanvasPanelProps {
   onClose: () => void;
   activeExtensionId: string | null;
   canvasState: unknown;
+  onCanvasStateChange?: (state: Record<string, unknown>) => void;
 }
 
 export function CanvasPanel({
@@ -21,6 +22,7 @@ export function CanvasPanel({
   onClose,
   activeExtensionId,
   canvasState,
+  onCanvasStateChange,
 }: CanvasPanelProps) {
   const isDragging = useRef(false);
 
@@ -75,9 +77,12 @@ export function CanvasPanel({
           </Button>
         </div>
         <div className="flex flex-1 flex-col overflow-y-auto rounded-bl-xl">
-          {activeExtensionId === "data-architect" ? (
-            <DataArchitectCanvas state={canvasState} />
-          ) : null}
+          {activeExtensionId && (() => {
+            const ext = getExtension(activeExtensionId);
+            if (!ext) return null;
+            const Canvas = ext.canvas;
+            return <Canvas state={canvasState} onStateChange={onCanvasStateChange} />;
+          })()}
         </div>
       </div>
     </div>

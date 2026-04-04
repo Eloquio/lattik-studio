@@ -58,6 +58,32 @@ export const conversations = pgTable("conversation", {
     .references(() => users.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   messages: jsonb("messages").notNull().$type<unknown[]>().default([]),
+  canvasState: jsonb("canvasState").$type<unknown>(),
+  createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt", { mode: "date" }).notNull().defaultNow(),
+});
+
+export type DefinitionKind =
+  | "entity"
+  | "dimension"
+  | "logger_table"
+  | "lattik_table"
+  | "metric";
+
+export type DefinitionStatus = "draft" | "pending_review" | "merged";
+
+export const definitions = pgTable("definition", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  kind: text("kind").$type<DefinitionKind>().notNull(),
+  name: text("name").notNull(),
+  version: integer("version").notNull().default(1),
+  spec: jsonb("spec").notNull().$type<unknown>(),
+  status: text("status").$type<DefinitionStatus>().notNull().default("draft"),
+  prUrl: text("prUrl"),
+  prMergedAt: timestamp("prMergedAt", { mode: "date" }),
+  createdBy: text("createdBy").references(() => users.id),
   createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
   updatedAt: timestamp("updatedAt", { mode: "date" }).notNull().defaultNow(),
 });
