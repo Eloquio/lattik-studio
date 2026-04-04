@@ -79,7 +79,7 @@ When updating, follow the same skill workflow (review, static checks, PR). Some 
 export function dataArchitectAgent(options?: AgentOptions): ExtensionAgent {
   return new ToolLoopAgent({
     id: "data-architect",
-    model: gateway("anthropic/claude-sonnet-4"),
+    model: gateway("anthropic/claude-haiku-4.5"),
     instructions,
     tools: {
       getSkill: getSkillTool,

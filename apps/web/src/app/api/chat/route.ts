@@ -121,7 +121,7 @@ export async function POST(req: Request) {
   // Default assistant with handoff
   const enabledAgents = await listEnabledAgents();
   const assistantAgent = new ToolLoopAgent({
-    model: gateway("anthropic/claude-sonnet-4"),
+    model: gateway("anthropic/claude-haiku-4.5"),
     instructions: buildAssistantPrompt(enabledAgents),
     tools: {
       handoff: {
