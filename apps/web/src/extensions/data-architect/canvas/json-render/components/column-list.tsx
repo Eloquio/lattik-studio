@@ -66,6 +66,7 @@ export function ColumnList({ props, state, onStateChange }: JsonRenderComponentP
             value={col.name}
             onChange={(e) => updateColumn(i, { name: e.target.value })}
             placeholder="column_name"
+            maxLength={60}
             className="flex-1 min-w-0 rounded border-0 bg-transparent px-1 py-0.5 text-xs font-mono text-amber-900 placeholder:text-amber-400/50 focus:outline-none"
           />
           <select

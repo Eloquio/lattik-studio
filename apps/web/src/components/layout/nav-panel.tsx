@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { MessageSquare, Store } from "lucide-react";
 import {
   Tooltip,
@@ -13,6 +14,8 @@ interface NavPanelProps {
 }
 
 export function NavPanel({ historyOpen, onChatClick }: NavPanelProps) {
+  const router = useRouter();
+
   return (
     <nav className="relative z-10 flex h-full w-14 flex-col items-center gap-2 border-r border-white/10 py-4">
       <Tooltip>
@@ -32,7 +35,7 @@ export function NavPanel({ historyOpen, onChatClick }: NavPanelProps) {
       <Tooltip>
         <TooltipTrigger
           className="flex h-10 w-10 items-center justify-center rounded-md text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-          onClick={() => window.location.href = "/marketplace"}
+          onClick={() => router.push("/marketplace")}
         >
           <Store className="h-5 w-5" />
         </TooltipTrigger>

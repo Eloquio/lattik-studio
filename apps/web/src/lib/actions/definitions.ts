@@ -1,6 +1,6 @@
 "use server";
 
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
 import type { DefinitionKind, DefinitionStatus } from "@/db/schema";
@@ -60,29 +60,43 @@ export async function updateDefinition(
 }
 
 export async function getDefinition(id: string) {
-  await requireUser();
+  const user = await requireUser();
   const db = getDb();
 
+  // User can see their own definitions + any merged definitions
   const rows = await db
     .select()
     .from(schema.definitions)
-    .where(eq(schema.definitions.id, id))
+    .where(
+      and(
+        eq(schema.definitions.id, id),
+        or(
+          eq(schema.definitions.createdBy, user.id!),
+          eq(schema.definitions.status, "merged")
+        )
+      )
+    )
     .limit(1);
 
   return rows[0] ?? null;
 }
 
 export async function getDefinitionByName(kind: DefinitionKind, name: string) {
-  await requireUser();
+  const user = await requireUser();
   const db = getDb();
 
+  // User can see their own definitions + any merged definitions
   const rows = await db
     .select()
     .from(schema.definitions)
     .where(
       and(
         eq(schema.definitions.kind, kind),
-        eq(schema.definitions.name, name)
+        eq(schema.definitions.name, name),
+        or(
+          eq(schema.definitions.createdBy, user.id!),
+          eq(schema.definitions.status, "merged")
+        )
       )
     )
     .limit(1);
@@ -91,20 +105,27 @@ export async function getDefinitionByName(kind: DefinitionKind, name: string) {
 }
 
 export async function listDefinitions(kind?: DefinitionKind) {
-  await requireUser();
+  const user = await requireUser();
   const db = getDb();
+
+  // User sees their own definitions + all merged definitions
+  const userOrMerged = or(
+    eq(schema.definitions.createdBy, user.id!),
+    eq(schema.definitions.status, "merged")
+  );
 
   if (kind) {
     return db
       .select()
       .from(schema.definitions)
-      .where(eq(schema.definitions.kind, kind))
+      .where(and(eq(schema.definitions.kind, kind), userOrMerged))
       .orderBy(desc(schema.definitions.updatedAt));
   }
 
   return db
     .select()
     .from(schema.definitions)
+    .where(userOrMerged)
     .orderBy(desc(schema.definitions.updatedAt));
 }
 
@@ -112,6 +133,7 @@ export async function listMergedDefinitions(kind?: DefinitionKind) {
   await requireUser();
   const db = getDb();
 
+  // Merged definitions are shared — all users can see them
   if (kind) {
     return db
       .select()

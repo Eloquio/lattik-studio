@@ -40,6 +40,7 @@ export function MarketplaceGrid({ agents, enabledIds: initialEnabledIds }: Marke
   const [enabledIds, setEnabledIds] = useState(new Set(initialEnabledIds));
   const [selectedId, setSelectedId] = useState<string | null>(agents[0]?.id ?? null);
   const [query, setQuery] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
   const filtered = useMemo(() => {
@@ -56,6 +57,7 @@ export function MarketplaceGrid({ agents, enabledIds: initialEnabledIds }: Marke
 
   const handleToggle = (agentId: string) => {
     const isEnabled = enabledIds.has(agentId);
+    setError(null);
     setEnabledIds((prev) => {
       const next = new Set(prev);
       if (isEnabled) next.delete(agentId);
@@ -68,6 +70,7 @@ export function MarketplaceGrid({ agents, enabledIds: initialEnabledIds }: Marke
         if (isEnabled) await disableAgent(agentId);
         else await enableAgent(agentId);
       } catch {
+        setError(`Failed to ${isEnabled ? "disable" : "enable"} agent. Please try again.`);
         setEnabledIds((prev) => {
           const next = new Set(prev);
           if (isEnabled) next.add(agentId);
@@ -81,7 +84,13 @@ export function MarketplaceGrid({ agents, enabledIds: initialEnabledIds }: Marke
   const Icon = selectedAgent ? (iconMap[selectedAgent.icon] || Blocks) : Blocks;
 
   return (
-    <div className="flex h-full gap-0 overflow-hidden rounded-xl border border-white/10 bg-white/5 backdrop-blur-sm">
+    <div className="flex h-full flex-col gap-0 overflow-hidden rounded-xl border border-white/10 bg-white/5 backdrop-blur-sm">
+      {error && (
+        <div className="flex items-center justify-between border-b border-red-500/20 bg-red-500/10 px-4 py-2">
+          <span className="text-xs text-red-400">{error}</span>
+          <button onClick={() => setError(null)} className="text-xs text-red-400/60 hover:text-red-400">dismiss</button>
+        </div>
+      )}
       {/* Sidebar */}
       <div className="flex w-64 shrink-0 flex-col border-r border-white/10">
         {/* Search */}
