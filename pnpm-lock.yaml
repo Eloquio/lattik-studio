@@ -27,8 +27,8 @@ importers:
         specifier: ^1.3.0
         version: 1.3.0(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@eloquio/lattik-expression':
-        specifier: file:../../../../lattik-expression
-        version: file:../../lattik-expression
+        specifier: ^0.2.0
+        version: 0.2.0
       '@tailwindcss/typography':
         specifier: 0.5.0-alpha.3
         version: 0.5.0-alpha.3(tailwindcss@4.2.2)
@@ -335,8 +335,8 @@ packages:
     peerDependencies:
       '@noble/ciphers': ^1.0.0
 
-  '@eloquio/lattik-expression@file:../../lattik-expression':
-    resolution: {directory: ../../lattik-expression, type: directory}
+  '@eloquio/lattik-expression@0.2.0':
+    resolution: {integrity: sha512-Bqb/0GlhSDFEX3C96k/ARdyqIe7Z+9tC0rhTtP8dx7uB5XL9hthJcKEhjSPkHTJ2qbwa2ErI/8i35J6XtdE0sg==, tarball: https://npm.pkg.github.com/download/@eloquio/lattik-expression/0.2.0/43e10aac75d05545ae75584d6cf3be690c17d714}
 
   '@emnapi/core@1.9.1':
     resolution: {integrity: sha512-mukuNALVsoix/w1BJwFzwXBN/dHeejQtuVzcDsfOEsdpCumXb/E9j8w11h5S54tT1xhifGfbbSm/ICrObRb3KA==}
@@ -4345,7 +4345,7 @@ snapshots:
     dependencies:
       '@noble/ciphers': 1.3.0
 
-  '@eloquio/lattik-expression@file:../../lattik-expression': {}
+  '@eloquio/lattik-expression@0.2.0': {}
 
   '@emnapi/core@1.9.1':
     dependencies:
