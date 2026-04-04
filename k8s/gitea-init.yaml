@@ -3,6 +3,7 @@ kind: Job
 metadata:
   name: gitea-init
 spec:
+  activeDeadlineSeconds: 300
   backoffLimit: 3
   template:
     spec:
@@ -16,12 +17,19 @@ spec:
             - |
               set -e
               GITEA_URL="http://gitea:3000"
+              MAX_WAIT=120
+              WAITED=0
 
               echo "Waiting for Gitea to be ready..."
               until curl -sf "$GITEA_URL/api/v1/version" > /dev/null 2>&1; do
                 sleep 2
+                WAITED=$((WAITED + 2))
+                if [ "$WAITED" -ge "$MAX_WAIT" ]; then
+                  echo "Timed out waiting for Gitea after ${MAX_WAIT}s"
+                  exit 1
+                fi
               done
-              echo "Gitea is ready."
+              echo "Gitea is ready (waited ${WAITED}s)."
 
               # Create admin user (ignore error if already exists)
               curl -sf -X POST "$GITEA_URL/api/v1/admin/users" \
@@ -42,18 +50,22 @@ spec:
                 -H "Content-Type: application/json" \
                 -u "lattik-admin:lattik-local" \
                 -d '{"name": "lattik-api", "scopes": ["all"]}')
-              echo "Token created: $TOKEN_RESPONSE"
+              echo "Token response: $TOKEN_RESPONSE"
 
-              # Extract token value
-              TOKEN=$(echo "$TOKEN_RESPONSE" | grep -o '"sha1":"[^"]*"' | cut -d'"' -f4)
+              # Extract token value — try sha1 first, then plain token field
+              TOKEN=$(echo "$TOKEN_RESPONSE" | sed -n 's/.*"sha1"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
               if [ -z "$TOKEN" ]; then
-                echo "Warning: Could not extract token. You may need to create one manually."
+                TOKEN=$(echo "$TOKEN_RESPONSE" | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+              fi
+
+              if [ -z "$TOKEN" ]; then
+                echo "Warning: Could not extract token from response. Create one manually at $GITEA_URL."
               else
                 echo ""
                 echo "============================================"
                 echo "GITEA_TOKEN=$TOKEN"
                 echo "============================================"
-                echo "Add this to your .env.local file."
+                echo "Add this to your apps/web/.env file."
                 echo ""
               fi
 

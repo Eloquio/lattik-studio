@@ -31,7 +31,24 @@ export async function updateDefinition(
   id: string,
   data: { name?: string; spec?: unknown; status?: DefinitionStatus; prUrl?: string }
 ) {
+  const user = await requireUser();
   const db = getDb();
+
+  // Verify the user owns this definition
+  const existing = await db
+    .select({ id: schema.definitions.id })
+    .from(schema.definitions)
+    .where(
+      and(
+        eq(schema.definitions.id, id),
+        eq(schema.definitions.createdBy, user.id!)
+      )
+    )
+    .limit(1);
+
+  if (existing.length === 0) {
+    throw new Error("Definition not found or unauthorized");
+  }
 
   const [row] = await db
     .update(schema.definitions)
@@ -43,6 +60,7 @@ export async function updateDefinition(
 }
 
 export async function getDefinition(id: string) {
+  await requireUser();
   const db = getDb();
 
   const rows = await db
@@ -55,6 +73,7 @@ export async function getDefinition(id: string) {
 }
 
 export async function getDefinitionByName(kind: DefinitionKind, name: string) {
+  await requireUser();
   const db = getDb();
 
   const rows = await db
@@ -72,21 +91,25 @@ export async function getDefinitionByName(kind: DefinitionKind, name: string) {
 }
 
 export async function listDefinitions(kind?: DefinitionKind) {
+  await requireUser();
   const db = getDb();
 
-  const query = db
+  if (kind) {
+    return db
+      .select()
+      .from(schema.definitions)
+      .where(eq(schema.definitions.kind, kind))
+      .orderBy(desc(schema.definitions.updatedAt));
+  }
+
+  return db
     .select()
     .from(schema.definitions)
     .orderBy(desc(schema.definitions.updatedAt));
-
-  if (kind) {
-    return query.where(eq(schema.definitions.kind, kind));
-  }
-
-  return query;
 }
 
 export async function listMergedDefinitions(kind?: DefinitionKind) {
+  await requireUser();
   const db = getDb();
 
   if (kind) {

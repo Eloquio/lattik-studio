@@ -29,7 +29,13 @@ export const submitPRTool = {
     name: string;
     specJson: string;
   }) => {
-    const spec = JSON.parse(input.specJson);
+    let spec: unknown;
+    try {
+      spec = JSON.parse(input.specJson);
+    } catch {
+      return { status: "error", message: "Invalid JSON in specJson" };
+    }
+
     const branchName = `define/${input.kind}/${input.name}-${Date.now()}`;
 
     try {

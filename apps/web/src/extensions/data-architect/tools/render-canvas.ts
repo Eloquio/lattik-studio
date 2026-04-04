@@ -3,7 +3,7 @@ import { z } from "zod";
 
 export const renderCanvasTool = {
   description:
-    "Render a visual component on the canvas panel. Supports json-render components: Heading, DataTable, TextInput, Select, Checkbox, Section, ColumnList, MockedTablePreview, ReviewCard, StatusBadge, and legacy components: CanvasTitle, PipelineView.",
+    "Render a visual component on the canvas panel. Supports json-render components: Heading, DataTable, TextInput, Select, Checkbox, Section, ColumnList, MockedTablePreview, ReviewCard, StatusBadge, ExpressionEditor, and legacy components: CanvasTitle, PipelineView.",
   inputSchema: zodSchema(
     z.object({
       specJson: z
@@ -14,7 +14,11 @@ export const renderCanvasTool = {
     })
   ),
   execute: async (input: { specJson: string }) => {
-    const spec = JSON.parse(input.specJson);
-    return { spec, rendered: true };
+    try {
+      const spec = JSON.parse(input.specJson);
+      return { spec, rendered: true };
+    } catch {
+      return { error: "Invalid JSON in specJson", rendered: false };
+    }
   },
 };

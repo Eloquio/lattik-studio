@@ -13,7 +13,7 @@ nodes:
         hostPort: 2222
         protocol: TCP
     extraMounts:
-      - hostPath: /tmp/lattik-postgres-data
+      - hostPath: /var/lib/lattik/postgres-data
         containerPath: /var/local/postgres-data
-      - hostPath: /tmp/lattik-gitea-data
+      - hostPath: /var/lib/lattik/gitea-data
         containerPath: /var/local/gitea-data
