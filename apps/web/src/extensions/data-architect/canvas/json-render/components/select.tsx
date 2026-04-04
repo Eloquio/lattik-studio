@@ -5,7 +5,7 @@ import type { JsonRenderComponentProps } from "../types";
 export function Select({ props, state, onStateChange }: JsonRenderComponentProps) {
   const label = props.label as string;
   const field = props.field as string;
-  const options = props.options as { value: string; label: string }[];
+  const options = Array.isArray(props.options) ? (props.options as { value: string; label: string }[]) : [];
   const required = props.required as boolean | undefined;
 
   const value = (state[field] as string) ?? (props.defaultValue as string) ?? "";

@@ -45,15 +45,27 @@ export async function POST(req: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const {
-    messages,
-    extensionId,
-    canvasState,
-  }: { messages: UIMessage[]; extensionId?: string; canvasState?: unknown } =
-    await req.json();
+  let body: { messages?: unknown; extensionId?: unknown; canvasState?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const { messages, extensionId, canvasState } = body as {
+    messages: UIMessage[];
+    extensionId?: string;
+    canvasState?: unknown;
+  };
+
+  if (!Array.isArray(messages)) {
+    return Response.json({ error: "messages must be an array" }, { status: 400 });
+  }
 
   // Use the extension's ToolLoopAgent if available
-  const agent = extensionId ? getExtensionAgent(extensionId, { canvasState }) : undefined;
+  const agent = extensionId && typeof extensionId === "string"
+    ? getExtensionAgent(extensionId, { canvasState })
+    : undefined;
 
   if (agent) {
     // Strip tool parts from other agents (e.g. handoff) to avoid schema validation errors

@@ -31,8 +31,9 @@ function generateMockValue(type: string, rowIndex: number): string {
 
 export function MockedTablePreview({ props }: JsonRenderComponentProps) {
   const title = props.title as string | undefined;
-  const columns = (props.columns as ColumnDef[]) ?? [];
-  const rowCount = (props.rowCount as number) ?? 3;
+  const columns = Array.isArray(props.columns) ? (props.columns as ColumnDef[]) : [];
+  const rawRowCount = typeof props.rowCount === "number" ? props.rowCount : 3;
+  const rowCount = Math.min(Math.max(rawRowCount, 0), 50);
 
   if (columns.length === 0) return null;
 

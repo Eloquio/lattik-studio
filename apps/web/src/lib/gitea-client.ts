@@ -3,6 +3,12 @@ const GITEA_TOKEN = process.env.GITEA_TOKEN ?? "";
 const GITEA_ORG = "lattik";
 const GITEA_REPO = "definitions";
 
+function ensureToken() {
+  if (!GITEA_TOKEN) {
+    throw new Error("GITEA_TOKEN environment variable is not set. Run 'pnpm gitea:start' and check 'pnpm gitea:init-logs' for the token.");
+  }
+}
+
 function headers(): Record<string, string> {
   return {
     "Content-Type": "application/json",
@@ -15,6 +21,7 @@ function apiUrl(path: string): string {
 }
 
 export async function createBranch(branchName: string, fromRef = "main") {
+  ensureToken();
   const res = await fetch(
     apiUrl(`/repos/${GITEA_ORG}/${GITEA_REPO}/branches`),
     {
@@ -26,8 +33,12 @@ export async function createBranch(branchName: string, fromRef = "main") {
       }),
     }
   );
-  if (!res.ok && res.status !== 409) {
-    throw new Error(`Failed to create branch: ${res.status} ${await res.text()}`);
+  if (res.status === 409) {
+    // Branch already exists — safe to continue
+    return { name: branchName, existing: true };
+  }
+  if (!res.ok) {
+    throw new Error(`Failed to create branch '${branchName}': ${res.status} ${await res.text()}`);
   }
   return res.json();
 }
@@ -37,6 +48,7 @@ export async function commitFiles(
   files: { path: string; content: string }[],
   message: string
 ) {
+  ensureToken();
   const res = await fetch(
     apiUrl(`/repos/${GITEA_ORG}/${GITEA_REPO}/contents`),
     {
@@ -58,7 +70,7 @@ export async function commitFiles(
     if (res.status === 422) {
       return commitFilesUpdate(branchName, files, message);
     }
-    throw new Error(`Failed to commit files: ${res.status} ${await res.text()}`);
+    throw new Error(`Failed to commit ${files.length} file(s) to branch '${branchName}': ${res.status} ${await res.text()}`);
   }
   return res.json();
 }
@@ -96,7 +108,7 @@ async function commitFilesUpdate(
       }
     );
     if (!res.ok) {
-      throw new Error(`Failed to update file ${file.path}: ${res.status} ${await res.text()}`);
+      throw new Error(`Failed to update file '${file.path}' on branch '${branchName}': ${res.status} ${await res.text()}`);
     }
   }
 }
@@ -107,6 +119,7 @@ export async function createPullRequest(
   headBranch: string,
   baseBranch = "main"
 ) {
+  ensureToken();
   const res = await fetch(
     apiUrl(`/repos/${GITEA_ORG}/${GITEA_REPO}/pulls`),
     {

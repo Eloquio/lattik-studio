@@ -45,7 +45,9 @@ export default function Home() {
             canvas.setCanvasState(conv.canvasState);
           }
         }
-      }).catch(() => {});
+      }).catch((error) => {
+        console.error("Failed to restore conversation:", error);
+      });
     }
   }, []);
 
@@ -61,16 +63,20 @@ export default function Home() {
   }, [canvas]);
 
   const handleSelectChat = useCallback(async (id: string) => {
-    const conv = await getConversation(id);
-    if (conv) {
-      setChat((prev) => ({
-        id,
-        renderKey: prev.renderKey + 1,
-        initialMessages: conv.messages as UIMessage[],
-        savedTitle: conv.title,
-      }));
-      canvas.setCanvasState(conv.canvasState ?? null);
-      setActiveExtensionId(null);
+    try {
+      const conv = await getConversation(id);
+      if (conv) {
+        setChat((prev) => ({
+          id,
+          renderKey: prev.renderKey + 1,
+          initialMessages: conv.messages as UIMessage[],
+          savedTitle: conv.title,
+        }));
+        canvas.setCanvasState(conv.canvasState ?? null);
+        setActiveExtensionId(null);
+      }
+    } catch (error) {
+      console.error("Failed to load conversation:", error);
     }
   }, [canvas]);
 

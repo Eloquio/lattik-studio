@@ -4,7 +4,7 @@ import type { JsonRenderComponentProps } from "../types";
 
 export function Section({ props, renderChild }: JsonRenderComponentProps) {
   const title = props.title as string | undefined;
-  const children = props.children as string[] | undefined;
+  const children = Array.isArray(props.children) ? (props.children as string[]) : undefined;
 
   return (
     <div className="flex flex-col gap-3">

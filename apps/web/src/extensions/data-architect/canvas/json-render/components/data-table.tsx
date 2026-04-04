@@ -4,8 +4,8 @@ import type { JsonRenderComponentProps } from "../types";
 
 export function DataTable({ props }: JsonRenderComponentProps) {
   const title = props.title as string | undefined;
-  const columns = props.columns as { key: string; label: string }[];
-  const rows = props.rows as Record<string, unknown>[];
+  const columns = Array.isArray(props.columns) ? (props.columns as { key: string; label: string }[]) : [];
+  const rows = Array.isArray(props.rows) ? (props.rows as Record<string, unknown>[]) : [];
 
   return (
     <div className="overflow-hidden rounded-lg border border-amber-200/50 bg-white/80">

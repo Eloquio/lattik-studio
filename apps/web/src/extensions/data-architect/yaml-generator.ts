@@ -8,6 +8,22 @@ const KIND_DIRS: Record<DefinitionKind, string> = {
   metric: "metrics",
 };
 
+const YAML_NEEDS_QUOTING = /[\n\r\t:#{}"'\[\],&*!|>%@`]|^\s|\s$/;
+const YAML_BARE_RESERVED = new Set(["null", "true", "false", ""]);
+
+function yamlScalar(s: string): string {
+  if (YAML_NEEDS_QUOTING.test(s) || YAML_BARE_RESERVED.has(s)) {
+    const escaped = s
+      .replace(/\\/g, "\\\\")
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, "\\n")
+      .replace(/\r/g, "\\r")
+      .replace(/\t/g, "\\t");
+    return `"${escaped}"`;
+  }
+  return s;
+}
+
 /**
  * Convert a definition spec to a YAML string.
  * Uses a simple serializer to avoid adding a YAML library dependency.
@@ -17,8 +33,25 @@ function toYaml(obj: unknown, indent = 0): string {
 
   if (obj === null || obj === undefined) return `${pad}null\n`;
   if (typeof obj === "string") {
-    if (obj.includes("\n") || obj.includes(":") || obj.includes("#") || obj.includes('"')) {
-      return `${pad}"${obj.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"\n`;
+    // Always quote strings that contain YAML-special characters or control chars
+    if (
+      obj.includes("\n") || obj.includes("\r") || obj.includes("\t") ||
+      obj.includes(":") || obj.includes("#") || obj.includes('"') ||
+      obj.includes("'") || obj.includes("{") || obj.includes("}") ||
+      obj.includes("[") || obj.includes("]") || obj.includes(",") ||
+      obj.includes("&") || obj.includes("*") || obj.includes("!") ||
+      obj.includes("|") || obj.includes(">") || obj.includes("%") ||
+      obj.includes("@") || obj.includes("`") ||
+      obj.startsWith(" ") || obj.endsWith(" ") ||
+      obj === "" || obj === "null" || obj === "true" || obj === "false"
+    ) {
+      const escaped = obj
+        .replace(/\\/g, "\\\\")
+        .replace(/"/g, '\\"')
+        .replace(/\n/g, "\\n")
+        .replace(/\r/g, "\\r")
+        .replace(/\t/g, "\\t");
+      return `${pad}"${escaped}"\n`;
     }
     return `${pad}${obj}\n`;
   }
@@ -60,8 +93,8 @@ function toYaml(obj: unknown, indent = 0): string {
       if (typeof value === "object" && value !== null) {
         result += `${pad}${key}:\n${toYaml(value, indent + 1)}`;
       } else {
-        const valStr = typeof value === "string" && (value.includes(":") || value.includes("#") || value.includes('"'))
-          ? `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`
+        const valStr = typeof value === "string"
+          ? yamlScalar(value)
           : String(value);
         result += `${pad}${key}: ${valStr}\n`;
       }
