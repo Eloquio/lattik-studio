@@ -9,8 +9,15 @@ import {
 } from "ai";
 import { z } from "zod";
 import { getExtensionAgent } from "@/extensions/agents";
+import { getExtension } from "@/extensions/registry";
 import { listEnabledAgents } from "@/lib/actions/agents";
+import { rateLimit } from "@/lib/rate-limit";
 import "@/extensions";
+
+/** Max request body size: 2MB */
+const MAX_BODY_SIZE = 2 * 1024 * 1024;
+/** Max messages per request */
+const MAX_MESSAGES = 200;
 
 function buildAssistantPrompt(
   agents: { id: string; name: string; description: string }[]
@@ -38,11 +45,27 @@ ${agentList}
 }
 
 export async function POST(req: Request) {
-  // Auth check — middleware handles redirects for pages, but API routes need explicit check
+  // Auth check
   const { auth } = await import("@/auth");
   const session = await auth();
   if (!session?.user) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Rate limiting (30 requests per minute per user)
+  const userId = session.user.id ?? session.user.email ?? "unknown";
+  const { allowed, remaining } = rateLimit(`chat:${userId}`, { maxRequests: 30, windowMs: 60_000 });
+  if (!allowed) {
+    return Response.json(
+      { error: "Too many requests. Please wait before sending another message." },
+      { status: 429, headers: { "X-RateLimit-Remaining": String(remaining) } }
+    );
+  }
+
+  // Body size check via Content-Length (best effort — streaming bodies may not have it)
+  const contentLength = req.headers.get("content-length");
+  if (contentLength && parseInt(contentLength, 10) > MAX_BODY_SIZE) {
+    return Response.json({ error: "Request too large" }, { status: 413 });
   }
 
   let body: { messages?: unknown; extensionId?: unknown; canvasState?: unknown };
@@ -62,6 +85,15 @@ export async function POST(req: Request) {
     return Response.json({ error: "messages must be an array" }, { status: 400 });
   }
 
+  if (messages.length > MAX_MESSAGES) {
+    return Response.json({ error: `Too many messages (max ${MAX_MESSAGES})` }, { status: 400 });
+  }
+
+  // Validate extensionId if provided
+  if (extensionId && typeof extensionId === "string" && !getExtension(extensionId)) {
+    return Response.json({ error: "Unknown extension" }, { status: 400 });
+  }
+
   // Use the extension's ToolLoopAgent if available
   const agent = extensionId && typeof extensionId === "string"
     ? getExtensionAgent(extensionId, { canvasState })
@@ -71,7 +103,7 @@ export async function POST(req: Request) {
     // Strip tool parts from other agents (e.g. handoff) to avoid schema validation errors
     const cleanMessages = messages.map((msg) => ({
       ...msg,
-      parts: msg.parts.filter((part) => {
+      parts: (msg.parts ?? []).filter((part) => {
         if (part.type.startsWith("tool-") && "toolCallId" in part) {
           const toolName = part.type.slice(5);
           return toolName in (agent.tools ?? {});
