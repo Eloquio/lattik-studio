@@ -38,6 +38,13 @@ ${agentList}
 }
 
 export async function POST(req: Request) {
+  // Auth check — middleware handles redirects for pages, but API routes need explicit check
+  const { auth } = await import("@/auth");
+  const session = await auth();
+  if (!session?.user) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const {
     messages,
     extensionId,

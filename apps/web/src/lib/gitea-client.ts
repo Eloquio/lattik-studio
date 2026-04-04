@@ -70,8 +70,9 @@ async function commitFilesUpdate(
 ) {
   // For updates, we need to get existing file SHAs first, then update individually
   for (const file of files) {
+    const encodedPath = file.path.split("/").map(encodeURIComponent).join("/");
     const existingRes = await fetch(
-      apiUrl(`/repos/${GITEA_ORG}/${GITEA_REPO}/contents/${file.path}?ref=${branchName}`),
+      apiUrl(`/repos/${GITEA_ORG}/${GITEA_REPO}/contents/${encodedPath}?ref=${encodeURIComponent(branchName)}`),
       { headers: headers() }
     );
 
@@ -87,7 +88,7 @@ async function commitFilesUpdate(
     }
 
     const res = await fetch(
-      apiUrl(`/repos/${GITEA_ORG}/${GITEA_REPO}/contents/${file.path}`),
+      apiUrl(`/repos/${GITEA_ORG}/${GITEA_REPO}/contents/${encodedPath}`),
       {
         method: "PUT",
         headers: headers(),

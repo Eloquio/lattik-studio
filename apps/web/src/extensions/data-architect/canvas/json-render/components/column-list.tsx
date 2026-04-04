@@ -4,11 +4,17 @@ import { Plus, Trash2 } from "lucide-react";
 import type { JsonRenderComponentProps } from "../types";
 
 interface Column {
+  _key?: string;
   name: string;
   type: string;
   entity?: string;
   nullable?: boolean;
   description?: string;
+}
+
+let nextKey = 0;
+function genKey() {
+  return `col_${++nextKey}_${Date.now()}`;
 }
 
 export function ColumnList({ props, state, onStateChange }: JsonRenderComponentProps) {
@@ -28,7 +34,7 @@ export function ColumnList({ props, state, onStateChange }: JsonRenderComponentP
   }
 
   function addColumn() {
-    onStateChange(field, [...columns, { name: "", type: "string" }]);
+    onStateChange(field, [...columns, { _key: genKey(), name: "", type: "string" }]);
   }
 
   function removeColumn(index: number) {
@@ -52,7 +58,7 @@ export function ColumnList({ props, state, onStateChange }: JsonRenderComponentP
       )}
       {columns.map((col, i) => (
         <div
-          key={i}
+          key={col._key ?? `idx_${i}`}
           className="flex items-start gap-1.5 rounded-md border border-amber-200/30 bg-white/60 px-2 py-1.5"
         >
           <input

@@ -26,19 +26,36 @@ export const updateDefinitionTool = {
     name: string;
     specJson: string;
   }) => {
-    const spec = JSON.parse(input.specJson);
-    const existing = await getDefinitionByName(input.kind, input.name);
-
-    if (existing) {
-      const updated = await updateDefinition(existing.id, { spec });
-      return { action: "updated", id: updated.id, name: input.name, kind: input.kind };
+    let spec: unknown;
+    try {
+      spec = JSON.parse(input.specJson);
+    } catch {
+      return { error: "Invalid JSON in specJson" };
     }
 
-    const created = await createDefinition({
-      kind: input.kind,
-      name: input.name,
-      spec,
-    });
-    return { action: "created", id: created.id, name: input.name, kind: input.kind };
+    try {
+      const existing = await getDefinitionByName(input.kind, input.name);
+      if (existing) {
+        const updated = await updateDefinition(existing.id, { spec });
+        return { action: "updated", id: updated.id, name: input.name, kind: input.kind };
+      }
+
+      const created = await createDefinition({
+        kind: input.kind,
+        name: input.name,
+        spec,
+      });
+      return { action: "created", id: created.id, name: input.name, kind: input.kind };
+    } catch (error) {
+      // Handle unique constraint violation (race condition)
+      if (error instanceof Error && error.message.includes("unique")) {
+        const existing = await getDefinitionByName(input.kind, input.name);
+        if (existing) {
+          const updated = await updateDefinition(existing.id, { spec });
+          return { action: "updated", id: updated.id, name: input.name, kind: input.kind };
+        }
+      }
+      return { error: error instanceof Error ? error.message : String(error) };
+    }
   },
 };

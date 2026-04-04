@@ -29,14 +29,18 @@ export function ChatHistoryPanel({
   refreshKey,
 }: ChatHistoryPanelProps) {
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
     startTransition(async () => {
       try {
+        setError(null);
         const data = await listConversations();
         setConversations(data);
-      } catch {}
+      } catch {
+        setError("Failed to load conversations");
+      }
     });
   }, [refreshKey]);
 
@@ -62,7 +66,11 @@ export function ChatHistoryPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto p-2">
-        {conversations.length === 0 ? (
+        {error ? (
+          <p className="px-2 py-4 text-center text-xs text-red-400/70">
+            {error}
+          </p>
+        ) : conversations.length === 0 ? (
           <p className="px-2 py-4 text-center text-xs text-white/30">
             No conversations yet
           </p>

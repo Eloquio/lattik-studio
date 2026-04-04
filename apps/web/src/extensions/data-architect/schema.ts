@@ -94,8 +94,10 @@ export const metricSchema = z.object({
 export const pipelineDefinitionSchema = z.object({
   version: z.literal(1),
   entities: z.array(entitySchema),
+  dimensions: z.array(dimensionSchema).optional(),
   log_tables: z.array(loggerTableSchema),
   tables: z.array(lattikTableSchema),
+  metrics: z.array(metricSchema).optional(),
 });
 
 export type Entity = z.infer<typeof entitySchema>;

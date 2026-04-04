@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getExtension } from "@/extensions/registry";
@@ -25,6 +25,22 @@ export function CanvasPanel({
   onCanvasStateChange,
 }: CanvasPanelProps) {
   const isDragging = useRef(false);
+  const handlersRef = useRef<{
+    move: ((e: MouseEvent) => void) | null;
+    up: (() => void) | null;
+  }>({ move: null, up: null });
+
+  // Clean up listeners on unmount
+  useEffect(() => {
+    return () => {
+      if (handlersRef.current.move) {
+        document.removeEventListener("mousemove", handlersRef.current.move);
+      }
+      if (handlersRef.current.up) {
+        document.removeEventListener("mouseup", handlersRef.current.up);
+      }
+    };
+  }, []);
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -34,7 +50,7 @@ export function CanvasPanel({
       const handleMouseMove = (e: MouseEvent) => {
         if (!isDragging.current) return;
         const windowWidth = window.innerWidth;
-        const navWidth = 56; // 14 * 4 = 56px (w-14)
+        const navWidth = 56;
         const availableWidth = windowWidth - navWidth;
         const newWidth =
           ((windowWidth - e.clientX) / availableWidth) * 100;
@@ -45,8 +61,18 @@ export function CanvasPanel({
         isDragging.current = false;
         document.removeEventListener("mousemove", handleMouseMove);
         document.removeEventListener("mouseup", handleMouseUp);
+        handlersRef.current = { move: null, up: null };
       };
 
+      // Clean up any stale listeners
+      if (handlersRef.current.move) {
+        document.removeEventListener("mousemove", handlersRef.current.move);
+      }
+      if (handlersRef.current.up) {
+        document.removeEventListener("mouseup", handlersRef.current.up);
+      }
+
+      handlersRef.current = { move: handleMouseMove, up: handleMouseUp };
       document.addEventListener("mousemove", handleMouseMove);
       document.addEventListener("mouseup", handleMouseUp);
     },

@@ -17,7 +17,12 @@ export const staticCheckTool = {
     })
   ),
   execute: async (input: { kind: DefinitionKind; specJson: string }) => {
-    const spec = JSON.parse(input.specJson);
+    let spec: unknown;
+    try {
+      spec = JSON.parse(input.specJson);
+    } catch {
+      return { passed: false, errors: [{ field: "specJson", message: "Invalid JSON" }] };
+    }
     const result = await validate(input.kind, spec);
     return result;
   },

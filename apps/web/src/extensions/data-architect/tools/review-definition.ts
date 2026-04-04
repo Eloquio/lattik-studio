@@ -16,10 +16,12 @@ export const reviewDefinitionTool = {
     })
   ),
   execute: async (input: { kind: DefinitionKind; specJson: string }) => {
-    // The agent itself performs the review by analyzing the spec.
-    // This tool just structures the input/output so the agent knows
-    // to provide suggestions in a standard format.
-    const spec = JSON.parse(input.specJson);
+    let spec: unknown;
+    try {
+      spec = JSON.parse(input.specJson);
+    } catch {
+      return { error: "Invalid JSON in specJson" };
+    }
     return {
       kind: input.kind,
       spec,
