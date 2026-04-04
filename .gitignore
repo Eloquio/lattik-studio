@@ -10,6 +10,10 @@ node_modules
 
 # testing
 coverage
+test-results/
+playwright-report/
+blob-report/
+e2e/.test-state.json
 
 # next.js
 .next/

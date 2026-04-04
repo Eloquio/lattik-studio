@@ -11,7 +11,8 @@
     "db:seed": "cd apps/web && pnpm tsx src/db/seed.ts",
     "gitea:start": "kubectl apply -f k8s/gitea.yaml && until kubectl get pod -l app=gitea 2>/dev/null | grep -q gitea; do sleep 2; done && kubectl wait --for=condition=ready pod -l app=gitea --timeout=120s && kubectl apply -f k8s/gitea-init.yaml",
     "gitea:logs": "kubectl logs -l app=gitea -f",
-    "gitea:init-logs": "kubectl logs job/gitea-init -f"
+    "gitea:init-logs": "kubectl logs job/gitea-init -f",
+    "test:e2e": "cd apps/web && pnpm test:e2e"
   },
   "devDependencies": {
     "turbo": "^2"
