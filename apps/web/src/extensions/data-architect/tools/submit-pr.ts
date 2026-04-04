@@ -78,9 +78,10 @@ export const submitPRTool = {
         files: files.map((f) => f.path),
       };
     } catch (error) {
+      console.error("submitPR error:", error);
       return {
         status: "error",
-        message: error instanceof Error ? error.message : String(error),
+        message: "Failed to submit PR. Please check Gitea is running and try again.",
       };
     }
   },

@@ -246,7 +246,7 @@ export function ChatPanel({
                     <div className="mt-1 border-l-2 border-[#e0a96e]/40 pl-4 text-sm text-white/90 prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-headings:text-white prose-strong:text-white prose-code:text-[#e0a96e] prose-code:bg-white/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-pre:bg-white/5 prose-pre:border prose-pre:border-white/10">
                       {message.parts.map((part, i) => {
                         if (part.type === "text") {
-                          return <Markdown key={i}>{part.text}</Markdown>;
+                          return <Markdown key={i} skipHtml disallowedElements={["script", "iframe", "object", "embed", "form"]}>{part.text}</Markdown>;
                         }
                         if (part.type.startsWith("tool-") && "state" in part) {
                           const p = part as { state: string; input?: unknown; output?: unknown };

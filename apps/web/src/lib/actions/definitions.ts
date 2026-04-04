@@ -104,9 +104,13 @@ export async function getDefinitionByName(kind: DefinitionKind, name: string) {
   return rows[0] ?? null;
 }
 
-export async function listDefinitions(kind?: DefinitionKind) {
+const DEFAULT_LIMIT = 100;
+const MAX_LIMIT = 1000;
+
+export async function listDefinitions(kind?: DefinitionKind, limit = DEFAULT_LIMIT) {
   const user = await requireUser();
   const db = getDb();
+  const take = Math.min(Math.max(limit, 1), MAX_LIMIT);
 
   // User sees their own definitions + all merged definitions
   const userOrMerged = or(
@@ -119,19 +123,22 @@ export async function listDefinitions(kind?: DefinitionKind) {
       .select()
       .from(schema.definitions)
       .where(and(eq(schema.definitions.kind, kind), userOrMerged))
-      .orderBy(desc(schema.definitions.updatedAt));
+      .orderBy(desc(schema.definitions.updatedAt))
+      .limit(take);
   }
 
   return db
     .select()
     .from(schema.definitions)
     .where(userOrMerged)
-    .orderBy(desc(schema.definitions.updatedAt));
+    .orderBy(desc(schema.definitions.updatedAt))
+    .limit(take);
 }
 
-export async function listMergedDefinitions(kind?: DefinitionKind) {
+export async function listMergedDefinitions(kind?: DefinitionKind, limit = DEFAULT_LIMIT) {
   await requireUser();
   const db = getDb();
+  const take = Math.min(Math.max(limit, 1), MAX_LIMIT);
 
   // Merged definitions are shared — all users can see them
   if (kind) {
@@ -144,12 +151,14 @@ export async function listMergedDefinitions(kind?: DefinitionKind) {
           eq(schema.definitions.status, "merged")
         )
       )
-      .orderBy(desc(schema.definitions.updatedAt));
+      .orderBy(desc(schema.definitions.updatedAt))
+      .limit(take);
   }
 
   return db
     .select()
     .from(schema.definitions)
     .where(eq(schema.definitions.status, "merged"))
-    .orderBy(desc(schema.definitions.updatedAt));
+    .orderBy(desc(schema.definitions.updatedAt))
+    .limit(take);
 }

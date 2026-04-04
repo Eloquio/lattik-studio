@@ -1,7 +1,22 @@
 const GITEA_URL = process.env.GITEA_URL ?? "http://localhost:3300";
 const GITEA_TOKEN = process.env.GITEA_TOKEN ?? "";
-const GITEA_ORG = "lattik";
-const GITEA_REPO = "definitions";
+const GITEA_ORG = process.env.GITEA_ORG ?? "lattik";
+const GITEA_REPO = process.env.GITEA_REPO ?? "definitions";
+
+// Validate GITEA_URL at module load to prevent SSRF
+if (GITEA_URL) {
+  try {
+    const parsed = new URL(GITEA_URL);
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      throw new Error(`GITEA_URL must use http or https (got ${parsed.protocol})`);
+    }
+  } catch (e) {
+    if (e instanceof TypeError) {
+      throw new Error(`GITEA_URL is not a valid URL: ${GITEA_URL}`);
+    }
+    throw e;
+  }
+}
 
 function ensureToken() {
   if (!GITEA_TOKEN) {
