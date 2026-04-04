@@ -6,3 +6,14 @@ nodes:
       - containerPort: 30432
         hostPort: 5432
         protocol: TCP
+      - containerPort: 30300
+        hostPort: 3300
+        protocol: TCP
+      - containerPort: 30222
+        hostPort: 2222
+        protocol: TCP
+    extraMounts:
+      - hostPath: /tmp/lattik-postgres-data
+        containerPath: /var/local/postgres-data
+      - hostPath: /tmp/lattik-gitea-data
+        containerPath: /var/local/gitea-data

@@ -13,7 +13,11 @@ export interface ExtensionMeta {
   icon: string;
 }
 
+export interface AgentOptions {
+  canvasState?: unknown;
+}
+
 export interface ExtensionDefinition extends ExtensionMeta {
-  agent: () => ExtensionAgent;
-  canvas: ComponentType<{ state: unknown }>;
+  agent: (options?: AgentOptions) => ExtensionAgent;
+  canvas: ComponentType<{ state: unknown; onStateChange?: (state: Record<string, unknown>) => void }>;
 }

@@ -14,6 +14,7 @@ interface ChatPanelProps {
   initialMessages?: UIMessage[];
   savedTitle?: string;
   activeExtensionId: string | null;
+  canvasState: unknown;
   onCanvasStateChange: (state: unknown) => void;
   onExtensionChange: (id: string | null) => void;
   onConversationChange?: () => void;
@@ -25,6 +26,7 @@ export function ChatPanel({
   initialMessages,
   savedTitle,
   activeExtensionId,
+  canvasState,
   onCanvasStateChange,
   onExtensionChange,
   onConversationChange,
@@ -33,10 +35,16 @@ export function ChatPanel({
   const extensionIdRef = useRef(activeExtensionId);
   extensionIdRef.current = activeExtensionId;
 
+  const canvasStateRef = useRef(canvasState);
+  canvasStateRef.current = canvasState;
+
   const [transport] = useState(
     () =>
       new DefaultChatTransport({
-        body: () => ({ extensionId: extensionIdRef.current }),
+        body: () => ({
+          extensionId: extensionIdRef.current,
+          canvasState: canvasStateRef.current,
+        }),
       })
   );
 
@@ -82,7 +90,7 @@ export function ChatPanel({
             .slice(0, 100) || "New Chat"
         : "New Chat";
 
-      saveConversation({ id: chatId, title, messages });
+      saveConversation({ id: chatId, title, messages, canvasState: canvasStateRef.current });
       onConversationChange?.();
     }
     wasLoadingRef.current = isLoading;

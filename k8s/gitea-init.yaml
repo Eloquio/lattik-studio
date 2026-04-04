@@ -1,0 +1,81 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gitea-init
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: init
+          image: curlimages/curl:8.5.0
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              GITEA_URL="http://gitea:3000"
+
+              echo "Waiting for Gitea to be ready..."
+              until curl -sf "$GITEA_URL/api/v1/version" > /dev/null 2>&1; do
+                sleep 2
+              done
+              echo "Gitea is ready."
+
+              # Create admin user (ignore error if already exists)
+              curl -sf -X POST "$GITEA_URL/api/v1/admin/users" \
+                -H "Content-Type: application/json" \
+                -u "lattik-admin:lattik-local" \
+                -d '{
+                  "username": "lattik-admin",
+                  "password": "lattik-local",
+                  "email": "admin@lattik.local",
+                  "must_change_password": false
+                }' || echo "Admin user may already exist, continuing..."
+
+              # Create API token (delete existing first)
+              curl -sf -X DELETE "$GITEA_URL/api/v1/users/lattik-admin/tokens/lattik-api" \
+                -u "lattik-admin:lattik-local" || true
+
+              TOKEN_RESPONSE=$(curl -sf -X POST "$GITEA_URL/api/v1/users/lattik-admin/tokens" \
+                -H "Content-Type: application/json" \
+                -u "lattik-admin:lattik-local" \
+                -d '{"name": "lattik-api", "scopes": ["all"]}')
+              echo "Token created: $TOKEN_RESPONSE"
+
+              # Extract token value
+              TOKEN=$(echo "$TOKEN_RESPONSE" | grep -o '"sha1":"[^"]*"' | cut -d'"' -f4)
+              if [ -z "$TOKEN" ]; then
+                echo "Warning: Could not extract token. You may need to create one manually."
+              else
+                echo ""
+                echo "============================================"
+                echo "GITEA_TOKEN=$TOKEN"
+                echo "============================================"
+                echo "Add this to your .env.local file."
+                echo ""
+              fi
+
+              # Create org (ignore if exists)
+              curl -sf -X POST "$GITEA_URL/api/v1/orgs" \
+                -H "Content-Type: application/json" \
+                -u "lattik-admin:lattik-local" \
+                -d '{"username": "lattik", "visibility": "private"}' \
+                || echo "Org may already exist, continuing..."
+
+              # Create definitions repo (ignore if exists)
+              curl -sf -X POST "$GITEA_URL/api/v1/orgs/lattik/repos" \
+                -H "Content-Type: application/json" \
+                -u "lattik-admin:lattik-local" \
+                -d '{
+                  "name": "definitions",
+                  "description": "Lattik pipeline definitions",
+                  "private": true,
+                  "auto_init": true,
+                  "default_branch": "main"
+                }' || echo "Repo may already exist, continuing..."
+
+              echo "Gitea initialization complete."
+              echo "Access Gitea at: http://localhost:3300"
+              echo "Credentials: lattik-admin / lattik-local"

@@ -38,11 +38,15 @@ ${agentList}
 }
 
 export async function POST(req: Request) {
-  const { messages, extensionId }: { messages: UIMessage[]; extensionId?: string } =
+  const {
+    messages,
+    extensionId,
+    canvasState,
+  }: { messages: UIMessage[]; extensionId?: string; canvasState?: unknown } =
     await req.json();
 
   // Use the extension's ToolLoopAgent if available
-  const agent = extensionId ? getExtensionAgent(extensionId) : undefined;
+  const agent = extensionId ? getExtensionAgent(extensionId, { canvasState }) : undefined;
 
   if (agent) {
     // Strip tool parts from other agents (e.g. handoff) to avoid schema validation errors

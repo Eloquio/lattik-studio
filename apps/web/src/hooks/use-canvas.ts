@@ -7,10 +7,10 @@ export function useCanvas() {
   const [width, setWidth] = useState(50);
   const [canvasState, setCanvasState] = useState<unknown>(null);
 
-  // Hydrate from localStorage after mount
+  // Hydrate layout prefs from localStorage after mount
   useEffect(() => {
     try {
-      const stored = localStorage.getItem("canvas-state");
+      const stored = localStorage.getItem("canvas-layout");
       if (stored) {
         const { isOpen: savedOpen, width: savedWidth } = JSON.parse(stored);
         if (typeof savedOpen === "boolean") setIsOpen(savedOpen);
@@ -19,9 +19,9 @@ export function useCanvas() {
     } catch {}
   }, []);
 
-  // Persist to localStorage on change
+  // Persist layout prefs to localStorage
   useEffect(() => {
-    localStorage.setItem("canvas-state", JSON.stringify({ isOpen, width }));
+    localStorage.setItem("canvas-layout", JSON.stringify({ isOpen, width }));
   }, [isOpen, width]);
 
   const open = useCallback(() => setIsOpen(true), []);
