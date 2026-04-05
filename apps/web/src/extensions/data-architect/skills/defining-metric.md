@@ -1,76 +1,50 @@
 # Defining a New Canonical Metric
 
 ## Overview
-A Metric is a collection of aggregation expressions against Logger Tables or Lattik Tables. It defines *how* to aggregate, not the result. For example, DAU (Daily Active Users) can be calculated as `count_if(is_dau)` against a user-level Lattik table, or as `count_distinct(user_id)` against a different table. The actual aggregation is performed at query time, not during definition.
+A Metric is a collection of aggregation expressions against Logger Tables or Lattik Tables. It defines *how* to aggregate, not the result. For example, DAU can be calculated as `count_if(is_dau)` against a user-level Lattik table, or as `count_distinct(user_id)` against a Logger table. The actual aggregation is performed at query time, not during definition.
 
 ## Fields
-- **name** (string, required) — snake_case identifier, e.g. `daily_active_users`
-- **description** (string, required) — what this metric measures
-- **calculations** (array, required) — one or more ways to compute this metric, each with:
-  - **expression** (string, required) — aggregation expression in lattik-expression syntax, e.g. `count_if(is_dau)`, `count_distinct(user_id)`, `sum(revenue)`
-  - **source_table** (string, required) — the Logger or Lattik table to aggregate against
+All fields are required.
 
-## Workflow (7 steps)
+- **name** (string) — snake_case identifier, e.g. `daily_active_users`
+- **description** (string) — what this metric measures (10-500 chars)
+- **calculations** (array) — one or more ways to compute this metric, each with:
+  - **expression** (string) — aggregation expression in lattik-expression syntax, e.g. `count_if(is_dau)`, `count_distinct(user_id)`, `sum(revenue)`
+  - **source_table** (string) — the Logger or Lattik table to aggregate against
 
-### Step 1 of 7: Gather Requirements
-> Status: draft
+## Workflow
 
-Ask the user:
-- What does this metric measure?
-- What tables contain the data needed?
-- How should it be calculated? Are there multiple ways depending on the table?
+### Step 1: Render Draft on Canvas
+Use `renderCanvas` to show the definition form, pre-populating any fields the user has already provided in the conversation:
+1. TextInput fields for name and description
+2. Calculations list — each with an ExpressionEditor and source table selector
 
-### Step 2 of 7: Render Draft on Canvas
-> Status: draft
-
-Use `renderCanvas` to show with a StatusBadge:
-1. Name and description fields
-2. Calculations list — each with expression editor and source table selector
-
-### Step 3 of 7: Collaborate on Definition
-> Status: draft
-
-The user may edit expressions or add/remove calculations. Use `readCanvasState` to check edits. Validate expression syntax using lattik-expression.
-
-### Step 4 of 7: AI Review
-> Status: reviewing
-
+### Step 2: AI Review
 When the user asks to review, use `reviewDefinition` and check:
 - Are the expressions semantically correct?
 - Do the source tables exist?
 - Are the referenced columns valid in the source tables?
 - Do multiple calculations produce consistent results?
+
 Render suggestions as ReviewCard components.
 
-### Step 5 of 7: Accept/Deny Suggestions
-> Status: reviewing
-
+### Step 3: Accept/Deny Suggestions
 Wait for user decisions. Use `readCanvasState` to check. Apply accepted changes.
 
-### Step 6 of 7: Static Checks
-> Status: checks-passed or checks-failed
+### Step 4: Static Checks
+Run `staticCheck` with the current definition. If checks fail, show errors and return to the canvas for fixes.
 
-Run `staticCheck` to validate metric name, calculations, expression syntax, source tables, and column references.
-
-### Step 7 of 7: Generate and Submit
-> Status: pr-submitted
-
+### Step 5: Generate and Submit
 Use `updateDefinition` to save, then `submitPR` to create a PR.
 
-## Validation Rules
-- Metric name must be snake_case, 1-60 chars
-- Must have at least one calculation
-- All expressions must be valid lattik-expression syntax
-- All source tables must exist
-- Column references in expressions must exist in the source table
+## Updating an Existing Metric
+Use `listDefinitions` to find existing metrics and `getDefinition` to load one. Then follow steps 2-5 above.
 
-## Example
-```yaml
-name: daily_active_users
-description: Count of unique users who were active on a given day
-calculations:
-  - expression: "count_if(is_dau)"
-    source_table: user_daily_stats
-  - expression: "count_distinct(user_id)"
-    source_table: user_login_events
-```
+**Immutable after merge:** name.
+
+## Validation Rules
+- Name: snake_case, 1-60 chars
+- Description: 10-500 chars
+- Calculations: at least one
+- Expressions: valid lattik-expression syntax
+- Source tables: must exist
