@@ -13,6 +13,7 @@ Extensions are specialized AI agents (e.g. a Root Cause Analysis Agent). Extensi
 - **Database:** PostgreSQL (local via kind) + Drizzle ORM
 - **UI:** shadcn/ui (Base Nova) + Tailwind CSS v4
 - **Dev server:** portless (`https://lattik-studio.dev` via `--tld dev`)
+- **Canvas rendering:** `@json-render/core` + `@json-render/react` ([vercel-labs/json-render](https://github.com/vercel-labs/json-render))
 - **Expression engine:** `@eloquio/lattik-expression` (parse, type-check, emit SQL)
 - **Git (local dev):** Gitea in kind cluster for PR review workflow
 
@@ -25,7 +26,7 @@ apps/web/              Next.js app
   src/components/      UI components (chat, canvas, layout, ui)
   src/db/              Drizzle schema and connection
   src/extensions/      Extension framework and agents
-    data-architect/    Data Architect extension
+    data-architect/    Data Architect extension (see README.md inside)
       canvas/          Canvas components + json-render system
       skills/          Skill markdown docs (entity, dimension, logger table, lattik table, metric)
       tools/           Agent tools (getSkill, renderCanvas, staticCheck, submitPR, etc.)
@@ -113,15 +114,12 @@ kubectl get pods -l app=postgres
 - Webhook routes (`/api/webhooks/*`) excluded from middleware, verified via HMAC
 - Google Console redirect URI: `https://lattik-studio.dev/api/auth/callback/google`
 
-## Data Architect Agent
+## Extensions
 
-The Data Architect agent helps users define pipeline concepts through a skill-based workflow:
+Each extension has a `README.md` documenting its agent architecture, tools, canvas components, and workflows. Read the extension's README before making changes.
 
-- **5 skills:** Entity, Dimension, Logger Table, Lattik Table, Metric
-- **Workflow:** Define via chat+canvas → AI review → accept/deny suggestions → static checks → generate YAML → submit PR
-- **Canvas:** json-render system with 11 components, bidirectional editing, state persisted per conversation
-- **Validation:** Naming conventions, referential integrity, expression syntax via lattik-expression
-- **PR flow:** Gitea (local dev) / GitHub (production)
+### Canvas Rules
+All canvas UI MUST be rendered via `@json-render/react`. Define catalogs with `defineCatalog()`, register components with `defineRegistry()`, render with `<Renderer>`. State is managed by json-render's JSON Pointer state model (`$state`, `$bindState`, `setState` actions). The LLM streams JSONL patches via `pipeJsonRender()`, client applies them with `useJsonRenderMessage()`. Do NOT bypass json-render with custom renderers or direct React state for canvas content. Conversation and canvas state MUST survive page refresh — the full spec + state is persisted to the database and restored on load.
 
 ## Design
 

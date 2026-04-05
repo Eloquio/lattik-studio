@@ -28,11 +28,7 @@ All fields are required unless marked optional.
 ## Workflow
 
 ### Step 1: Render Draft on Canvas
-Use `renderCanvas` to show the definition form, pre-populating any fields the user has already provided in the conversation:
-1. Table metadata form — TextInput fields for name and description, primary key editor
-2. MockedTablePreview with sample data based on the schema
-3. Column family definitions with source mappings and aggregations
-4. Derived columns section
+Call `renderCanvas` with `form: "lattik-table"`. This renders the built-in Lattik table form with inline editable name/description, primary key editor, column families with source mappings and aggregations, and derived columns. Do NOT use specJson — just pass `{ form: "lattik-table" }`.
 
 ### Step 2: AI Review
 When the user asks to review, use `reviewDefinition` and check:

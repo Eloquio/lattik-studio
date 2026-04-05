@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import type { UIMessage } from "ai";
 import { generateId } from "ai";
+import type { Spec } from "@json-render/core";
 import { NavPanel } from "@/components/layout/nav-panel";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { ChatHistoryPanel } from "@/components/chat/chat-history-panel";
 import { CanvasPanel } from "@/components/canvas/canvas-panel";
 import { useCanvas } from "@/hooks/use-canvas";
 import { getConversation } from "@/lib/actions/conversations";
+import type { TaskStackEntry } from "@/lib/types/task-stack";
 
 const CHAT_ID_KEY = "lattik-active-chat";
 
@@ -22,6 +24,7 @@ interface ChatState {
 export default function Home() {
   const canvas = useCanvas();
   const [activeExtensionId, setActiveExtensionId] = useState<string | null>(null);
+  const [taskStack, setTaskStack] = useState<TaskStackEntry[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [chat, setChat] = useState<ChatState>(() => ({
@@ -42,7 +45,13 @@ export default function Home() {
             savedTitle: conv.title,
           });
           if (conv.canvasState) {
-            canvas.setCanvasState(conv.canvasState);
+            canvas.setCanvasSpec(conv.canvasState as Spec);
+          }
+          if (conv.taskStack) {
+            setTaskStack(conv.taskStack as TaskStackEntry[]);
+          }
+          if (conv.activeExtensionId) {
+            setActiveExtensionId(conv.activeExtensionId);
           }
         }
       }).catch((error) => {
@@ -56,11 +65,20 @@ export default function Home() {
     localStorage.setItem(CHAT_ID_KEY, chat.id);
   }, [chat.id]);
 
+  // When a new spec arrives from the AI stream, set it and open the canvas
+  const handleSpecFromStream = useCallback((spec: unknown) => {
+    canvas.setCanvasSpec(spec as Spec | null);
+    if (spec !== null) {
+      canvas.open();
+    }
+  }, [canvas.setCanvasSpec, canvas.open]);
+
   const handleNewChat = useCallback(() => {
     setChat((prev) => ({ id: generateId(), renderKey: prev.renderKey + 1 }));
-    canvas.setCanvasState(null);
+    canvas.setCanvasSpec(null);
     setActiveExtensionId(null);
-  }, [canvas]);
+    setTaskStack([]);
+  }, [canvas.setCanvasSpec]);
 
   const handleSelectChat = useCallback(async (id: string) => {
     try {
@@ -72,13 +90,14 @@ export default function Home() {
           initialMessages: conv.messages as UIMessage[],
           savedTitle: conv.title,
         }));
-        canvas.setCanvasState(conv.canvasState ?? null);
-        setActiveExtensionId(null);
+        canvas.setCanvasSpec((conv.canvasState as Spec) ?? null);
+        setActiveExtensionId(conv.activeExtensionId ?? null);
+        setTaskStack((conv.taskStack as TaskStackEntry[]) ?? []);
       }
     } catch (error) {
       console.error("Failed to load conversation:", error);
     }
-  }, [canvas]);
+  }, [canvas.setCanvasSpec]);
 
   const handleConversationChange = useCallback(() => {
     setHistoryRefreshKey((k) => k + 1);
@@ -116,11 +135,13 @@ export default function Home() {
             initialMessages={chat.initialMessages}
             savedTitle={chat.savedTitle}
             activeExtensionId={activeExtensionId}
-            canvasState={canvas.canvasState}
-            onCanvasStateChange={canvas.setCanvasState}
+            canvasState={canvas.canvasSpec}
+            onCanvasStateChange={handleSpecFromStream}
             onExtensionChange={setActiveExtensionId}
             onConversationChange={handleConversationChange}
             onNewChat={handleNewChat}
+            taskStack={taskStack}
+            onTaskStackChange={setTaskStack}
           />
         </div>
 
@@ -142,8 +163,8 @@ export default function Home() {
           onWidthChange={canvas.setWidth}
           onClose={canvas.close}
           activeExtensionId={activeExtensionId}
-          canvasState={canvas.canvasState}
-          onCanvasStateChange={canvas.setCanvasState}
+          spec={canvas.canvasSpec}
+          onStateChange={canvas.mergeStateChanges}
         />
       </div>
     </div>

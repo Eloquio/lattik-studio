@@ -4,10 +4,13 @@ import {
   UIMessage,
   zodSchema,
   createAgentUIStreamResponse,
+  createAgentUIStream,
+  createUIMessageStreamResponse,
   ToolLoopAgent,
   stepCountIs,
 } from "ai";
 import { z } from "zod";
+import { pipeJsonRender } from "@json-render/core";
 import { getExtensionAgent } from "@/extensions/agents";
 import { getExtension } from "@/extensions/registry";
 import { listEnabledAgents } from "@/lib/actions/agents";
@@ -20,12 +23,18 @@ const MAX_BODY_SIZE = 2 * 1024 * 1024;
 const MAX_MESSAGES = 200;
 
 function buildAssistantPrompt(
-  agents: { id: string; name: string; description: string }[]
+  agents: { id: string; name: string; description: string }[],
+  currentTaskStack?: { extensionId: string; reason: string }[]
 ) {
   const agentList =
     agents.length > 0
       ? agents.map((a) => `- **${a.name}** (id: "${a.id}"): ${a.description}`).join("\n")
       : "No agents enabled. Suggest the user visit the Agent Marketplace to enable specialized agents.";
+
+  const stackNote =
+    currentTaskStack && currentTaskStack.length > 0
+      ? `\n\n## Paused Task\nThere is a paused task on the stack: the "${currentTaskStack[0].extensionId}" agent was working on "${currentTaskStack[0].reason}" and is waiting to resume.\n- Do NOT hand off to a different specialist — handle the user's new request yourself.\n- When the user indicates they are done with their current request ("that's all", "nothing else", "I'm done", etc.), use the handoff tool to resume the paused agent (agentId: "${currentTaskStack[0].extensionId}") so it can continue where it left off.\n- Briefly tell the user you're handing them back to the paused agent.`
+      : "";
 
   return `You are the Lattik Studio Assistant — the main AI assistant for Lattik Studio, an agentic analytics platform.
 
@@ -41,7 +50,7 @@ ${agentList}
 
 ## Guidelines
 - Be friendly and concise
-- When handing off, briefly tell the user which agent you're routing them to and why`;
+- When handing off, briefly tell the user which agent you're routing them to and why${stackNote}`;
 }
 
 export async function POST(req: Request) {
@@ -68,17 +77,25 @@ export async function POST(req: Request) {
     return Response.json({ error: "Request too large" }, { status: 413 });
   }
 
-  let body: { messages?: unknown; extensionId?: unknown; canvasState?: unknown };
+  let body: {
+    messages?: unknown;
+    extensionId?: unknown;
+    canvasState?: unknown;
+    taskStack?: unknown;
+    resumeContext?: unknown;
+  };
   try {
     body = await req.json();
   } catch {
     return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { messages, extensionId, canvasState } = body as {
+  const { messages, extensionId, canvasState, taskStack, resumeContext } = body as {
     messages: UIMessage[];
     extensionId?: string;
     canvasState?: unknown;
+    taskStack?: { extensionId: string; canvasState: unknown; reason: string; pausedAt: string }[];
+    resumeContext?: string;
   };
 
   if (!Array.isArray(messages)) {
@@ -96,7 +113,7 @@ export async function POST(req: Request) {
 
   // Use the extension's ToolLoopAgent if available
   const agent = extensionId && typeof extensionId === "string"
-    ? getExtensionAgent(extensionId, { canvasState })
+    ? getExtensionAgent(extensionId, { canvasState, taskStack, resumeContext })
     : undefined;
 
   if (agent) {
@@ -112,9 +129,12 @@ export async function POST(req: Request) {
       }),
     }));
 
-    return createAgentUIStreamResponse({
+    const stream = await createAgentUIStream({
       agent,
       uiMessages: cleanMessages,
+    });
+    return createUIMessageStreamResponse({
+      stream: pipeJsonRender(stream),
     });
   }
 
@@ -122,7 +142,7 @@ export async function POST(req: Request) {
   const enabledAgents = await listEnabledAgents();
   const assistantAgent = new ToolLoopAgent({
     model: gateway("anthropic/claude-haiku-4.5"),
-    instructions: buildAssistantPrompt(enabledAgents),
+    instructions: buildAssistantPrompt(enabledAgents, taskStack),
     tools: {
       handoff: {
         description:
@@ -133,17 +153,36 @@ export async function POST(req: Request) {
             reason: z.string().describe("Brief reason for the handoff"),
           })
         ),
-        execute: async (input: { agentId: string; reason: string }) => ({
-          handedOffTo: input.agentId,
-          reason: input.reason,
-        }),
+        execute: async (input: { agentId: string; reason: string }) => {
+          // Allow resuming the paused specialist (stack pop), but block new handoffs
+          const isPausedResume = taskStack && taskStack.length > 0
+            && taskStack[taskStack.length - 1].extensionId === input.agentId;
+          if (taskStack && taskStack.length >= 1 && !isPausedResume) {
+            return {
+              error: "Maximum task depth reached. Handle this request directly or suggest the user finish their paused task.",
+            };
+          }
+          return { handedOffTo: input.agentId, reason: input.reason };
+        },
       },
     },
     stopWhen: stepCountIs(5),
   });
 
+  // Strip tool parts from specialist agents to avoid schema validation errors
+  const cleanAssistantMessages = messages.map((msg) => ({
+    ...msg,
+    parts: (msg.parts ?? []).filter((part) => {
+      if (part.type.startsWith("tool-") && "toolCallId" in part) {
+        const toolName = part.type.slice(5);
+        return toolName in (assistantAgent.tools ?? {});
+      }
+      return true;
+    }),
+  }));
+
   return createAgentUIStreamResponse({
     agent: assistantAgent,
-    uiMessages: messages,
+    uiMessages: cleanAssistantMessages,
   });
 }

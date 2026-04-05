@@ -16,7 +16,7 @@ All fields are required.
 ## Workflow
 
 ### Step 1: Render Draft on Canvas
-Use `renderCanvas` to show the definition form, pre-populating any fields the user has already provided in the conversation. If the referenced entity doesn't exist yet, suggest defining it first.
+Call `renderCanvas` with `form: "dimension"`. This renders the built-in dimension form with inline editable name/description, entity field, source table/column, and data type selector. Do NOT use specJson — just pass `{ form: "dimension" }`. If the referenced entity doesn't exist yet, suggest defining it first.
 
 ### Step 2: AI Review
 When the user asks to review, use `reviewDefinition` and check:
