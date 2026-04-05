@@ -4,6 +4,7 @@ export interface ValidationError {
 }
 
 const SNAKE_CASE_RE = /^[a-z][a-z0-9]*(_[a-z0-9]+)*$/;
+const QUALIFIED_NAME_RE = /^[a-z][a-z0-9]*(_[a-z0-9]+)*\.[a-z][a-z0-9]*(_[a-z0-9]+)*$/;
 
 const RESERVED_WORDS = new Set([
   "select", "from", "where", "insert", "update", "delete", "create", "drop",
@@ -41,6 +42,36 @@ export function validateName(
   return errors;
 }
 
+export function validateQualifiedName(
+  value: string,
+  field: string,
+  { maxLength = 60 }: { maxLength?: number } = {}
+): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  if (!value || value.length === 0) {
+    errors.push({ field, message: `${field} is required` });
+    return errors;
+  }
+
+  if (value.length > maxLength) {
+    errors.push({ field, message: `${field} must be at most ${maxLength} chars` });
+  }
+
+  if (!QUALIFIED_NAME_RE.test(value)) {
+    errors.push({ field, message: `${field} must be schema.table_name format (e.g. 'ingest.click_events')` });
+  }
+
+  const parts = value.split(".");
+  for (const part of parts) {
+    if (RESERVED_WORDS.has(part.toLowerCase())) {
+      errors.push({ field, message: `${field} contains reserved word '${part}'` });
+    }
+  }
+
+  return errors;
+}
+
 export function validateDescription(
   value: string | undefined,
   field: string,
@@ -59,16 +90,16 @@ export function validateDescription(
 
 export function validateRetention(value: string | undefined, field: string): ValidationError[] {
   if (!value) return [];
-  if (!/^\d+[dhmy]$/.test(value)) {
-    return [{ field, message: `${field} must be a number followed by d, h, m, or y (e.g. '90d')` }];
+  if (!/^\d+d$/.test(value)) {
+    return [{ field, message: `${field} must be a number followed by d (e.g. '30d', '90d')` }];
   }
   return [];
 }
 
 export function validateDedupWindow(value: string | undefined, field: string): ValidationError[] {
   if (!value) return [];
-  if (!/^\d+[dhms]$/.test(value)) {
-    return [{ field, message: `${field} must be a number followed by d, h, m, or s (e.g. '1h')` }];
+  if (!/^\d+h$/.test(value)) {
+    return [{ field, message: `${field} must be a number followed by h (e.g. '1h', '24h')` }];
   }
   return [];
 }
