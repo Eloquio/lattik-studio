@@ -12,8 +12,8 @@ Every logger table automatically includes these columns — they cannot be redef
 |--------|------|---------|
 | `event_id` | string | Unique event identifier for deduplication |
 | `event_timestamp` | timestamp | When the event occurred |
-| `ds` | date | Date partition key (derived from ingestion time to handle late-arriving data) |
-| `hour` | int32 | Hour partition key (derived from ingestion time) |
+| `ds` | string | Date partition key (derived from ingestion time to handle late-arriving data) |
+| `hour` | string | Hour partition key (derived from ingestion time) |
 
 ## Fields
 All fields are required. Fields with a default are pre-populated but can be overridden.
@@ -38,6 +38,7 @@ Call `renderCanvas` with `form: "logger-table"`. This renders the built-in logge
 - Columns table showing implicit columns (event_id, event_timestamp, ds, hour) and an "Add column" button for user-defined columns
 
 The form state is managed automatically. Do NOT use specJson — just pass `{ form: "logger-table" }`.
+Do NOT add a separate Heading element — the form already includes its own title.
 
 ### Step 2: AI Review
 When the user asks to review, use `reviewDefinition` and check:

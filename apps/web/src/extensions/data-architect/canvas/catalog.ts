@@ -16,7 +16,7 @@ export const catalog = defineCatalog(schema, {
         title: z.string(),
         subtitle: z.string().optional(),
       }),
-      description: "Heading with title and optional subtitle.",
+      description: "Heading with title and optional subtitle. Do NOT use before composite forms (LoggerTableForm, EntityForm, etc.) — they render their own title.",
     },
 
     // --- Form fields ---
@@ -114,30 +114,31 @@ export const catalog = defineCatalog(schema, {
 
     // --- Composite forms ---
     // These render complete definition forms. All data lives in spec.state.
+    // IMPORTANT: Each form renders its own title. Never add a Heading before a composite form.
     LoggerTableForm: {
       props: z.object({}),
       description:
-        "Logger table definition form. State: name, description, retention, dedup_window, user_columns[].",
+        "Logger table definition form. Renders its own title — never pair with a Heading. State: name, description, retention, dedup_window, user_columns[].",
     },
     EntityForm: {
       props: z.object({}),
       description:
-        "Entity definition form. State: name, description, id_field, id_type.",
+        "Entity definition form. Renders its own title — never pair with a Heading. State: name, description, id_field, id_type.",
     },
     DimensionForm: {
       props: z.object({}),
       description:
-        "Dimension definition form. State: name, description, entity, source_table, source_column, data_type.",
+        "Dimension definition form. Renders its own title — never pair with a Heading. State: name, description, entity, source_table, source_column, data_type.",
     },
     MetricForm: {
       props: z.object({}),
       description:
-        "Metric definition form. State: name, description, calculations[].",
+        "Metric definition form. Renders its own title — never pair with a Heading. State: name, description, calculations[].",
     },
     LattikTableForm: {
       props: z.object({}),
       description:
-        "Lattik table definition form. State: name, description, primary_key[], column_families[], derived_columns[].",
+        "Lattik table definition form. Renders its own title — never pair with a Heading. State: name, description, primary_key[], column_families[], derived_columns[].",
     },
   },
   actions: {},
