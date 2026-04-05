@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { getExtension } from "@/extensions/registry";
+import { getCanvas } from "@/extensions/canvases";
+import type { Spec } from "@json-render/core";
 
 interface CanvasPanelProps {
   isOpen: boolean;
@@ -11,8 +12,8 @@ interface CanvasPanelProps {
   onWidthChange: (width: number) => void;
   onClose: () => void;
   activeExtensionId: string | null;
-  canvasState: unknown;
-  onCanvasStateChange?: (state: Record<string, unknown>) => void;
+  spec: Spec | null;
+  onStateChange?: (changes: Array<{ path: string; value: unknown }>) => void;
 }
 
 export function CanvasPanel({
@@ -21,8 +22,8 @@ export function CanvasPanel({
   onWidthChange,
   onClose,
   activeExtensionId,
-  canvasState,
-  onCanvasStateChange,
+  spec,
+  onStateChange,
 }: CanvasPanelProps) {
   const isDragging = useRef(false);
   const handlersRef = useRef<{
@@ -104,10 +105,9 @@ export function CanvasPanel({
         </div>
         <div className="flex flex-1 flex-col overflow-y-auto rounded-bl-xl">
           {activeExtensionId && (() => {
-            const ext = getExtension(activeExtensionId);
-            if (!ext) return null;
-            const Canvas = ext.canvas;
-            return <Canvas state={canvasState} onStateChange={onCanvasStateChange} />;
+            const Canvas = getCanvas(activeExtensionId);
+            if (!Canvas) return null;
+            return <Canvas spec={spec} onStateChange={onStateChange} />;
           })()}
         </div>
       </div>

@@ -15,9 +15,7 @@ All fields are required.
 ## Workflow
 
 ### Step 1: Render Draft on Canvas
-Use `renderCanvas` to show the definition form, pre-populating any fields the user has already provided in the conversation:
-1. TextInput fields for name and description
-2. Calculations list — each with an ExpressionEditor and source table selector
+Call `renderCanvas` with `form: "metric"`. This renders the built-in metric form with inline editable name/description and an interactive calculations list. Do NOT use specJson — just pass `{ form: "metric" }`.
 
 ### Step 2: AI Review
 When the user asks to review, use `reviewDefinition` and check:

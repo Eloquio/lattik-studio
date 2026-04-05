@@ -1,5 +1,6 @@
 import type { Agent } from "ai";
 import type { ComponentType } from "react";
+import type { TaskStackEntry } from "@/lib/types/task-stack";
 
 export type ExtensionId = string;
 
@@ -15,9 +16,15 @@ export interface ExtensionMeta {
 
 export interface AgentOptions {
   canvasState?: unknown;
+  taskStack?: TaskStackEntry[];
+  resumeContext?: string;
 }
 
 export interface ExtensionDefinition extends ExtensionMeta {
   agent: (options?: AgentOptions) => ExtensionAgent;
-  canvas: ComponentType<{ state: unknown; onStateChange?: (state: Record<string, unknown>) => void }>;
+  canvas?: ComponentType<{
+    spec: import("@json-render/core").Spec | null;
+    loading?: boolean;
+    onStateChange?: (changes: Array<{ path: string; value: unknown }>) => void;
+  }>;
 }

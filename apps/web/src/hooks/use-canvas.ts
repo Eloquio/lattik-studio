@@ -1,11 +1,13 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
+import type { Spec } from "@json-render/core";
+import { setByPath } from "@json-render/core";
 
 export function useCanvas() {
   const [isOpen, setIsOpen] = useState(false);
   const [width, setWidth] = useState(50);
-  const [canvasState, setCanvasState] = useState<unknown>(null);
+  const [canvasSpec, setCanvasSpec] = useState<Spec | null>(null);
 
   // Hydrate layout prefs from localStorage after mount
   useEffect(() => {
@@ -28,5 +30,30 @@ export function useCanvas() {
   const close = useCallback(() => setIsOpen(false), []);
   const toggle = useCallback(() => setIsOpen((prev: boolean) => !prev), []);
 
-  return { isOpen, width, setWidth, open, close, toggle, canvasState, setCanvasState };
+  // Merge state changes from canvas interactions into the spec
+  const mergeStateChanges = useCallback(
+    (changes: Array<{ path: string; value: unknown }>) => {
+      setCanvasSpec((prev) => {
+        if (!prev) return prev;
+        const nextState = { ...(prev.state ?? {}) };
+        for (const { path, value } of changes) {
+          setByPath(nextState, path, value);
+        }
+        return { ...prev, state: nextState };
+      });
+    },
+    []
+  );
+
+  return {
+    isOpen,
+    width,
+    setWidth,
+    open,
+    close,
+    toggle,
+    canvasSpec,
+    setCanvasSpec,
+    mergeStateChanges,
+  };
 }

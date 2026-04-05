@@ -6,8 +6,10 @@ import { DefaultChatTransport } from "ai";
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Bot, Pencil, Plus, Trash2 } from "lucide-react";
 import Markdown from "react-markdown";
+import { buildSpecFromParts } from "@json-render/react";
 import { ToolResult } from "./tool-result";
 import { saveConversation, deleteConversation } from "@/lib/actions/conversations";
+import type { TaskStackEntry } from "@/lib/types/task-stack";
 
 interface ChatPanelProps {
   chatId: string;
@@ -19,6 +21,8 @@ interface ChatPanelProps {
   onExtensionChange: (id: string | null) => void;
   onConversationChange?: () => void;
   onNewChat?: () => void;
+  taskStack: TaskStackEntry[];
+  onTaskStackChange: (stack: TaskStackEntry[]) => void;
 }
 
 export function ChatPanel({
@@ -31,6 +35,8 @@ export function ChatPanel({
   onExtensionChange,
   onConversationChange,
   onNewChat,
+  taskStack,
+  onTaskStackChange,
 }: ChatPanelProps) {
   const extensionIdRef = useRef(activeExtensionId);
   extensionIdRef.current = activeExtensionId;
@@ -38,17 +44,24 @@ export function ChatPanel({
   const canvasStateRef = useRef(canvasState);
   canvasStateRef.current = canvasState;
 
+  const taskStackRef = useRef(taskStack);
+  taskStackRef.current = taskStack;
+
+  const resumeContextRef = useRef<string | undefined>(undefined);
+
   const [transport] = useState(
     () =>
       new DefaultChatTransport({
         body: () => ({
           extensionId: extensionIdRef.current,
           canvasState: canvasStateRef.current,
+          taskStack: taskStackRef.current,
+          resumeContext: resumeContextRef.current,
         }),
       })
   );
 
-  const { messages, sendMessage, status } = useChat({
+  const { messages, sendMessage, status, error } = useChat({
     id: chatId,
     messages: initialMessages,
     transport,
@@ -90,7 +103,14 @@ export function ChatPanel({
             .slice(0, 100) || "New Chat"
         : "New Chat";
 
-      saveConversation({ id: chatId, title, messages, canvasState: canvasStateRef.current });
+      saveConversation({
+        id: chatId,
+        title,
+        messages,
+        canvasState: canvasStateRef.current,
+        taskStack: taskStackRef.current,
+        activeExtensionId: extensionIdRef.current,
+      });
       onConversationChange?.();
     }
     wasLoadingRef.current = isLoading;
@@ -99,64 +119,144 @@ export function ChatPanel({
   // Handle handoff: detect handoff tool, switch agent, wait for stream to finish, then continue
   const handoffProcessedRef = useRef<Set<string>>(new Set());
   const pendingHandoffRef = useRef<boolean>(false);
+  const [handoffTrigger, setHandoffTrigger] = useState(0);
   const CONTINUE_MARKER = "[continue]";
 
-  // Detect handoff and mark pending
+  // Detect handoff and mark pending — handles forward (assistant → specialist),
+  // pause (specialist → push stack → assistant), and complete (specialist → pop stack)
   useEffect(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
       if (msg.role !== "assistant") continue;
       for (const part of msg.parts) {
         if (
-          part.type === "tool-handoff" &&
+          (part.type === "tool-handoff" || part.type === "tool-handback") &&
           "state" in part &&
           "output" in part &&
           part.state === "output-available" &&
           !handoffProcessedRef.current.has(msg.id)
         ) {
-          const toolOutput = part.output as { handedOffTo: string };
-          if (toolOutput.handedOffTo && toolOutput.handedOffTo !== activeExtensionId) {
-            handoffProcessedRef.current.add(msg.id);
-            pendingHandoffRef.current = true;
-            extensionIdRef.current = toolOutput.handedOffTo;
-            onExtensionChange(toolOutput.handedOffTo);
+          const toolOutput = part.output as Record<string, unknown>;
+          handoffProcessedRef.current.add(msg.id);
+
+          // CASE 1: Forward handoff (assistant → specialist)
+          if ("handedOffTo" in toolOutput && toolOutput.handedOffTo) {
+            const targetAgent = toolOutput.handedOffTo as string;
+            if (targetAgent !== activeExtensionId) {
+              // Check if this is a resume (target matches the paused specialist on the stack)
+              const stack = taskStackRef.current;
+              if (stack.length > 0 && stack[stack.length - 1].extensionId === targetAgent) {
+                // Stack pop: restore canvas state from the paused entry
+                const entry = stack[stack.length - 1];
+                const newStack = stack.slice(0, -1);
+                onTaskStackChange(newStack);
+                taskStackRef.current = newStack;
+
+                onCanvasStateChange(entry.canvasState);
+                canvasStateRef.current = entry.canvasState;
+
+                const reason = (toolOutput.reason as string) || "a side request";
+                resumeContextRef.current =
+                  `User took a detour to work on: "${reason}". Resuming your previous task. Pick up where you left off.`;
+              }
+
+              pendingHandoffRef.current = true;
+              setHandoffTrigger((n) => n + 1);
+              extensionIdRef.current = targetAgent;
+              onExtensionChange(targetAgent);
+            }
+            return;
           }
-          return;
+
+          // CASE 2: Specialist handoff (pause or complete)
+          if ("handoffType" in toolOutput) {
+            const handoffType = toolOutput.handoffType as "pause" | "complete";
+            const fromAgent = toolOutput.fromAgent as string;
+            const reason = toolOutput.reason as string;
+
+            if (handoffType === "pause") {
+              // Push current state onto stack, return to assistant
+              const entry: TaskStackEntry = {
+                extensionId: fromAgent,
+                canvasState: canvasStateRef.current,
+                reason,
+                pausedAt: new Date().toISOString(),
+              };
+              const newStack = [...taskStackRef.current, entry];
+              onTaskStackChange(newStack);
+              taskStackRef.current = newStack;
+
+              pendingHandoffRef.current = true;
+              setHandoffTrigger((n) => n + 1);
+              extensionIdRef.current = null;
+              onExtensionChange(null);
+              resumeContextRef.current = undefined;
+              return;
+            }
+
+            if (handoffType === "complete") {
+              // Pop stack if non-empty, otherwise return to assistant
+              if (taskStackRef.current.length > 0) {
+                const entry = taskStackRef.current[taskStackRef.current.length - 1];
+                const newStack = taskStackRef.current.slice(0, -1);
+                onTaskStackChange(newStack);
+                taskStackRef.current = newStack;
+
+                // Restore canvas state from the paused task
+                onCanvasStateChange(entry.canvasState);
+                canvasStateRef.current = entry.canvasState;
+
+                // Inject context for the resumed agent
+                resumeContextRef.current =
+                  `User took a detour to work on: "${reason}". Resuming your previous task. Pick up where you left off.`;
+
+                pendingHandoffRef.current = true;
+              setHandoffTrigger((n) => n + 1);
+                extensionIdRef.current = entry.extensionId;
+                onExtensionChange(entry.extensionId);
+              } else {
+                // Stack empty — return to assistant
+                pendingHandoffRef.current = true;
+              setHandoffTrigger((n) => n + 1);
+                extensionIdRef.current = null;
+                onExtensionChange(null);
+                resumeContextRef.current = undefined;
+              }
+              return;
+            }
+          }
         }
       }
     }
-  }, [messages, activeExtensionId, onExtensionChange]);
+  }, [messages, activeExtensionId, onExtensionChange, onCanvasStateChange, onTaskStackChange]);
 
-  // Once stream finishes, send hidden continue message to trigger the new agent
+  // Once stream finishes, send hidden continue message to trigger the new agent.
+  // handoffTrigger ensures this re-runs when a handoff is detected, even if
+  // status was already "ready" and messages.length didn't change.
   useEffect(() => {
     if (status === "ready" && pendingHandoffRef.current) {
       pendingHandoffRef.current = false;
-      requestAnimationFrame(() => sendMessage({ text: CONTINUE_MARKER }));
+      sendMessage({ text: CONTINUE_MARKER });
+      resumeContextRef.current = undefined;
     }
-  }, [status, sendMessage]);
+  }, [status, sendMessage, messages.length, handoffTrigger]);
 
-  // Extract canvas state from tool results (updatePipeline or renderCanvas)
+  // Extract canvas spec from json-render data parts in assistant messages
   useEffect(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
       if (msg.role !== "assistant") continue;
-      for (const part of msg.parts) {
-        if (
-          "state" in part &&
-          part.state === "output-available" &&
-          "output" in part &&
-          (part.type === "tool-updatePipeline" || part.type === "tool-renderCanvas")
-        ) {
-          onCanvasStateChange(part.output);
-          return;
-        }
+      const spec = buildSpecFromParts(msg.parts);
+      if (spec) {
+        onCanvasStateChange(spec);
+        return;
       }
     }
   }, [messages, onCanvasStateChange]);
 
   const handleSubmit = () => {
     if (!input.trim() || isLoading) return;
-    sendMessage({ text: input });
+    sendMessage({ text: input.trim() });
     setInput("");
   };
 
@@ -268,6 +368,11 @@ export function ChatPanel({
               </div>
               );
             })}
+            {error && (
+              <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-2 text-sm text-red-300">
+                {error.message || "Something went wrong. Please try again."}
+              </div>
+            )}
             <div ref={messagesEndRef} />
           </div>
         )}

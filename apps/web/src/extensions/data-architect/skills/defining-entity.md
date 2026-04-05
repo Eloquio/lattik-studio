@@ -14,7 +14,7 @@ All fields are required.
 ## Workflow
 
 ### Step 1: Render Draft on Canvas
-Use `renderCanvas` to show the definition form, pre-populating any fields the user has already provided in the conversation. Include TextInput fields for name, description, id_field, and a Select for id_type.
+Call `renderCanvas` with `form: "entity"`. This renders the built-in entity form with inline editable name/description, ID field, and ID type selector. Do NOT use specJson — just pass `{ form: "entity" }`.
 
 ### Step 2: AI Review
 When the user asks to review, use `reviewDefinition` and check:

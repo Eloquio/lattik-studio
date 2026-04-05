@@ -32,10 +32,12 @@ All fields are required. Fields with a default are pre-populated but can be over
 ## Workflow
 
 ### Step 1: Render Draft on Canvas
-Use `renderCanvas` to show the definition form, pre-populating any fields the user has already provided in the conversation:
-1. Table metadata form — TextInput fields for name, description, retention (`30d`), and dedup_window (`1h`)
-2. MockedTablePreview showing implicit and user-defined columns with sample data
-3. ColumnList for user-defined columns
+Call `renderCanvas` with `form: "logger-table"`. This renders the built-in logger table form with:
+- Inline editable table name and description
+- Retention and dedup window fields (pre-filled with defaults)
+- Columns table showing implicit columns (event_id, event_timestamp, ds, hour) and an "Add column" button for user-defined columns
+
+The form state is managed automatically. Do NOT use specJson — just pass `{ form: "logger-table" }`.
 
 ### Step 2: AI Review
 When the user asks to review, use `reviewDefinition` and check:

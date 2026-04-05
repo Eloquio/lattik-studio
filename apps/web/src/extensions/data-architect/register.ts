@@ -1,6 +1,5 @@
 import { registerExtension } from "../registry";
-import { dataArchitectAgent } from "../agents/data-architect";
-import { DataArchitectCanvas } from "./canvas/data-architect-canvas";
+import { dataArchitectAgent } from "./agent";
 
 registerExtension({
   id: "data-architect",
@@ -8,5 +7,4 @@ registerExtension({
   description: "Design pipeline architectures: Logger Tables, Lattik Tables, and Canonical Dimensions",
   icon: "blocks",
   agent: dataArchitectAgent,
-  canvas: DataArchitectCanvas,
 });
