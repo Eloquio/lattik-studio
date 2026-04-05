@@ -63,6 +63,8 @@ export const conversations = pgTable(
     title: text("title").notNull(),
     messages: jsonb("messages").notNull().$type<unknown[]>().default([]),
     canvasState: jsonb("canvasState").$type<unknown>(),
+    taskStack: jsonb("taskStack").$type<unknown[]>(),
+    activeExtensionId: text("activeExtensionId"),
     createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updatedAt", { mode: "date" }).notNull().defaultNow(),
   },

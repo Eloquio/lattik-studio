@@ -1,9 +1,7 @@
-import type { ExtensionAgent, ExtensionId } from "../types";
+import type { ExtensionAgent, ExtensionId, AgentOptions } from "../types";
 import { getExtension } from "../registry";
 
-export interface AgentOptions {
-  canvasState?: unknown;
-}
+export type { AgentOptions };
 
 export function getExtensionAgent(id: ExtensionId, options?: AgentOptions): ExtensionAgent | undefined {
   const ext = getExtension(id);

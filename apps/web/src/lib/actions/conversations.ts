@@ -10,6 +10,8 @@ export async function saveConversation(data: {
   title: string;
   messages: unknown[];
   canvasState?: unknown;
+  taskStack?: unknown[];
+  activeExtensionId?: string | null;
 }) {
   const user = await requireUser();
   const db = getDb();
@@ -33,6 +35,8 @@ export async function saveConversation(data: {
         title: data.title,
         messages: messagesJson,
         canvasState: data.canvasState ?? undefined,
+        taskStack: data.taskStack ?? undefined,
+        activeExtensionId: data.activeExtensionId ?? null,
         updatedAt: new Date(),
       })
       .where(eq(schema.conversations.id, data.id));
@@ -43,6 +47,8 @@ export async function saveConversation(data: {
       title: data.title,
       messages: messagesJson,
       canvasState: data.canvasState ?? undefined,
+      taskStack: data.taskStack ?? undefined,
+      activeExtensionId: data.activeExtensionId ?? null,
     });
   }
 }
