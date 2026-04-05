@@ -34,6 +34,7 @@ apps/web/              Next.js app
   src/hooks/           React hooks
   src/lib/             Server actions and utilities
   src/proxy.ts         Auth middleware (protects all routes except /sign-in, /api/auth, /api/webhooks)
+docs/                  Architecture docs (agent-handoff, canvas-rendering, progressive-disclosure)
 k8s/                   Kubernetes manifests (kind cluster, PostgreSQL, Gitea)
 packages/              Shared packages (future)
 ```
