@@ -4,70 +4,43 @@
 An Entity is a business concept that uniquely identifies something in the system — like a user, a game, or a session. Entities serve as join keys across Logger Tables and Lattik Tables.
 
 ## Fields
-- **name** (string, required) — snake_case identifier, e.g. `user`, `game`, `session`
-- **description** (string, required) — what this entity represents in the business domain
-- **id_field** (string, required) — the column name used to identify this entity, e.g. `user_id`, `game_id`
-- **id_type** (enum, required) — data type of the ID field: `int64` or `string`
+All fields are required.
 
-## Workflow (7 steps)
+- **name** (string) — snake_case identifier, e.g. `user`, `game`, `session`
+- **description** (string) — what this entity represents in the business domain (10-500 chars)
+- **id_field** (string) — the column name used to identify this entity, must end with `_id`, e.g. `user_id`
+- **id_type** (enum) — data type of the ID field: `int64` or `string`
 
-### Step 1 of 7: Gather Requirements
-> Status: draft
+## Workflow
 
-Ask the user what business concept they want to define. Understand:
-- What does this entity represent?
-- How is it identified (what ID field)?
-- What is the ID data type?
+### Step 1: Render Draft on Canvas
+Use `renderCanvas` to show the definition form, pre-populating any fields the user has already provided in the conversation. Include TextInput fields for name, description, id_field, and a Select for id_type.
 
-### Step 2 of 7: Render Draft on Canvas
-> Status: draft
-
-Use `renderCanvas` to show the entity definition form on the canvas with the fields populated from the conversation. Include a StatusBadge at the top showing "draft" status.
-
-### Step 3 of 7: Collaborate on Definition
-> Status: draft
-
-The user may edit fields directly on the canvas or ask for changes via chat. Use `readCanvasState` to check their edits. Update the canvas as needed.
-
-### Step 4 of 7: AI Review
-> Status: reviewing
-
-When the user asks to review, use `reviewDefinition` and analyze the definition. Provide suggestions:
+### Step 2: AI Review
+When the user asks to review, use `reviewDefinition` and check:
 - Is the name clear and follows naming conventions?
 - Is the description meaningful?
-- Is the ID type appropriate for the use case?
-Render suggestions as ReviewCard components on the canvas.
+- Does the id_field end with `_id`?
+- Is the id_type appropriate for the use case?
 
-### Step 5 of 7: Accept/Deny Suggestions
-> Status: reviewing
+Render suggestions as ReviewCard components.
 
-Wait for the user to accept or deny each suggestion via the canvas. Use `readCanvasState` to check decisions. Apply accepted changes.
+### Step 3: Accept/Deny Suggestions
+Wait for user decisions. Use `readCanvasState` to check. Apply accepted changes.
 
-### Step 6 of 7: Static Checks
-> Status: checks-passed or checks-failed
+### Step 4: Static Checks
+Run `staticCheck` with the current definition. If checks fail, show errors and return to the canvas for fixes.
 
-Run `staticCheck` to validate:
-- Name is snake_case, 1-60 characters, no reserved words
-- Description is 10-500 characters
-- ID field name ends with `_id`
-- ID type is `int64` or `string`
+### Step 5: Generate and Submit
+Use `updateDefinition` to save, then `submitPR` to create a PR.
 
-### Step 7 of 7: Generate and Submit
-> Status: pr-submitted
+## Updating an Existing Entity
+Use `listDefinitions` to find existing entities and `getDefinition` to load one. Then follow steps 2-5 above.
 
-Use `updateDefinition` to save the final draft, then `submitPR` to generate YAML and create a PR.
+**Immutable after merge:** name, id_type.
 
 ## Validation Rules
-- Entity name must be snake_case, 1-60 chars
-- Entity name must not conflict with existing entities
-- Description required, 10-500 chars
-- ID field must end with `_id`
-- ID type must be `int64` or `string`
-
-## Example
-```yaml
-name: user
-description: A registered user of the platform
-id_field: user_id
-id_type: int64
-```
+- Name: snake_case, 1-60 chars, no reserved words
+- Description: 10-500 chars
+- ID field: must end with `_id`, snake_case
+- ID type: `int64` or `string`
