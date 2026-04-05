@@ -23,7 +23,6 @@ export const loggerColumnSchema = z.object({
   name: z.string(),
   type: columnTypeSchema,
   entity: z.string().optional(),
-  nullable: z.boolean().optional(),
   tags: z.array(z.string()).optional(),
   description: z.string().optional(),
 });
@@ -35,11 +34,10 @@ export const primaryKeySchema = z.object({
 
 export const loggerTableSchema = z.object({
   name: z.string(),
-  event_timestamp: z.string(),
-  retention: z.string().optional(),
-  dedup_window: z.string().optional(),
+  description: z.string(),
+  retention: z.string().optional().default("30d"),
+  dedup_window: z.string().optional().default("1h"),
   columns: z.array(loggerColumnSchema),
-  primary_key: z.array(primaryKeySchema),
 });
 
 export const familyColumnSchema = z.object({
@@ -66,6 +64,7 @@ export const derivedColumnSchema = z.object({
 
 export const lattikTableSchema = z.object({
   name: z.string(),
+  description: z.string(),
   primary_key: z.array(primaryKeySchema),
   column_families: z.array(columnFamilySchema),
   derived_columns: z.array(derivedColumnSchema).optional(),

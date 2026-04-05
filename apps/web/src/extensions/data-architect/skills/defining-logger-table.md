@@ -1,110 +1,70 @@
 # Defining a New Logger Table
 
 ## Overview
-A Logger Table is a raw, append-only event table that captures events as they happen. Each row represents a single event occurrence with a timestamp. Logger Tables are the primary data ingestion point in the Lattik pipeline.
+A Logger Table is a raw, append-only event table that captures events as they happen. Each row represents a single event occurrence. Logger Tables are the primary data ingestion point — downstream Lattik Tables aggregate from them via Column Families.
+
+Logger Tables have no primary key. Deduplication is handled within the dedup window by `event_id`. All logger tables are partitioned by `ds` and `hour`.
+
+## Implicit Columns
+Every logger table automatically includes these columns — they cannot be redefined:
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| `event_id` | string | Unique event identifier for deduplication |
+| `event_timestamp` | timestamp | When the event occurred |
+| `ds` | date | Date partition key (derived from ingestion time to handle late-arriving data) |
+| `hour` | int32 | Hour partition key (derived from ingestion time) |
 
 ## Fields
-- **name** (string, required) — snake_case table name, e.g. `user_login_events`
-- **description** (string, required) — what events this table captures
-- **event_timestamp** (string, required) — the column name used as the event timestamp
-- **retention** (string, optional) — how long to keep data, e.g. `90d`, `1y`
-- **dedup_window** (string, optional) — deduplication window, e.g. `1h`, `24h`
-- **primary_key** (array, required) — list of `{ column, entity }` pairs defining the composite key
-- **columns** (array, required) — column definitions, each with:
-  - **name** (string, required) — column name
-  - **type** (enum, required) — `string`, `int32`, `int64`, `float`, `double`, `boolean`, `timestamp`, `date`, `json`
-  - **entity** (string, optional) — entity this column references (for join keys)
-  - **nullable** (boolean, optional) — whether the column can be null
+All fields are required. Fields with a default are pre-populated but can be overridden.
+
+- **name** (string) — `schema.table_name` format, e.g. `ingest.click_events`
+- **description** (string) — what events this table captures (10-500 chars)
+- **retention** (string, default: `30d`) — how long to keep data in days, e.g. `30d`, `90d`
+- **dedup_window** (string, default: `1h`) — deduplication window in hours, e.g. `1h`, `24h`
+- **columns** (array) — user-defined columns (the event payload). All user-defined columns are nullable. Each with:
+  - **name** (string) — column name (must not collide with implicit columns)
+  - **type** (enum) — `string`, `int32`, `int64`, `float`, `double`, `boolean`, `timestamp`, `date`, `json`
+  - **entity** (string, optional) — entity this column references, used as join keys for downstream Lattik Tables
+  - **tags** (array of strings, optional) — freeform tags, e.g. `["pii", "high-cardinality"]`
   - **description** (string, optional) — column description
 
-## Workflow (7 steps)
+## Workflow
 
-### Step 1 of 7: Gather Requirements
-> Status: draft
+### Step 1: Render Draft on Canvas
+Use `renderCanvas` to show the definition form, pre-populating any fields the user has already provided in the conversation:
+1. Table metadata form — TextInput fields for name, description, retention (`30d`), and dedup_window (`1h`)
+2. MockedTablePreview showing implicit and user-defined columns with sample data
+3. ColumnList for user-defined columns
 
-Ask the user:
-- What events does this table capture?
-- What are the key entities involved?
-- What columns are needed?
-- What is the retention and dedup strategy?
-
-### Step 2 of 7: Render Draft on Canvas
-> Status: draft
-
-Use `renderCanvas` to show with a StatusBadge:
-1. The table metadata form (name, description, retention, dedup window)
-2. A MockedTablePreview with auto-generated sample data
-3. The ColumnList for column definitions
-
-### Step 3 of 7: Collaborate on Definition
-> Status: draft
-
-The user may edit the form, add/remove columns, or adjust settings. Use `readCanvasState` to check edits. Update the canvas as changes are made.
-
-### Step 4 of 7: AI Review
-> Status: reviewing
-
+### Step 2: AI Review
 When the user asks to review, use `reviewDefinition` and check:
-- Are all primary key columns mapped to entities?
-- Is the event_timestamp column present in the columns list?
+- Is the name in `schema.table_name` format?
+- Do any columns collide with implicit column names?
 - Are column types appropriate for their data?
 - Are descriptions provided for all columns?
-- Is the retention policy reasonable?
+- Are entity references consistent with existing entities?
+
 Render suggestions as ReviewCard components.
 
-### Step 5 of 7: Accept/Deny Suggestions
-> Status: reviewing
-
+### Step 3: Accept/Deny Suggestions
 Wait for user decisions. Use `readCanvasState` to check. Apply accepted changes.
 
-### Step 6 of 7: Static Checks
-> Status: checks-passed or checks-failed
+### Step 4: Static Checks
+Run `staticCheck` with the current definition. If checks fail, show errors and return to the canvas for fixes.
 
-Run `staticCheck` to validate table name, event_timestamp, primary keys, column names, types, and referential integrity.
-
-### Step 7 of 7: Generate and Submit
-> Status: pr-submitted
-
+### Step 5: Generate and Submit
 Use `updateDefinition` to save, then `submitPR` to create a PR.
 
-## Validation Rules
-- Table name must be snake_case, 1-60 chars
-- Must have at least one primary key column
-- event_timestamp column must exist with type `timestamp`
-- All PK columns must reference existing entities
-- Column names must be unique and snake_case
-- Retention format: number + unit (d, h, m, y)
-- Dedup window format: number + unit (d, h, m, s)
+## Updating an Existing Logger Table
+Use `listDefinitions` to find existing tables and `getDefinition` to load one. Then follow steps 2-5 above.
 
-## Example
-```yaml
-name: user_login_events
-description: Captures every user login event across all platforms
-event_timestamp: event_ts
-retention: 90d
-dedup_window: 1h
-primary_key:
-  - column: user_id
-    entity: user
-  - column: session_id
-    entity: session
-columns:
-  - name: user_id
-    type: int64
-    entity: user
-    description: The user who logged in
-  - name: session_id
-    type: string
-    entity: session
-    description: The session identifier
-  - name: event_ts
-    type: timestamp
-    description: When the login occurred
-  - name: platform
-    type: string
-    description: Platform used (web, ios, android)
-  - name: ip_address
-    type: string
-    nullable: true
-    description: Client IP address
-```
+**Immutable after merge:** name.
+
+## Validation Rules
+- Table name: `schema.table_name` format, max 60 chars
+- Description: 10-500 chars
+- Column names: unique, snake_case, no collisions with implicit columns
+- Entity references: must point to existing entities
+- Retention: `<number>d`, e.g. `30d`
+- Dedup window: `<number>h`, e.g. `1h`

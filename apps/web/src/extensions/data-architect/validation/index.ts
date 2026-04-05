@@ -1,5 +1,5 @@
 import type { ValidationError } from "./naming";
-import { validateName, validateDescription, validateRetention, validateDedupWindow } from "./naming";
+import { validateName, validateQualifiedName, validateDescription, validateRetention, validateDedupWindow } from "./naming";
 import { validateExpression } from "./expressions";
 import {
   loadMergedEntities,
@@ -78,30 +78,25 @@ async function validateDimension(spec: Dimension): Promise<ValidationError[]> {
 
 async function validateLoggerTable(spec: LoggerTable): Promise<ValidationError[]> {
   const errors: ValidationError[] = [];
-  errors.push(...validateName(spec.name, "name"));
+  errors.push(...validateQualifiedName(spec.name, "name"));
+  errors.push(...validateDescription(spec.description, "description"));
   errors.push(...validateRetention(spec.retention, "retention"));
   errors.push(...validateDedupWindow(spec.dedup_window, "dedup_window"));
 
-  // event_timestamp must exist
-  if (!spec.columns.some((c) => c.name === spec.event_timestamp)) {
-    errors.push({ field: "event_timestamp", message: `event_timestamp column '${spec.event_timestamp}' not found in columns` });
-  } else {
-    const tsCol = spec.columns.find((c) => c.name === spec.event_timestamp);
-    if (tsCol && tsCol.type !== "timestamp") {
-      errors.push({ field: "event_timestamp", message: "event_timestamp column must have type 'timestamp'" });
+  // User-defined columns must not collide with implicit columns
+  const IMPLICIT_COLUMNS = new Set(["event_id", "event_timestamp", "ds", "hour"]);
+  for (const col of spec.columns) {
+    if (IMPLICIT_COLUMNS.has(col.name)) {
+      errors.push({ field: `column.${col.name}`, message: `'${col.name}' is an implicit column and cannot be redefined` });
     }
   }
 
-  // Primary key validation
-  if (!spec.primary_key || spec.primary_key.length === 0) {
-    errors.push({ field: "primary_key", message: "At least one primary key is required" });
-  }
+  // Entity references must exist
   const entities = await loadMergedEntities();
-  for (const pk of spec.primary_key) {
-    if (!spec.columns.some((c) => c.name === pk.column)) {
-      errors.push({ field: "primary_key", message: `PK column '${pk.column}' not found in columns` });
+  for (const col of spec.columns) {
+    if (col.entity) {
+      errors.push(...validateEntityExists(col.entity, entities, `column.${col.name}.entity`));
     }
-    errors.push(...validateEntityExists(pk.entity, entities, `primary_key.${pk.column}.entity`));
   }
 
   // Column names unique and valid
