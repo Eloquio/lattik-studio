@@ -3,7 +3,13 @@
 import type { Spec } from "@json-render/core";
 import { Renderer, JSONUIProvider } from "@json-render/react";
 import { registry } from "./registry";
-import { PipelineEmptyState } from "./pipeline-empty-state";
+
+const EMPTY_SPEC: Spec = {
+  root: "empty",
+  elements: {
+    empty: { type: "EmptyState", props: {} },
+  },
+};
 
 interface DataArchitectCanvasProps {
   spec: Spec | null;
@@ -12,16 +18,16 @@ interface DataArchitectCanvasProps {
 }
 
 export function DataArchitectCanvas({ spec, loading, onStateChange }: DataArchitectCanvasProps) {
-  if (!spec) return <PipelineEmptyState />;
+  const activeSpec = spec ?? EMPTY_SPEC;
 
   return (
     <JSONUIProvider
       registry={registry}
-      initialState={spec.state ?? {}}
+      initialState={activeSpec.state ?? {}}
       onStateChange={onStateChange}
     >
       <div className="flex flex-1 flex-col gap-4 p-5">
-        <Renderer spec={spec} registry={registry} loading={loading} />
+        <Renderer spec={activeSpec} registry={registry} loading={loading} />
       </div>
     </JSONUIProvider>
   );
