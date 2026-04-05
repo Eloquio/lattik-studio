@@ -1,7 +1,10 @@
 "use client";
 
+import { useRef, useState } from "react";
 import { defineRegistry, useStateStore } from "@json-render/react";
 import { Check, X, Plus, Trash2, Lock, Blocks, Database, Table2 } from "lucide-react";
+import type { ScalarTypeKind } from "@eloquio/lattik-expression";
+import { fromColumnType } from "@eloquio/lattik-expression";
 import { catalog } from "./catalog";
 
 // ---- State helper hook ----
@@ -14,35 +17,107 @@ function useField(field: string) {
 
 // ---- Shared styles ----
 const inputCls =
-  "rounded-md border border-amber-200/50 bg-white/90 px-2.5 py-1.5 text-xs text-amber-900 placeholder:text-amber-400/60 focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400/30";
+  "rounded-md border border-stone-200 bg-white px-2.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-400 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500/30";
 
 // ---- Column helpers ----
-interface UserColumn { _key: string; name: string; type: string }
-const TYPE_OPTIONS = ["string", "int32", "int64", "float", "double", "boolean", "timestamp", "date", "json"];
+interface UserColumn { _key: string; name: string; type: string; description?: string; dimension?: string; entity?: string; pii?: boolean }
+const SNAKE_CASE_RE = /^[a-z][a-z0-9]*(_[a-z0-9]+)*$/;
+const TYPE_OPTIONS: ScalarTypeKind[] = ["string", "int32", "int64", "float", "double", "boolean", "timestamp", "date", "json"];
+const TYPE_DISPLAY: Record<string, string> = Object.fromEntries(TYPE_OPTIONS.map((t) => [t, t.toUpperCase()]));
+
+function TypeCombobox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [input, setInput] = useState(value);
+  const [activeIdx, setActiveIdx] = useState(-1);
+  const ref = useRef<HTMLDivElement>(null);
+  const filtered = TYPE_OPTIONS.filter((t) => t.includes(input.toLowerCase()) || t.toUpperCase().includes(input.toUpperCase()));
+  const resolved = fromColumnType(input);
+  const isValid = resolved !== "unknown" || input === "";
+
+  const select = (t: string) => { setInput(t); onChange(t); setOpen(false); setActiveIdx(-1); };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!open || filtered.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIdx((prev) => (prev + 1) % filtered.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIdx((prev) => (prev <= 0 ? filtered.length - 1 : prev - 1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (activeIdx >= 0 && activeIdx < filtered.length) {
+        select(filtered[activeIdx]);
+      } else if (filtered.length === 1) {
+        select(filtered[0]);
+      }
+    }
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      <input type="text" value={input.toUpperCase()}
+        onChange={(e) => { const v = e.target.value.toLowerCase(); setInput(v); onChange(v); setOpen(true); setActiveIdx(-1); }}
+        onFocus={() => { setOpen(true); setActiveIdx(-1); }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onKeyDown={handleKeyDown}
+        placeholder="What's the data type of this column?"
+        className={`w-full bg-transparent text-xs text-stone-600 placeholder:text-stone-300 placeholder:normal-case focus:outline-none ${input ? "uppercase" : ""} ${!isValid && input ? "text-red-500" : ""}`} />
+      {open && filtered.length > 0 && (
+        <div className="absolute left-0 right-0 top-full z-10 mt-1 rounded-md border border-stone-200 bg-white py-1 shadow-lg max-h-36 overflow-y-auto">
+          {filtered.map((t, i) => (
+            <button key={t} onMouseDown={(e) => { e.preventDefault(); select(t); }}
+              className={`block w-full px-2.5 py-1 text-left text-xs uppercase transition-colors ${i === activeIdx ? "bg-stone-100 text-amber-700 font-medium" : t === input ? "text-amber-700 font-medium" : "text-stone-700 hover:bg-stone-50"}`}>
+              {t}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 let _nextKey = 0;
 function genKey(prefix = "k") { return `${prefix}_${++_nextKey}_${Date.now()}`; }
 
-const IMPLICIT_TOP = [{ name: "event_id", type: "string" }, { name: "event_timestamp", type: "timestamp" }];
-const IMPLICIT_BOTTOM = [{ name: "ds", type: "date" }, { name: "hour", type: "int32" }];
+const IMPLICIT_TOP = [
+  { name: "event_id", type: "string", description: "Unique event identifier for deduplication" },
+  { name: "event_timestamp", type: "timestamp", description: "When the event occurred" },
+];
+const IMPLICIT_BOTTOM = [
+  { name: "ds", type: "string", description: "Date partition key" },
+  { name: "hour", type: "string", description: "Hour partition key" },
+];
 
-function ImplicitRow({ name, type }: { name: string; type: string }) {
+function ImplicitRow({ name, type, description, highlighted, onHover, onLeave }: { name: string; type: string; description?: string; highlighted?: boolean; onHover?: () => void; onLeave?: () => void }) {
   return (
-    <tr className="border-b border-amber-100/30">
-      <td className="px-2.5 py-1.5 font-mono text-xs text-amber-900/40">{name}</td>
-      <td className="px-2.5 py-1.5 text-xs text-amber-500/40">{type}</td>
-      <td className="px-2.5 py-1.5 w-8"><Lock className="h-3 w-3 text-amber-300/40" /></td>
+    <tr className={`border-b border-stone-100 transition-colors ${highlighted ? "bg-amber-50" : "bg-stone-50/50"}`}
+      onMouseEnter={onHover} onMouseLeave={onLeave}>
+      <td className={`px-2.5 py-1.5 font-mono text-xs ${highlighted ? "text-amber-700" : "text-stone-400"}`}>{name}</td>
+      <td className={`px-2.5 py-1.5 text-xs uppercase ${highlighted ? "text-amber-600" : "text-stone-400"}`}>{type}</td>
+      <td className="px-2.5 py-1.5 text-[10px] text-stone-400/70">{description}</td>
+      <td className="px-2.5 py-1.5 w-8" title="System column — cannot be modified">
+        <Lock className="h-3 w-3 text-stone-300" />
+      </td>
     </tr>
   );
 }
 
 // ---- Mock data generator ----
-function mockValue(type: string, i: number): string {
+const MOCK_TIMESTAMPS = ["2026-04-05T10:23:01", "2026-04-04T14:07:45", "2026-04-03T08:52:19"];
+const MOCK_FLOATS = ["42.17", "8.93", "71.56"];
+const MOCK_DS = ["2026-04-05", "2026-04-05", "2026-04-05"];
+const MOCK_HOURS = ["10", "10", "10"];
+
+function mockValue(type: string, i: number, colName?: string): string {
+  if (colName === "ds") return MOCK_DS[i % MOCK_DS.length];
+  if (colName === "hour") return MOCK_HOURS[i % MOCK_HOURS.length];
   switch (type) {
     case "int32": case "int64": return String(1000 + i * 7);
-    case "float": case "double": return (Math.random() * 100).toFixed(2);
+    case "float": case "double": return MOCK_FLOATS[i % MOCK_FLOATS.length];
     case "boolean": return i % 2 === 0 ? "true" : "false";
-    case "timestamp": return new Date(Date.now() - i * 86400000).toISOString().slice(0, 19);
-    case "date": return new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+    case "timestamp": return MOCK_TIMESTAMPS[i % MOCK_TIMESTAMPS.length];
+    case "date": return MOCK_DS[i % MOCK_DS.length];
     case "json": return "{}";
     default: return `value_${i + 1}`;
   }
@@ -68,7 +143,7 @@ export const { registry, handlers } = defineRegistry(catalog, {
     Section: ({ props, children }) => (
       <div className="flex flex-col gap-3">
         {props.title && (
-          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-amber-700/60">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-stone-500">
             {props.title}
           </h3>
         )}
@@ -76,12 +151,8 @@ export const { registry, handlers } = defineRegistry(catalog, {
       </div>
     ),
 
-    Heading: ({ props }) => (
-      <div className="mb-2">
-        <h2 className="text-lg font-semibold text-amber-900">{props.title}</h2>
-        {props.subtitle && <p className="mt-0.5 text-sm text-amber-700/60">{props.subtitle}</p>}
-      </div>
-    ),
+    // Composite forms render their own titles — suppress agent-generated headings
+    Heading: () => null,
 
     // --- Form fields ---
     TextInput: ({ props }) => {
@@ -92,20 +163,20 @@ export const { registry, handlers } = defineRegistry(catalog, {
         return (
           <input type="text" value={v} onChange={(e) => setValue(e.target.value)}
             placeholder={props.placeholder}
-            className="w-full bg-transparent text-base font-semibold text-amber-900 placeholder:text-amber-400/40 focus:outline-none" />
+            className="w-full bg-transparent text-base font-semibold text-stone-800 placeholder:text-stone-400 focus:outline-none" />
         );
       }
       if (props.variant === "subtitle") {
         return (
           <input type="text" value={v} onChange={(e) => setValue(e.target.value)}
             placeholder={props.placeholder}
-            className="w-full bg-transparent text-sm text-amber-700/70 placeholder:text-amber-400/40 focus:outline-none" />
+            className="w-full bg-transparent text-sm text-stone-600 placeholder:text-stone-400 focus:outline-none" />
         );
       }
       return (
         <div className="flex flex-col gap-1">
           {props.label && (
-            <label className="text-xs font-semibold text-amber-800">
+            <label className="text-xs font-medium text-stone-600">
               {props.label}
               {props.required && <span className="text-red-500 ml-0.5">*</span>}
             </label>
@@ -126,7 +197,7 @@ export const { registry, handlers } = defineRegistry(catalog, {
       const v = (value as string) ?? props.defaultValue ?? "";
       return (
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-semibold text-amber-800">
+          <label className="text-xs font-medium text-stone-600">
             {props.label}
             {props.required && <span className="text-red-500 ml-0.5">*</span>}
           </label>
@@ -146,8 +217,8 @@ export const { registry, handlers } = defineRegistry(catalog, {
       return (
         <label className="flex items-center gap-2 cursor-pointer">
           <input type="checkbox" checked={checked} onChange={(e) => setValue(e.target.checked)}
-            className="h-3.5 w-3.5 rounded border-amber-300 text-amber-600 focus:ring-amber-400/30" />
-          <span className="text-xs text-amber-800">{props.label}</span>
+            className="h-3.5 w-3.5 rounded border-stone-300 text-amber-600 focus:ring-amber-500/30" />
+          <span className="text-xs text-stone-700">{props.label}</span>
         </label>
       );
     },
@@ -156,26 +227,26 @@ export const { registry, handlers } = defineRegistry(catalog, {
     DataTable: ({ props }) => {
       if (!props.columns.length) return null;
       return (
-        <div className="overflow-hidden rounded-lg border border-amber-200/50 bg-white/80">
+        <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
           {props.title && (
-            <div className="border-b border-amber-200/50 px-3 py-1.5">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-700/60">{props.title}</span>
+            <div className="border-b border-stone-200 px-3 py-1.5">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">{props.title}</span>
             </div>
           )}
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b border-amber-100/50 bg-amber-50/50">
+                <tr className="border-b border-stone-200 bg-stone-50">
                   {props.columns.map((c) => (
-                    <th key={c.key} className="px-2.5 py-1 text-left font-semibold text-amber-800">{c.label}</th>
+                    <th key={c.key} className="px-2.5 py-1 text-left font-semibold text-stone-600">{c.label}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {props.rows.map((row, i) => (
-                  <tr key={i} className="border-b border-amber-100/30 last:border-b-0">
+                  <tr key={i} className="border-b border-stone-100 last:border-b-0">
                     {props.columns.map((c) => (
-                      <td key={c.key} className="px-2.5 py-1 text-amber-900/60">{String(row[c.key] ?? "")}</td>
+                      <td key={c.key} className="px-2.5 py-1 text-stone-700">{String(row[c.key] ?? "")}</td>
                     ))}
                   </tr>
                 ))}
@@ -191,32 +262,32 @@ export const { registry, handlers } = defineRegistry(catalog, {
       if (!cols.length) return null;
       const count = Math.min(Math.max(props.rowCount ?? 3, 0), 50);
       const rows = Array.from({ length: count }, (_, i) =>
-        Object.fromEntries(cols.map((c) => [c.name, mockValue(c.type, i)]))
+        Object.fromEntries(cols.map((c) => [c.name, mockValue(c.type, i, c.name)]))
       );
       return (
-        <div className="overflow-hidden rounded-lg border border-amber-200/50 bg-white/80">
+        <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
           {props.title && (
-            <div className="border-b border-amber-200/50 px-3 py-1.5">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-700/60">{props.title}</span>
+            <div className="border-b border-stone-200 px-3 py-1.5">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">{props.title}</span>
             </div>
           )}
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b border-amber-100/50 bg-amber-50/50">
+                <tr className="border-b border-stone-200 bg-stone-50">
                   {cols.map((c) => (
-                    <th key={c.name} className="px-2.5 py-1 text-left font-semibold text-amber-800">
+                    <th key={c.name} className="px-2.5 py-1 text-left font-semibold text-stone-600">
                       <div>{c.name}</div>
-                      <div className="font-normal text-amber-500/60 text-[9px]">{c.type}</div>
+                      <div className="font-normal text-stone-400 text-[9px]">{c.type}</div>
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row, i) => (
-                  <tr key={i} className="border-b border-amber-100/30 last:border-b-0">
+                  <tr key={i} className="border-b border-stone-100 last:border-b-0">
                     {cols.map((c) => (
-                      <td key={c.name} className="px-2.5 py-1 font-mono text-amber-900/60 text-[10px]">{String(row[c.name])}</td>
+                      <td key={c.name} className="px-2.5 py-1 font-mono text-stone-600 text-[10px]">{String(row[c.name])}</td>
                     ))}
                   </tr>
                 ))}
@@ -242,28 +313,28 @@ export const { registry, handlers } = defineRegistry(catalog, {
         <div className="flex flex-col gap-2">
           {props.label && (
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-amber-700/60">{props.label}</span>
-              <button onClick={add} className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-amber-600 hover:bg-amber-100/50 transition-colors">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-stone-500">{props.label}</span>
+              <button onClick={add} className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-amber-600 hover:bg-amber-50 transition-colors">
                 <Plus className="h-3 w-3" /> Add
               </button>
             </div>
           )}
           {columns.map((col, i) => (
-            <div key={col._key ?? `idx_${i}`} className="flex items-start gap-1.5 rounded-md border border-amber-200/30 bg-white/60 px-2 py-1.5">
+            <div key={col._key ?? `idx_${i}`} className="flex items-start gap-1.5 rounded-md border border-stone-200 bg-white px-2 py-1.5">
               <input type="text" value={col.name} onChange={(e) => update(i, { name: e.target.value })}
                 placeholder="column_name" maxLength={60}
-                className="flex-1 min-w-0 rounded border-0 bg-transparent px-1 py-0.5 text-xs font-mono text-amber-900 placeholder:text-amber-400/50 focus:outline-none" />
+                className="flex-1 min-w-0 rounded border-0 bg-transparent px-1 py-0.5 text-xs font-mono text-stone-800 placeholder:text-stone-400 focus:outline-none" />
               <select value={col.type} onChange={(e) => update(i, { type: e.target.value })}
-                className="rounded border-0 bg-transparent px-1 py-0.5 text-xs text-amber-700 focus:outline-none">
+                className="rounded border-0 bg-transparent px-1 py-0.5 text-xs text-stone-600 focus:outline-none">
                 {types.map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
-              <button onClick={() => remove(i)} className="flex h-5 w-5 items-center justify-center rounded text-amber-400 hover:text-red-500 transition-colors">
+              <button onClick={() => remove(i)} className="flex h-5 w-5 items-center justify-center rounded text-stone-400 hover:text-red-500 transition-colors">
                 <Trash2 className="h-3 w-3" />
               </button>
             </div>
           ))}
           {columns.length === 0 && (
-            <button onClick={add} className="rounded-md border border-dashed border-amber-300/50 px-3 py-2 text-xs text-amber-600/60 hover:bg-amber-50/50 transition-colors">
+            <button onClick={add} className="rounded-md border border-dashed border-stone-300 px-3 py-2 text-xs text-stone-500 hover:border-amber-500 hover:text-amber-700 hover:bg-amber-50/50 transition-colors">
               Add first column...
             </button>
           )}
@@ -275,15 +346,15 @@ export const { registry, handlers } = defineRegistry(catalog, {
       const [decision, setDecision] = useField(`review_${props.suggestionId}`);
       const d = decision as "accepted" | "denied" | undefined;
       const sev = props.severity ?? "info";
-      const borderColor = sev === "error" ? "border-red-300/50" : sev === "warning" ? "border-amber-300/50" : "border-blue-300/50";
-      const bgColor = d === "accepted" ? "bg-green-50/50" : d === "denied" ? "bg-red-50/30" : "bg-white/80";
+      const borderColor = sev === "error" ? "border-red-300" : sev === "warning" ? "border-amber-300" : "border-blue-200";
+      const bgColor = d === "accepted" ? "bg-green-50/50" : d === "denied" ? "bg-red-50/30" : "bg-white";
 
       return (
         <div className={`rounded-lg border ${borderColor} ${bgColor} px-3 py-2 transition-colors`}>
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1">
-              <div className="text-xs font-semibold text-amber-900">{props.title}</div>
-              <div className="mt-0.5 text-[11px] text-amber-700/70">{props.description}</div>
+              <div className="text-xs font-semibold text-stone-800">{props.title}</div>
+              <div className="mt-0.5 text-[11px] text-stone-600">{props.description}</div>
             </div>
             {!d && (
               <div className="flex items-center gap-1 shrink-0">
@@ -313,28 +384,28 @@ export const { registry, handlers } = defineRegistry(catalog, {
         <div className={`inline-flex items-center gap-2 rounded-full px-3 py-1 ${style.bg}`}>
           <div className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
           <span className={`text-[11px] font-medium ${style.text}`}>{props.label ?? props.status}</span>
-          {props.step && <span className="text-[10px] text-amber-600/50">{props.step}</span>}
+          {props.step && <span className="text-[10px] text-stone-500">{props.step}</span>}
         </div>
       );
     },
 
     // --- Empty state ---
     EmptyState: ({ props }) => (
-      <div className="flex flex-1 flex-col items-center justify-center gap-6 p-8 text-amber-900/60">
+      <div className="flex flex-1 flex-col items-center justify-center gap-6 p-8">
         <div className="flex items-center gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-200/50">
-            <Blocks className="h-6 w-6 text-amber-700" />
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-100">
+            <Blocks className="h-6 w-6 text-amber-600" />
           </div>
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-200/50">
-            <Database className="h-6 w-6 text-amber-700" />
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-100">
+            <Database className="h-6 w-6 text-amber-600" />
           </div>
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-200/50">
-            <Table2 className="h-6 w-6 text-amber-700" />
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-100">
+            <Table2 className="h-6 w-6 text-amber-600" />
           </div>
         </div>
         <div className="text-center">
-          <p className="text-sm font-medium text-amber-900/70">{props.title ?? "No pipeline yet"}</p>
-          <p className="mt-1 text-xs text-amber-800/50">
+          <p className="text-sm font-medium text-stone-700">{props.title ?? "No pipeline yet"}</p>
+          <p className="mt-1 text-xs text-stone-500">
             {props.subtitle ?? "Start designing your pipeline in the chat"}
           </p>
         </div>
@@ -350,83 +421,273 @@ export const { registry, handlers } = defineRegistry(catalog, {
       const dedupWindow = (store.get("/dedup_window") as string) ?? "1h";
       const columns = (store.get("/user_columns") as UserColumn[]) ?? [];
 
+      const [hoveredCol, setHoveredCol] = useState<string | null>(null);
+      const [showAddCol, setShowAddCol] = useState(false);
+      const [newColName, setNewColName] = useState("");
+      const [newColType, setNewColType] = useState("");
+      const [newColDesc, setNewColDesc] = useState("");
+      const [newColDim, setNewColDim] = useState("");
+      const [newColEntity, setNewColEntity] = useState("");
+      const [newColPii, setNewColPii] = useState(false);
+      const [editIdx, setEditIdx] = useState<number | null>(null);
+      const [editName, setEditName] = useState("");
+      const [editType, setEditType] = useState("string");
+      const [editDesc, setEditDesc] = useState("");
+      const [editDim, setEditDim] = useState("");
+      const [editEntity, setEditEntity] = useState("");
+      const [editPii, setEditPii] = useState(false);
+
       const updateCol = (i: number, patch: Partial<UserColumn>) =>
         store.set("/user_columns", columns.map((c, j) => (j === i ? { ...c, ...patch } : c)));
-      const addCol = () =>
-        store.set("/user_columns", [...columns, { _key: genKey("col"), name: "", type: "string" }]);
+      const addCol = () => {
+        if (!newColName.trim()) return;
+        const dim = newColDim.trim() || undefined;
+        if (dim && !SNAKE_CASE_RE.test(dim)) return;
+        if (dim && !newColEntity.trim()) return;
+        store.set("/user_columns", [...columns, { _key: genKey("col"), name: newColName.trim(), type: newColType, description: newColDesc.trim() || undefined, dimension: dim, entity: dim ? newColEntity.trim() : undefined, pii: newColPii || undefined }]);
+        setNewColName(""); setNewColType(""); setNewColDesc(""); setNewColDim(""); setNewColEntity(""); setNewColPii(false);
+        setShowAddCol(false);
+      };
       const removeCol = (i: number) =>
         store.set("/user_columns", columns.filter((_, j) => j !== i));
+      const startEdit = (i: number) => {
+        setEditIdx(i);
+        setEditName(columns[i].name);
+        setEditType(columns[i].type);
+        setEditDesc(columns[i].description ?? "");
+        setEditDim(columns[i].dimension ?? "");
+        setEditEntity(columns[i].entity ?? "");
+        setEditPii(columns[i].pii ?? false);
+      };
+      const saveEdit = () => {
+        if (editIdx === null || !editName.trim()) return;
+        const dim = editDim.trim() || undefined;
+        if (dim && !SNAKE_CASE_RE.test(dim)) return;
+        if (dim && !editEntity.trim()) return;
+        updateCol(editIdx, { name: editName.trim(), type: editType, description: editDesc.trim() || undefined, dimension: dim, entity: dim ? editEntity.trim() : undefined, pii: editPii || undefined });
+        setEditIdx(null);
+      };
+      const cancelEdit = () => setEditIdx(null);
+      const closePopup = () => { setShowAddCol(false); cancelEdit(); setNewColName(""); setNewColType(""); setNewColDesc(""); setNewColDim(""); setNewColEntity(""); setNewColPii(false); };
+
+      const allPreviewCols = [...IMPLICIT_TOP, ...columns.filter((c) => c.name), ...IMPLICIT_BOTTOM];
 
       return (
-        <div className="flex flex-col gap-4">
-          <h2 className="text-lg font-semibold text-amber-900">Define a New Logger Table</h2>
+        <div className="flex flex-col gap-5">
+          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-stone-800">
+            <Table2 className="h-4 w-4 text-stone-400" />Logger Table
+          </h2>
           <div className="flex flex-col gap-1">
             <input type="text" value={name} onChange={(e) => store.set("/name", e.target.value)}
               placeholder="schema.table_name"
-              className="w-full bg-transparent text-base font-semibold text-amber-900 placeholder:text-amber-400/40 focus:outline-none" />
+              className="w-full border-b border-stone-200 bg-transparent pb-1 text-base font-semibold text-stone-800 placeholder:text-stone-400 focus:border-amber-500 focus:outline-none transition-colors" />
             <input type="text" value={description} onChange={(e) => store.set("/description", e.target.value)}
               placeholder="Describe what events this table captures..."
-              className="w-full bg-transparent text-sm text-amber-700/70 placeholder:text-amber-400/40 focus:outline-none" />
+              className="w-full bg-transparent text-sm text-stone-600 placeholder:text-stone-400 focus:outline-none" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-amber-800">Retention</label>
+
+          {/* Retention & dedup */}
+          <div className="flex flex-col gap-1">
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-xs text-stone-400">Retention:</span>
               <input type="text" value={retention} onChange={(e) => store.set("/retention", e.target.value)}
-                placeholder="e.g. 30d" className={inputCls} />
+                placeholder="30d"
+                className="w-12 bg-transparent text-xs font-medium text-stone-800 placeholder:text-stone-400 focus:outline-none border-b border-transparent focus:border-amber-500 transition-colors" />
             </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-amber-800">Dedup Window</label>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-xs text-stone-400">Dedup:</span>
               <input type="text" value={dedupWindow} onChange={(e) => store.set("/dedup_window", e.target.value)}
-                placeholder="e.g. 1h" className={inputCls} />
+                placeholder="1h"
+                className="w-12 bg-transparent text-xs font-medium text-stone-800 placeholder:text-stone-400 focus:outline-none border-b border-transparent focus:border-amber-500 transition-colors" />
             </div>
           </div>
+
+          {/* Preview */}
           <div className="flex flex-col gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-amber-700/60">Columns</span>
-            <div className="overflow-hidden rounded-lg border border-amber-200/50 bg-white/80">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-stone-500">Preview</span>
+            <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-stone-200 bg-stone-50">
+                      {allPreviewCols.map((c) => (
+                        <th key={c.name} className={`px-2.5 py-1.5 text-left font-semibold whitespace-nowrap transition-colors ${hoveredCol === c.name ? "bg-amber-100 text-amber-800" : "text-stone-600"}`}>
+                          {c.name}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: 3 }, (_, i) => (
+                      <tr key={i} className="border-b border-stone-100 last:border-b-0">
+                        {allPreviewCols.map((c) => (
+                          <td key={c.name} className={`px-2.5 py-1 font-mono text-[10px] whitespace-nowrap transition-colors ${hoveredCol === c.name ? "bg-amber-50 text-amber-700" : "text-stone-500"}`}>
+                            {mockValue(c.type, i, c.name)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          {/* Columns */}
+          <div className="flex flex-col gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-stone-500">Columns</span>
+            <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="border-b border-amber-100/50 bg-amber-50/50">
-                    <th className="px-2.5 py-1.5 text-left font-semibold text-amber-800">Column</th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold text-amber-800">Type</th>
+                  <tr className="border-b border-stone-200 bg-stone-50">
+                    <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Column</th>
+                    <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Type</th>
+                    <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Description</th>
                     <th className="px-2.5 py-1.5 w-8" />
                   </tr>
                 </thead>
                 <tbody>
-                  {IMPLICIT_TOP.map((c) => <ImplicitRow key={c.name} name={c.name} type={c.type} />)}
+                  {/* System columns (top) */}
+                  {IMPLICIT_TOP.map((c) => <ImplicitRow key={c.name} name={c.name} type={c.type} description={c.description} highlighted={hoveredCol === c.name} onHover={() => setHoveredCol(c.name)} onLeave={() => setHoveredCol(null)} />)}
+
+                  {/* Separator: user columns section */}
+                  <tr>
+                    <td colSpan={4} className="px-2.5 pt-2.5 pb-1">
+                      <span className="text-[10px] font-medium uppercase tracking-wider text-stone-400">Custom columns</span>
+                    </td>
+                  </tr>
+
+                  {/* User-defined columns */}
+                  {columns.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="px-2.5 py-2 text-center text-[11px] text-stone-400 italic">
+                        No custom columns yet
+                      </td>
+                    </tr>
+                  )}
                   {columns.map((col, i) => (
-                    <tr key={col._key} className="border-b border-amber-100/30">
-                      <td className="px-1 py-0.5">
-                        <input type="text" value={col.name} onChange={(e) => updateCol(i, { name: e.target.value })}
-                          placeholder="column_name" maxLength={60}
-                          className="w-full rounded bg-transparent px-1.5 py-1 font-mono text-xs text-amber-900 placeholder:text-amber-400/50 focus:outline-none focus:bg-amber-50/50" />
+                    <tr key={col._key} className={`border-b border-stone-100 group transition-colors cursor-pointer ${hoveredCol === col.name && col.name ? "bg-amber-50" : ""}`}
+                      onMouseEnter={() => col.name && setHoveredCol(col.name)} onMouseLeave={() => setHoveredCol(null)}
+                      onClick={() => startEdit(i)}>
+                      <td className="px-2.5 py-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-xs text-stone-800">{col.name || <span className="text-stone-400 italic">unnamed</span>}</span>
+                          {col.pii && <span className="rounded bg-red-100 px-1 py-0.5 text-[9px] font-medium text-red-600">PII</span>}
+                          {col.dimension && <span className="rounded bg-blue-100 px-1 py-0.5 text-[9px] font-medium text-blue-600">{col.dimension}</span>}
+                        </div>
                       </td>
-                      <td className="px-1 py-0.5">
-                        <select value={col.type} onChange={(e) => updateCol(i, { type: e.target.value })}
-                          className="rounded bg-transparent px-1 py-1 text-xs text-amber-700 focus:outline-none focus:bg-amber-50/50">
-                          {TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
-                        </select>
-                      </td>
+                      <td className="px-2.5 py-1.5 text-xs text-stone-600 uppercase">{col.type}</td>
+                      <td className="px-2.5 py-1.5 text-[10px] text-stone-400">{col.description}</td>
                       <td className="px-1 py-0.5 w-8">
-                        <button onClick={() => removeCol(i)}
-                          className="flex h-5 w-5 items-center justify-center rounded text-amber-400 hover:text-red-500 transition-colors">
+                        <button onClick={(e) => { e.stopPropagation(); removeCol(i); }}
+                          className="flex h-5 w-5 items-center justify-center rounded text-stone-400 opacity-0 group-hover:opacity-100 hover:text-red-500 transition-all">
                           <Trash2 className="h-3 w-3" />
                         </button>
                       </td>
                     </tr>
                   ))}
-                  <tr className="border-b border-amber-100/30">
-                    <td colSpan={3} className="px-2.5 py-0.5">
-                      <button onClick={addCol}
-                        className="flex items-center gap-1 rounded px-1 py-1 text-[11px] text-amber-600 hover:bg-amber-100/50 transition-colors">
+
+                  {/* Add column button */}
+                  <tr>
+                    <td colSpan={4} className="px-2.5 py-1.5">
+                      <button onClick={() => setShowAddCol(true)}
+                        className="flex items-center gap-1.5 rounded-md border border-dashed border-stone-300 px-2.5 py-1.5 text-[11px] text-stone-500 hover:border-amber-500 hover:text-amber-700 hover:bg-amber-50/50 transition-colors w-full justify-center">
                         <Plus className="h-3 w-3" /> Add column
                       </button>
                     </td>
                   </tr>
-                  {IMPLICIT_BOTTOM.map((c) => <ImplicitRow key={c.name} name={c.name} type={c.type} />)}
+
+                  {/* Separator: system partition columns */}
+                  <tr>
+                    <td colSpan={4} className="px-2.5 pt-2.5 pb-1 border-t border-stone-200">
+                      <span className="text-[10px] font-medium uppercase tracking-wider text-stone-400">Partition columns</span>
+                    </td>
+                  </tr>
+                  {IMPLICIT_BOTTOM.map((c) => <ImplicitRow key={c.name} name={c.name} type={c.type} description={c.description} highlighted={hoveredCol === c.name} onHover={() => setHoveredCol(c.name)} onLeave={() => setHoveredCol(null)} />)}
                 </tbody>
               </table>
             </div>
           </div>
+
+          {/* Column popup */}
+          {(showAddCol || editIdx !== null) && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/10 backdrop-blur-[1px] rounded-lg" onClick={closePopup}>
+              <div className="w-[22rem] rounded-xl border border-stone-200 bg-white shadow-xl" onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => { if (e.key === "Escape") closePopup(); if (e.key === "Enter") { e.preventDefault(); editIdx !== null ? saveEdit() : addCol(); } }}>
+                {/* Header */}
+                <div className="flex items-center justify-between px-4 py-2 bg-amber-50 border-b border-amber-100 rounded-t-xl">
+                  <span className="text-[11px] font-medium text-amber-700">{editIdx !== null ? "Edit Column" : "Add Column"}</span>
+                  <button onClick={closePopup} className="flex h-5 w-5 items-center justify-center rounded text-amber-400 hover:text-amber-700 transition-colors">
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+
+                {/* Body */}
+                <div className="flex flex-col gap-3 px-4 py-4">
+                  {/* PII + Name */}
+                  <div className="flex items-center gap-2">
+                    <button type="button"
+                      onClick={() => editIdx !== null ? setEditPii(!editPii) : setNewColPii(!newColPii)}
+                      className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors ${(editIdx !== null ? editPii : newColPii) ? "bg-red-100 text-red-600 ring-1 ring-red-200" : "bg-stone-100 text-stone-400 hover:bg-stone-200 hover:text-stone-600"}`}>
+                      PII
+                    </button>
+                    <input type="text" value={editIdx !== null ? editName : newColName}
+                      onChange={(e) => editIdx !== null ? setEditName(e.target.value) : setNewColName(e.target.value)}
+                      placeholder="new_column_name" autoFocus maxLength={60}
+                      className="flex-1 min-w-0 bg-transparent text-sm font-semibold font-mono text-stone-800 placeholder:text-stone-300 placeholder:font-sans placeholder:font-normal focus:outline-none" />
+                  </div>
+
+                  {/* Type */}
+                  <div className="relative">
+                    <TypeCombobox value={editIdx !== null ? editType : newColType}
+                      onChange={(v) => editIdx !== null ? setEditType(v) : setNewColType(v)} />
+                  </div>
+
+                  {/* Description */}
+                  <input type="text" value={editIdx !== null ? editDesc : newColDesc}
+                    onChange={(e) => editIdx !== null ? setEditDesc(e.target.value) : setNewColDesc(e.target.value)}
+                    placeholder="Describe the column"
+                    className="w-full bg-transparent text-xs text-stone-500 placeholder:text-stone-300 focus:outline-none" />
+
+                  {/* Dimension + Entity */}
+                  {(() => {
+                    const dimVal = editIdx !== null ? editDim : newColDim;
+                    const dimInvalid = dimVal.length > 0 && !SNAKE_CASE_RE.test(dimVal);
+                    const entityVal = editIdx !== null ? editEntity : newColEntity;
+                    const needsEntity = dimVal.length > 0 && !entityVal.trim();
+                    return (<div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-2">
+                        <input type="text" value={dimVal}
+                          onChange={(e) => editIdx !== null ? setEditDim(e.target.value) : setNewColDim(e.target.value)}
+                          placeholder="Bind to dimension if applicable"
+                          className={`flex-1 min-w-0 bg-transparent text-xs text-stone-600 placeholder:text-stone-300 focus:outline-none ${dimInvalid ? "text-red-500" : ""}`} />
+                        {dimVal.length > 0 && (
+                          <input type="text" value={entityVal}
+                            onChange={(e) => editIdx !== null ? setEditEntity(e.target.value) : setNewColEntity(e.target.value)}
+                            placeholder="Entity"
+                            className={`w-24 bg-transparent text-xs text-stone-600 placeholder:text-stone-300 focus:outline-none text-right ${needsEntity ? "text-red-500" : ""}`} />
+                        )}
+                      </div>
+                      {dimInvalid && <span className="text-[10px] text-red-500">Must be snake_case</span>}
+                      {needsEntity && <span className="text-[10px] text-red-500">Entity required</span>}
+                    </div>);
+                  })()}
+
+                  {/* Actions */}
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-stone-100">
+                    <button onClick={closePopup}
+                      className="text-[11px] text-stone-400 hover:text-stone-600 transition-colors">
+                      Cancel
+                    </button>
+                    <button onClick={() => editIdx !== null ? saveEdit() : addCol()}
+                      className="rounded-full bg-stone-800 px-3 py-1 text-[11px] font-medium text-white hover:bg-stone-700 transition-colors">
+                      {editIdx !== null ? "Save" : "Add"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       );
     },

@@ -96,10 +96,10 @@ export function CanvasPanel({
       </div>
 
       {/* Canvas content */}
-      <div className="flex flex-1 flex-col overflow-hidden rounded-l-xl bg-amber-50 shadow-lg">
-        <div className="flex items-center justify-between border-b border-amber-200/60 bg-amber-100/50 px-4 py-2 rounded-tl-xl">
-          <span className="text-sm font-medium text-amber-900">Canvas</span>
-          <Button variant="ghost" size="icon" className="h-8 w-8 text-amber-700 hover:bg-amber-200/50 hover:text-amber-900" onClick={onClose}>
+      <div className="flex flex-1 flex-col overflow-hidden rounded-l-xl bg-stone-50 shadow-lg">
+        <div className="flex items-center justify-between border-b border-stone-200 bg-white px-4 py-2 rounded-tl-xl">
+          <span className="text-sm font-medium text-stone-700">Canvas</span>
+          <Button variant="ghost" size="icon" className="h-8 w-8 text-stone-500 hover:bg-stone-100 hover:text-stone-700" onClick={onClose}>
             <X className="h-4 w-4" />
           </Button>
         </div>
