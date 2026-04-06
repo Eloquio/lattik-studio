@@ -8,6 +8,31 @@ import { registry } from "./registry";
 
 const EMPTY_STATE: Record<string, unknown> = {};
 
+/** Deduplicate array entries by _key (or by name as fallback) to guard against
+ *  the agent streaming spec patches that repeatedly append the same entries. */
+function dedupeByKey(arr: unknown[]): unknown[] {
+  const seen = new Set<string>();
+  return arr.filter((item) => {
+    if (item && typeof item === "object") {
+      const rec = item as Record<string, unknown>;
+      const key = (rec._key as string) ?? (rec.name as string);
+      if (key) {
+        if (seen.has(key)) return false;
+        seen.add(key);
+      }
+    }
+    return true;
+  });
+}
+
+function sanitizeState(state: Record<string, unknown>): Record<string, unknown> {
+  const cols = state.user_columns;
+  if (!Array.isArray(cols) || cols.length <= 1) return state;
+  const deduped = dedupeByKey(cols);
+  if (deduped.length === cols.length) return state;
+  return { ...state, user_columns: deduped };
+}
+
 interface DataArchitectCanvasProps {
   spec: Spec | null;
   loading?: boolean;
@@ -31,7 +56,9 @@ export function DataArchitectCanvas({ spec, loading, onStateChange, onSendMessag
 
   // Stabilize initialState: keep the same reference when content hasn't changed,
   // preventing the StateProvider from re-syncing state on every parent render.
-  const stateObj = spec.state ?? EMPTY_STATE;
+  // Also deduplicate user_columns by _key to guard against the agent streaming
+  // spec patches that repeatedly append the same column entries.
+  const stateObj = sanitizeState(spec.state ?? EMPTY_STATE);
   const stateJson = JSON.stringify(stateObj);
   if (stateJson !== prevStateJsonRef.current) {
     prevStateJsonRef.current = stateJson;
