@@ -144,6 +144,7 @@ export default function Home() {
             taskStack={taskStack}
             onTaskStackChange={setTaskStack}
             sendMessageRef={sendMessageRef}
+            onCanvasStateWrite={canvas.mergeStateChanges}
           />
         </div>
 

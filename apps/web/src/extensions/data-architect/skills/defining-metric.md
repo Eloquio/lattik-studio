@@ -28,10 +28,10 @@ When the user asks to review, use `reviewDefinition` and check:
 - Are the referenced columns valid in the source tables?
 - Do multiple calculations produce consistent results?
 
-The suggestions are rendered as interactive cards in the chat panel — do NOT render ReviewCard components on the canvas.
+Each suggestion MUST include `actions` with canvas state patches. The suggestions are rendered as interactive cards in the chat — do NOT render ReviewCard components on the canvas and do NOT output any spec code fences.
 
 ### Step 3: Accept/Deny Suggestions
-The user will accept or deny each suggestion individually. Apply each accepted change to the definition on the canvas right away by outputting an updated spec code fence. Denied suggestions require no action.
+Accepted suggestions are applied directly to the canvas — no chat message is sent. After the user finishes reviewing, proceed to static checks.
 
 ### Step 4: Static Checks
 Run `staticCheck` with the current definition. If checks fail, show errors and return to the canvas for fixes.

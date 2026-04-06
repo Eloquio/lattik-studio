@@ -6,16 +6,17 @@ import type { ReviewSuggestion } from "@/extensions/data-architect/tools/review-
 
 interface ReviewSuggestionsProps {
   suggestions: ReviewSuggestion[];
-  onSubmit: (text: string) => void;
+  onApply?: (changes: Array<{ path: string; value: unknown }>) => void;
 }
 
-export function ReviewSuggestions({ suggestions, onSubmit }: ReviewSuggestionsProps) {
+export function ReviewSuggestions({ suggestions, onApply }: ReviewSuggestionsProps) {
   const [decisions, setDecisions] = useState<Record<string, "accepted" | "denied">>({});
 
   const handleDecision = (s: ReviewSuggestion, decision: "accepted" | "denied") => {
     setDecisions((prev) => ({ ...prev, [s.id]: decision }));
-    const verb = decision === "accepted" ? "Accept" : "Deny";
-    onSubmit(`${verb}: "${s.title}"`);
+    if (decision === "accepted" && s.actions?.length && onApply) {
+      onApply(s.actions);
+    }
   };
 
   const severityBorder = (sev: string) =>

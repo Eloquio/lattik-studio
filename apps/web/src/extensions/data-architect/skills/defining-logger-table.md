@@ -49,10 +49,12 @@ When the user asks to review, call `reviewDefinition` with the `suggestions` arr
 - Are descriptions provided for all columns?
 - Are dimension references consistent with existing dimensions?
 
-The suggestions are rendered as interactive cards in the chat panel — do NOT render ReviewCard components on the canvas.
+Each suggestion MUST include `actions` — an array of canvas state patches (`{path, value}`) that will be applied when the user accepts. Use canvas state paths like `/description`, `/user_columns`, `/retention`, etc. Example: `actions: [{path: "/description", value: "Tracks user click events on the platform"}]`.
+
+The suggestions are rendered as interactive cards in the chat panel — do NOT render ReviewCard components on the canvas and do NOT output any spec code fences.
 
 ### Step 3: Accept/Deny Suggestions
-The user will accept or deny each suggestion individually via buttons in the chat. Each decision sends a message immediately (e.g. `Accept: "Missing description"`). Apply each accepted change to the definition on the canvas right away by outputting an updated spec code fence. Denied suggestions require no action.
+The user accepts or denies each suggestion via buttons in the chat. Accepted suggestions are applied directly to the canvas — no chat message is sent. After the user finishes reviewing, proceed to static checks.
 
 ### Step 4: Static Checks
 Run `staticCheck` with the current definition. If checks fail, show errors and return to the canvas for fixes.

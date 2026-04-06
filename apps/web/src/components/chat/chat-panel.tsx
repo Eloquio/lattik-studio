@@ -26,6 +26,7 @@ interface ChatPanelProps {
   taskStack: TaskStackEntry[];
   onTaskStackChange: (stack: TaskStackEntry[]) => void;
   sendMessageRef?: React.MutableRefObject<((text: string) => void) | null>;
+  onCanvasStateWrite?: (changes: Array<{ path: string; value: unknown }>) => void;
 }
 
 export function ChatPanel({
@@ -41,6 +42,7 @@ export function ChatPanel({
   taskStack,
   onTaskStackChange,
   sendMessageRef,
+  onCanvasStateWrite,
 }: ChatPanelProps) {
   const extensionIdRef = useRef(activeExtensionId);
   extensionIdRef.current = activeExtensionId;
@@ -407,7 +409,7 @@ export function ChatPanel({
                               <ReviewSuggestions
                                 key={i}
                                 suggestions={(p.output as { suggestions: ReviewSuggestion[] }).suggestions}
-                                onSubmit={(text) => sendMessage({ text })}
+                                onApply={onCanvasStateWrite}
                               />
                             );
                           }
