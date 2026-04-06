@@ -48,7 +48,7 @@ export const reviewDefinitionTool = {
       spec,
       suggestions: input.suggestions,
       instruction:
-        "Suggestions are now displayed as interactive cards in the chat. Wait for the user to accept or deny each suggestion — they will respond with their decisions. Then apply accepted changes to the definition.",
+        "Suggestions are now displayed as interactive cards in the chat. IMPORTANT: Do NOT output any spec code fences in your response — the canvas form must remain unchanged. Wait for the user to accept or deny each suggestion — they will respond with their decisions. Then apply accepted changes to the definition.",
     };
   },
 };
