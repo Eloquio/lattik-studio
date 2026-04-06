@@ -3,8 +3,10 @@ import { validateName, validateQualifiedName, validateDescription, validateReten
 import { validateExpression } from "./expressions";
 import {
   loadMergedEntities,
+  loadMergedDimensions,
   loadMergedTables,
   validateEntityExists,
+  validateDimensionExists,
   validateTableExists,
   validateColumnExists,
 } from "./referential";
@@ -91,11 +93,11 @@ async function validateLoggerTable(spec: LoggerTable): Promise<ValidationError[]
     }
   }
 
-  // Entity references must exist
-  const entities = await loadMergedEntities();
+  // Dimension references must exist
+  const dimensions = await loadMergedDimensions();
   for (const col of spec.columns) {
-    if (col.entity) {
-      errors.push(...validateEntityExists(col.entity, entities, `column.${col.name}.entity`));
+    if (col.dimension) {
+      errors.push(...validateDimensionExists(col.dimension, dimensions, `column.${col.name}.dimension`));
     }
   }
 

@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import type { Spec } from "@json-render/core";
-import { setByPath } from "@json-render/core";
+import { getByPath, setByPath } from "@json-render/core";
 
 export function useCanvas() {
   const [isOpen, setIsOpen] = useState(false);
@@ -30,12 +30,23 @@ export function useCanvas() {
   const close = useCallback(() => setIsOpen(false), []);
   const toggle = useCallback(() => setIsOpen((prev: boolean) => !prev), []);
 
-  // Merge state changes from canvas interactions into the spec
+  // Merge state changes from canvas interactions into the spec.
+  // Bail out (return prev) when no values actually changed to avoid
+  // cascading re-renders that can trigger infinite update depth.
   const mergeStateChanges = useCallback(
     (changes: Array<{ path: string; value: unknown }>) => {
       setCanvasSpec((prev) => {
         if (!prev) return prev;
-        const nextState = { ...(prev.state ?? {}) };
+        const prevState = prev.state ?? {};
+        let changed = false;
+        for (const { path, value } of changes) {
+          if (getByPath(prevState, path) !== value) {
+            changed = true;
+            break;
+          }
+        }
+        if (!changed) return prev;
+        const nextState = { ...prevState };
         for (const { path, value } of changes) {
           setByPath(nextState, path, value);
         }

@@ -241,14 +241,21 @@ export function ChatPanel({
     }
   }, [status, sendMessage, messages.length, handoffTrigger]);
 
-  // Extract canvas spec from json-render data parts in assistant messages
+  // Extract canvas spec from json-render data parts in assistant messages.
+  // Deduplicate: only push to onCanvasStateChange when spec content changes,
+  // since buildSpecFromParts returns a new object on every call.
+  const prevSpecJsonRef = useRef<string>("");
   useEffect(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
       if (msg.role !== "assistant") continue;
       const spec = buildSpecFromParts(msg.parts);
       if (spec) {
-        onCanvasStateChange(spec);
+        const json = JSON.stringify(spec);
+        if (json !== prevSpecJsonRef.current) {
+          prevSpecJsonRef.current = json;
+          onCanvasStateChange(spec);
+        }
         return;
       }
     }

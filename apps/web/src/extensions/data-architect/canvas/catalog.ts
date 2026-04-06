@@ -102,16 +102,6 @@ export const catalog = defineCatalog(schema, {
         "Pipeline status badge (draft, reviewing, checks-passed, checks-failed, pr-submitted, merged).",
     },
 
-    // --- Empty state ---
-    EmptyState: {
-      props: z.object({
-        title: z.string().optional(),
-        subtitle: z.string().optional(),
-      }),
-      description:
-        "Placeholder shown when no pipeline has been designed yet.",
-    },
-
     // --- Composite forms ---
     // These render complete definition forms. All data lives in spec.state.
     // IMPORTANT: Each form renders its own title. Never add a Heading before a composite form.

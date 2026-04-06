@@ -22,7 +22,7 @@ export const entitySchema = z.object({
 export const loggerColumnSchema = z.object({
   name: z.string(),
   type: columnTypeSchema,
-  entity: z.string().optional(),
+  dimension: z.string().optional(),
   tags: z.array(z.string()).optional(),
   description: z.string().optional(),
 });
