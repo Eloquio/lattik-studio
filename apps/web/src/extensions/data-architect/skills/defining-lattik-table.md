@@ -28,7 +28,11 @@ All fields are required unless marked optional.
 ## Workflow
 
 ### Step 1: Render Draft on Canvas
-Call `renderCanvas` with `form: "lattik-table"`. This renders the built-in Lattik table form with inline editable name/description, primary key editor, column families with source mappings and aggregations, and derived columns. Do NOT use specJson — just pass `{ form: "lattik-table" }`.
+Output a `spec` code fence rendering the `LattikTableForm` component with initial state pre-populated from the conversation. The form renders inline editable name/description, primary key editor, column families with source mappings and aggregations, and derived columns.
+
+State keys: `name`, `description`, `primary_key[]`, `column_families[]`, `derived_columns[]`.
+
+Do NOT add a separate Heading element — the form already includes its own title.
 
 ### Step 2: AI Review
 When the user asks to review, use `reviewDefinition` and check:
@@ -38,10 +42,10 @@ When the user asks to review, use `reviewDefinition` and check:
 - Are merge strategies appropriate for each aggregation?
 - Are derived column expressions valid?
 
-Render suggestions as ReviewCard components.
+The suggestions are rendered as interactive cards in the chat panel — do NOT render ReviewCard components on the canvas.
 
 ### Step 3: Accept/Deny Suggestions
-Wait for user decisions. Use `readCanvasState` to check. Apply accepted changes.
+Wait for the user to respond with their decisions in the chat. Apply accepted changes to the definition on the canvas.
 
 ### Step 4: Static Checks
 Run `staticCheck` with the current definition. If checks fail, show errors and return to the canvas for fixes.

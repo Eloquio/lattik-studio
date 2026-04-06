@@ -8,6 +8,8 @@ import { ArrowUp, Bot, Pencil, Plus, Trash2 } from "lucide-react";
 import Markdown from "react-markdown";
 import { buildSpecFromParts } from "@json-render/react";
 import { ToolResult } from "./tool-result";
+import { ReviewSuggestions } from "./review-suggestions";
+import type { ReviewSuggestion } from "@/extensions/data-architect/tools/review-definition";
 import { saveConversation, deleteConversation } from "@/lib/actions/conversations";
 import type { TaskStackEntry } from "@/lib/types/task-stack";
 
@@ -23,6 +25,7 @@ interface ChatPanelProps {
   onNewChat?: () => void;
   taskStack: TaskStackEntry[];
   onTaskStackChange: (stack: TaskStackEntry[]) => void;
+  sendMessageRef?: React.MutableRefObject<((text: string) => void) | null>;
 }
 
 export function ChatPanel({
@@ -37,6 +40,7 @@ export function ChatPanel({
   onNewChat,
   taskStack,
   onTaskStackChange,
+  sendMessageRef,
 }: ChatPanelProps) {
   const extensionIdRef = useRef(activeExtensionId);
   extensionIdRef.current = activeExtensionId;
@@ -70,6 +74,18 @@ export function ChatPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isLoading = status === "submitted" || status === "streaming";
   const wasLoadingRef = useRef(false);
+
+  // Expose sendMessage to parent via ref so canvas components can trigger chat messages
+  useEffect(() => {
+    if (sendMessageRef) {
+      sendMessageRef.current = (text: string) => {
+        if (!isLoading) sendMessage({ text });
+      };
+    }
+    return () => {
+      if (sendMessageRef) sendMessageRef.current = null;
+    };
+  }, [sendMessage, sendMessageRef, isLoading]);
 
   // Track which agent owns each assistant message
   const messageAgentMap = useRef<Map<string, string | null>>(new Map());
@@ -244,7 +260,12 @@ export function ChatPanel({
   // Extract canvas spec from json-render data parts in assistant messages.
   // Deduplicate: only push to onCanvasStateChange when spec content changes,
   // since buildSpecFromParts returns a new object on every call.
+  // Throttled via rAF to prevent cascading re-renders during rapid streaming
+  // (each JSONL patch produces a new spec — without throttling this can exceed
+  // React's maximum update depth).
   const prevSpecJsonRef = useRef<string>("");
+  const pendingSpecRef = useRef<{ spec: unknown; json: string } | null>(null);
+  const rafIdRef = useRef<number>(0);
   useEffect(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
@@ -253,13 +274,28 @@ export function ChatPanel({
       if (spec) {
         const json = JSON.stringify(spec);
         if (json !== prevSpecJsonRef.current) {
-          prevSpecJsonRef.current = json;
-          onCanvasStateChange(spec);
+          pendingSpecRef.current = { spec, json };
+          if (!rafIdRef.current) {
+            rafIdRef.current = requestAnimationFrame(() => {
+              rafIdRef.current = 0;
+              const pending = pendingSpecRef.current;
+              if (pending) {
+                pendingSpecRef.current = null;
+                prevSpecJsonRef.current = pending.json;
+                onCanvasStateChange(pending.spec);
+              }
+            });
+          }
         }
         return;
       }
     }
   }, [messages, onCanvasStateChange]);
+  useEffect(() => {
+    return () => {
+      if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
+    };
+  }, []);
 
   const handleSubmit = () => {
     if (!input.trim() || isLoading) return;
@@ -357,10 +393,28 @@ export function ChatPanel({
                         }
                         if (part.type.startsWith("tool-") && "state" in part) {
                           const p = part as { state: string; input?: unknown; output?: unknown };
+                          const name = part.type.slice(5);
+                          // Render review suggestions as interactive cards
+                          if (
+                            name === "reviewDefinition" &&
+                            p.state === "output-available" &&
+                            p.output &&
+                            typeof p.output === "object" &&
+                            "suggestions" in p.output &&
+                            Array.isArray((p.output as Record<string, unknown>).suggestions)
+                          ) {
+                            return (
+                              <ReviewSuggestions
+                                key={i}
+                                suggestions={(p.output as { suggestions: ReviewSuggestion[] }).suggestions}
+                                onSubmit={(text) => sendMessage({ text })}
+                              />
+                            );
+                          }
                           return (
                             <ToolResult
                               key={i}
-                              toolName={part.type.slice(5)}
+                              toolName={name}
                               state={p.state}
                               input={p.input}
                               output={p.output}

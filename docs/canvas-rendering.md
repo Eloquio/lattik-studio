@@ -188,6 +188,48 @@ These render complete definition forms. All data lives in `Spec.state`:
 - **MetricForm** — state: `name`, `description`, `calculations[]`
 - **LattikTableForm** — state: `name`, `description`, `primary_key[]`, `column_families[]`, `derived_columns[]`
 
+## Canvas → Chat Communication
+
+Canvas components can send messages to the chat panel (as if the user typed them) via `CanvasActionsContext`. This is useful for buttons like "Review Table" that trigger agent workflows from the canvas.
+
+### Data Flow
+
+```
+LoggerTableForm (registry.tsx)
+  → useCanvasActions().sendChatMessage("Review table")
+  → CanvasActionsContext (provided by DataArchitectCanvas)
+  → onSendMessage prop (threaded: DataArchitectCanvas ← CanvasPanel ← page.tsx)
+  → sendMessageRef (ChatPanel exposes sendMessage via a mutable ref)
+  → useChat().sendMessage({ text })
+```
+
+### Key Files
+
+| File | Role |
+|------|------|
+| `components/canvas/canvas-actions-context.tsx` | Context definition + `useCanvasActions()` hook |
+| `extensions/.../canvas/data-architect-canvas.tsx` | Provides context with `onSendMessage` |
+| `components/canvas/canvas-panel.tsx` | Threads `onSendMessage` to the canvas component |
+| `components/chat/chat-panel.tsx` | Exposes `sendMessage` via `sendMessageRef` prop |
+| `app/page.tsx` | Wires the ref from ChatPanel to CanvasPanel |
+
+### Usage in Registry Components
+
+```tsx
+import { useCanvasActions } from "@/components/canvas/canvas-actions-context";
+
+// Inside a registry component:
+const { sendChatMessage } = useCanvasActions();
+// ...
+<button onClick={() => sendChatMessage("Review table")}>Review Table</button>
+```
+
+### Adding to a New Extension
+
+1. Accept `onSendMessage` in your canvas component props
+2. Wrap your `<JSONUIProvider>` with `<CanvasActionsContext value={...}>`
+3. Call `useCanvasActions()` in any registry component that needs it
+
 ## Adding a New Component
 
 1. Add the component definition to `catalog.ts` with Zod prop schema

@@ -16,7 +16,11 @@ All fields are required.
 ## Workflow
 
 ### Step 1: Render Draft on Canvas
-Call `renderCanvas` with `form: "dimension"`. This renders the built-in dimension form with inline editable name/description, entity field, source table/column, and data type selector. Do NOT use specJson — just pass `{ form: "dimension" }`. If the referenced entity doesn't exist yet, suggest defining it first.
+Output a `spec` code fence rendering the `DimensionForm` component with initial state pre-populated from the conversation. The form renders inline editable name/description, entity field, source table/column, and data type selector. If the referenced entity doesn't exist yet, suggest defining it first.
+
+State keys: `name`, `description`, `entity`, `source_table`, `source_column`, `data_type`.
+
+Do NOT add a separate Heading element — the form already includes its own title.
 
 ### Step 2: AI Review
 When the user asks to review, use `reviewDefinition` and check:
@@ -25,10 +29,10 @@ When the user asks to review, use `reviewDefinition` and check:
 - Is the data type consistent with the source column?
 - Is the naming convention followed (entity prefix)?
 
-Render suggestions as ReviewCard components.
+The suggestions are rendered as interactive cards in the chat panel — do NOT render ReviewCard components on the canvas.
 
 ### Step 3: Accept/Deny Suggestions
-Wait for user decisions. Use `readCanvasState` to check. Apply accepted changes.
+Wait for the user to respond with their decisions in the chat. Apply accepted changes to the definition on the canvas.
 
 ### Step 4: Static Checks
 Run `staticCheck` with the current definition. If checks fail, show errors and return to the canvas for fixes.

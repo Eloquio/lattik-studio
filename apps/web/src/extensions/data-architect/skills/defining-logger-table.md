@@ -32,26 +32,27 @@ All fields are required. Fields with a default are pre-populated but can be over
 ## Workflow
 
 ### Step 1: Render Draft on Canvas
-Call `renderCanvas` with `form: "logger-table"`. This renders the built-in logger table form with:
+Output a `spec` code fence rendering the `LoggerTableForm` component with initial state pre-populated from the conversation. The form renders:
 - Inline editable table name and description
 - Retention and dedup window fields (pre-filled with defaults)
 - Columns table showing implicit columns (event_id, event_timestamp, ds, hour) and an "Add column" button for user-defined columns
 
-The form state is managed automatically. Do NOT use specJson — just pass `{ form: "logger-table" }`.
+State keys: `name`, `description`, `retention` (default: `"30d"`), `dedup_window` (default: `"1h"`), `user_columns` (array of `{name, type}`).
+
 Do NOT add a separate Heading element — the form already includes its own title.
 
 ### Step 2: AI Review
-When the user asks to review, use `reviewDefinition` and check:
+When the user asks to review, call `reviewDefinition` with the `suggestions` array. Analyze the definition and include suggestions checking:
 - Is the name in `schema.table_name` format?
 - Do any columns collide with implicit column names?
 - Are column types appropriate for their data?
 - Are descriptions provided for all columns?
 - Are dimension references consistent with existing dimensions?
 
-Render suggestions as ReviewCard components.
+The suggestions are rendered as interactive cards in the chat panel — do NOT render ReviewCard components on the canvas.
 
 ### Step 3: Accept/Deny Suggestions
-Wait for user decisions. Use `readCanvasState` to check. Apply accepted changes.
+Wait for the user to respond with their decisions in the chat. The user will accept or deny each suggestion via buttons, then submit. Apply accepted changes to the definition on the canvas.
 
 ### Step 4: Static Checks
 Run `staticCheck` with the current definition. If checks fail, show errors and return to the canvas for fixes.

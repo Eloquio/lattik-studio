@@ -2,7 +2,8 @@
 
 import { useRef, useState } from "react";
 import { defineRegistry, useStateStore } from "@json-render/react";
-import { Check, X, Plus, Trash2, Lock, Table2 } from "lucide-react";
+import { Check, X, Plus, Trash2, Lock, Table2, Send } from "lucide-react";
+import { useCanvasActions } from "@/components/canvas/canvas-actions-context";
 import type { ScalarTypeKind } from "@eloquio/lattik-expression";
 import { fromColumnType } from "@eloquio/lattik-expression";
 import { catalog } from "./catalog";
@@ -391,6 +392,7 @@ export const { registry, handlers } = defineRegistry(catalog, {
 
     // --- Composite forms ---
     LoggerTableForm: () => {
+      const { sendChatMessage } = useCanvasActions();
       const store = useStateStore();
       const name = (store.get("/name") as string) ?? "";
       const description = (store.get("/description") as string) ?? "";
@@ -580,6 +582,15 @@ export const { registry, handlers } = defineRegistry(catalog, {
               </table>
             </div>
           </div>
+
+          {/* Review table button */}
+          <button
+            onClick={() => sendChatMessage("Review table")}
+            className="flex items-center justify-center gap-2 rounded-lg bg-stone-800 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-700 transition-colors"
+          >
+            <Send className="h-3.5 w-3.5" />
+            Review Table
+          </button>
 
           {/* Column popup */}
           {(showAddCol || editIdx !== null) && (

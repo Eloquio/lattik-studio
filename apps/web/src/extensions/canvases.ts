@@ -6,6 +6,7 @@ type CanvasComponent = ComponentType<{
   spec: Spec | null;
   loading?: boolean;
   onStateChange?: (changes: Array<{ path: string; value: unknown }>) => void;
+  onSendMessage?: (text: string) => void;
 }>;
 
 const canvases: Record<string, CanvasComponent> = {

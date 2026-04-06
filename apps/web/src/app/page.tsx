@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { UIMessage } from "ai";
 import { generateId } from "ai";
 import type { Spec } from "@json-render/core";
@@ -23,6 +23,7 @@ interface ChatState {
 
 export default function Home() {
   const canvas = useCanvas();
+  const sendMessageRef = useRef<((text: string) => void) | null>(null);
   const [activeExtensionId, setActiveExtensionId] = useState<string | null>(null);
   const [taskStack, setTaskStack] = useState<TaskStackEntry[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -142,6 +143,7 @@ export default function Home() {
             onNewChat={handleNewChat}
             taskStack={taskStack}
             onTaskStackChange={setTaskStack}
+            sendMessageRef={sendMessageRef}
           />
         </div>
 
@@ -165,6 +167,7 @@ export default function Home() {
           activeExtensionId={activeExtensionId}
           spec={canvas.canvasSpec}
           onStateChange={canvas.mergeStateChanges}
+          onSendMessage={(text) => sendMessageRef.current?.(text)}
         />
       </div>
     </div>

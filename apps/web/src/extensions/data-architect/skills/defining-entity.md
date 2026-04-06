@@ -14,7 +14,11 @@ All fields are required.
 ## Workflow
 
 ### Step 1: Render Draft on Canvas
-Call `renderCanvas` with `form: "entity"`. This renders the built-in entity form with inline editable name/description, ID field, and ID type selector. Do NOT use specJson — just pass `{ form: "entity" }`.
+Output a `spec` code fence rendering the `EntityForm` component with initial state pre-populated from the conversation. The form renders inline editable name/description, ID field, and ID type selector.
+
+State keys: `name`, `description`, `id_field`, `id_type`.
+
+Do NOT add a separate Heading element — the form already includes its own title.
 
 ### Step 2: AI Review
 When the user asks to review, use `reviewDefinition` and check:
@@ -23,10 +27,10 @@ When the user asks to review, use `reviewDefinition` and check:
 - Does the id_field end with `_id`?
 - Is the id_type appropriate for the use case?
 
-Render suggestions as ReviewCard components.
+The suggestions are rendered as interactive cards in the chat panel — do NOT render ReviewCard components on the canvas.
 
 ### Step 3: Accept/Deny Suggestions
-Wait for user decisions. Use `readCanvasState` to check. Apply accepted changes.
+Wait for the user to respond with their decisions in the chat. Apply accepted changes to the definition on the canvas.
 
 ### Step 4: Static Checks
 Run `staticCheck` with the current definition. If checks fail, show errors and return to the canvas for fixes.
