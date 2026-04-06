@@ -29,7 +29,7 @@ The agent is a `ToolLoopAgent` (Vercel AI SDK v6) with a max of 10 tool steps pe
 
 All five definition types follow the same workflow:
 
-1. **Render Draft on Canvas** — Agent calls `renderCanvas` with the built-in form (e.g. `form: "logger-table"`), pre-populating fields from the conversation. User edits directly on the canvas or chats with the agent.
+1. **Render Draft on Canvas** — Agent outputs a `spec` code fence with the built-in form component (e.g. `LoggerTableForm`), pre-populating state from the conversation. User edits directly on the canvas or chats with the agent.
 2. **AI Review** — Agent calls `reviewDefinition` and renders suggestions as `ReviewCard` components on the canvas.
 3. **Accept/Deny Suggestions** — User accepts or denies each suggestion via canvas buttons. Agent reads decisions with `readCanvasState` and applies accepted changes.
 4. **Static Checks** — Agent calls `staticCheck` which runs validation functions (naming, referential integrity, expression syntax). Failures return to canvas for fixes.
@@ -40,7 +40,7 @@ All five definition types follow the same workflow:
 | Tool | Purpose |
 |------|---------|
 | `getSkill` | Load a skill markdown document by ID |
-| `renderCanvas` | Render a built-in form or custom JSON-render spec on the canvas |
+| *(canvas rendering)* | Agent outputs `spec` code fences with JSONL patches — no dedicated tool |
 | `readCanvasState` | Read the current form field values from the canvas |
 | `reviewDefinition` | Generate AI review suggestions for a definition |
 | `staticCheck` | Run validation (naming, referential, expression syntax) |
@@ -84,6 +84,9 @@ Forms are built from these registered json-render components:
 ### State Binding
 All form inputs bind to json-render state paths (e.g. `/name`, `/description`, `/user_columns`). State is two-way: components read from state and write back via `onStateChange`. Canvas state is persisted to the database with the conversation and restored on page load.
 
+### Canvas → Chat Actions
+Composite forms can send messages to the chat panel via `useCanvasActions()` from `CanvasActionsContext`. For example, `LoggerTableForm` has a "Review Table" button that sends `"Review table"` to the chat, triggering the agent's review workflow. See `docs/canvas-rendering.md` for the full data flow and how to add this to new extensions.
+
 ## Validation
 
 Three layers of validation run during static checks:
@@ -107,7 +110,7 @@ data-architect/
 ├── schema.ts             Zod schemas for all definition types
 ├── yaml-generator.ts     Spec → YAML serializer
 ├── canvas/
-│   ├── data-architect-canvas.tsx   Root canvas component
+│   ├── data-architect-canvas.tsx   Root canvas component (provides CanvasActionsContext)
 │   ├── catalog.ts                  json-render catalog definition
 │   ├── registry.tsx                Component registry (all 16 components)
 │   ├── logger-table-card.tsx       Logger table visualization card
@@ -122,7 +125,6 @@ data-architect/
 │   └── defining-metric.md          Metric workflow
 ├── tools/
 │   ├── get-skill.ts          Load skill documents
-│   ├── render-canvas.ts      Render forms/specs on canvas
 │   ├── read-canvas-state.ts  Read canvas form state
 │   ├── review-definition.ts  AI review suggestions
 │   ├── static-check.ts       Run validation

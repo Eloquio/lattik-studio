@@ -14,6 +14,7 @@ interface CanvasPanelProps {
   activeExtensionId: string | null;
   spec: Spec | null;
   onStateChange?: (changes: Array<{ path: string; value: unknown }>) => void;
+  onSendMessage?: (text: string) => void;
 }
 
 export function CanvasPanel({
@@ -24,6 +25,7 @@ export function CanvasPanel({
   activeExtensionId,
   spec,
   onStateChange,
+  onSendMessage,
 }: CanvasPanelProps) {
   const isDragging = useRef(false);
   const handlersRef = useRef<{
@@ -107,7 +109,7 @@ export function CanvasPanel({
           {activeExtensionId && (() => {
             const Canvas = getCanvas(activeExtensionId);
             if (!Canvas) return null;
-            return <Canvas spec={spec} onStateChange={onStateChange} />;
+            return <Canvas spec={spec} onStateChange={onStateChange} onSendMessage={onSendMessage} />;
           })()}
         </div>
       </div>
