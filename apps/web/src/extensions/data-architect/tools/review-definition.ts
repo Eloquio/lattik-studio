@@ -2,16 +2,22 @@ import { zodSchema } from "ai";
 import { z } from "zod";
 import type { DefinitionKind } from "@/db/schema";
 
+export interface ReviewAction {
+  path: string;
+  value: unknown;
+}
+
 export interface ReviewSuggestion {
   id: string;
   title: string;
   description: string;
   severity: "info" | "warning" | "error";
+  actions?: ReviewAction[];
 }
 
 export const reviewDefinitionTool = {
   description:
-    "Generate AI review suggestions for a definition. Returns a list of suggestions the user can accept or deny. The suggestions are rendered as interactive cards in the chat panel — the user will respond with their decisions.",
+    "Generate AI review suggestions for a definition. Suggestions are rendered as interactive cards in the chat. When the user accepts a suggestion with actions, the changes are applied directly to the canvas — no chat message is sent.",
   inputSchema: zodSchema(
     z.object({
       kind: z
@@ -27,6 +33,15 @@ export const reviewDefinitionTool = {
             title: z.string().describe("Short title for the suggestion"),
             description: z.string().describe("Explanation of the suggestion"),
             severity: z.enum(["info", "warning", "error"]).describe("Severity level"),
+            actions: z
+              .array(
+                z.object({
+                  path: z.string().describe("JSON Pointer path to the canvas state field, e.g. '/description'"),
+                  value: z.unknown().describe("The value to set at this path"),
+                })
+              )
+              .optional()
+              .describe("State patches to apply when accepted. Use canvas state paths like /description, /user_columns, etc. If omitted, accepting records the decision but does not change the canvas."),
           })
         )
         .describe("List of review suggestions to present to the user"),
@@ -48,7 +63,7 @@ export const reviewDefinitionTool = {
       spec,
       suggestions: input.suggestions,
       instruction:
-        "Suggestions are now displayed as interactive cards in the chat. IMPORTANT: Do NOT output any spec code fences in your response — the canvas form must remain unchanged. Wait for the user to accept or deny each suggestion — they will respond with their decisions. Then apply accepted changes to the definition.",
+        "Suggestions are displayed as interactive cards in the chat. When the user accepts a suggestion with actions, the changes are applied directly to the canvas — no chat message is needed. IMPORTANT: Do NOT output any spec code fences in your response. Include concrete `actions` on each suggestion so the change can be applied instantly (e.g. actions: [{path: '/description', value: 'Tracks user click events'}]).",
     };
   },
 };
