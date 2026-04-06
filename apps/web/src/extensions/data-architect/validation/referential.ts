@@ -1,10 +1,26 @@
 import type { ValidationError } from "./naming";
 import { listMergedDefinitions } from "@/lib/actions/definitions";
-import type { Entity, LoggerTable, LattikTable } from "../schema";
+import type { Entity, Dimension, LoggerTable, LattikTable } from "../schema";
 
 export async function loadMergedEntities(): Promise<Entity[]> {
   const defs = await listMergedDefinitions("entity");
   return defs.map((d) => d.spec as Entity);
+}
+
+export async function loadMergedDimensions(): Promise<Dimension[]> {
+  const defs = await listMergedDefinitions("dimension");
+  return defs.map((d) => d.spec as Dimension);
+}
+
+export function validateDimensionExists(
+  dimensionName: string,
+  mergedDimensions: Dimension[],
+  field: string
+): ValidationError[] {
+  if (!mergedDimensions.some((d) => d.name === dimensionName)) {
+    return [{ field, message: `Dimension '${dimensionName}' does not exist in merged definitions` }];
+  }
+  return [];
 }
 
 export async function loadMergedTables(): Promise<{ loggerTables: LoggerTable[]; lattikTables: LattikTable[] }> {

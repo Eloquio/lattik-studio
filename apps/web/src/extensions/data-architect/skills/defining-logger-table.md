@@ -25,7 +25,7 @@ All fields are required. Fields with a default are pre-populated but can be over
 - **columns** (array) — user-defined columns (the event payload). All user-defined columns are nullable. Each with:
   - **name** (string) — column name (must not collide with implicit columns)
   - **type** (enum) — `string`, `int32`, `int64`, `float`, `double`, `boolean`, `timestamp`, `date`, `json`
-  - **entity** (string, optional) — entity this column references, used as join keys for downstream Lattik Tables
+  - **dimension** (string, optional) — dimension this column maps to, used to resolve entity join keys for downstream Lattik Tables
   - **tags** (array of strings, optional) — freeform tags, e.g. `["pii", "high-cardinality"]`
   - **description** (string, optional) — column description
 
@@ -46,7 +46,7 @@ When the user asks to review, use `reviewDefinition` and check:
 - Do any columns collide with implicit column names?
 - Are column types appropriate for their data?
 - Are descriptions provided for all columns?
-- Are entity references consistent with existing entities?
+- Are dimension references consistent with existing dimensions?
 
 Render suggestions as ReviewCard components.
 
@@ -68,6 +68,6 @@ Use `listDefinitions` to find existing tables and `getDefinition` to load one. T
 - Table name: `schema.table_name` format, max 60 chars
 - Description: 10-500 chars
 - Column names: unique, snake_case, no collisions with implicit columns
-- Entity references: must point to existing entities
+- Dimension references: must point to existing dimensions
 - Retention: `<number>d`, e.g. `30d`
 - Dedup window: `<number>h`, e.g. `1h`

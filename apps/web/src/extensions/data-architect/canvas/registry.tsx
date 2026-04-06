@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { defineRegistry, useStateStore } from "@json-render/react";
-import { Check, X, Plus, Trash2, Lock, Blocks, Database, Table2 } from "lucide-react";
+import { Check, X, Plus, Trash2, Lock, Table2 } from "lucide-react";
 import type { ScalarTypeKind } from "@eloquio/lattik-expression";
 import { fromColumnType } from "@eloquio/lattik-expression";
 import { catalog } from "./catalog";
@@ -20,7 +20,7 @@ const inputCls =
   "rounded-md border border-stone-200 bg-white px-2.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-400 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500/30";
 
 // ---- Column helpers ----
-interface UserColumn { _key: string; name: string; type: string; description?: string; dimension?: string; entity?: string; pii?: boolean }
+interface UserColumn { _key: string; name: string; type: string; description?: string; dimension?: string; pii?: boolean }
 const SNAKE_CASE_RE = /^[a-z][a-z0-9]*(_[a-z0-9]+)*$/;
 const TYPE_OPTIONS: ScalarTypeKind[] = ["string", "int32", "int64", "float", "double", "boolean", "timestamp", "date", "json"];
 const TYPE_DISPLAY: Record<string, string> = Object.fromEntries(TYPE_OPTIONS.map((t) => [t, t.toUpperCase()]));
@@ -389,29 +389,6 @@ export const { registry, handlers } = defineRegistry(catalog, {
       );
     },
 
-    // --- Empty state ---
-    EmptyState: ({ props }) => (
-      <div className="flex flex-1 flex-col items-center justify-center gap-6 p-8">
-        <div className="flex items-center gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-100">
-            <Blocks className="h-6 w-6 text-amber-600" />
-          </div>
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-100">
-            <Database className="h-6 w-6 text-amber-600" />
-          </div>
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-100">
-            <Table2 className="h-6 w-6 text-amber-600" />
-          </div>
-        </div>
-        <div className="text-center">
-          <p className="text-sm font-medium text-stone-700">{props.title ?? "No pipeline yet"}</p>
-          <p className="mt-1 text-xs text-stone-500">
-            {props.subtitle ?? "Start designing your pipeline in the chat"}
-          </p>
-        </div>
-      </div>
-    ),
-
     // --- Composite forms ---
     LoggerTableForm: () => {
       const store = useStateStore();
@@ -427,14 +404,12 @@ export const { registry, handlers } = defineRegistry(catalog, {
       const [newColType, setNewColType] = useState("");
       const [newColDesc, setNewColDesc] = useState("");
       const [newColDim, setNewColDim] = useState("");
-      const [newColEntity, setNewColEntity] = useState("");
       const [newColPii, setNewColPii] = useState(false);
       const [editIdx, setEditIdx] = useState<number | null>(null);
       const [editName, setEditName] = useState("");
       const [editType, setEditType] = useState("string");
       const [editDesc, setEditDesc] = useState("");
       const [editDim, setEditDim] = useState("");
-      const [editEntity, setEditEntity] = useState("");
       const [editPii, setEditPii] = useState(false);
 
       const updateCol = (i: number, patch: Partial<UserColumn>) =>
@@ -443,9 +418,8 @@ export const { registry, handlers } = defineRegistry(catalog, {
         if (!newColName.trim()) return;
         const dim = newColDim.trim() || undefined;
         if (dim && !SNAKE_CASE_RE.test(dim)) return;
-        if (dim && !newColEntity.trim()) return;
-        store.set("/user_columns", [...columns, { _key: genKey("col"), name: newColName.trim(), type: newColType, description: newColDesc.trim() || undefined, dimension: dim, entity: dim ? newColEntity.trim() : undefined, pii: newColPii || undefined }]);
-        setNewColName(""); setNewColType(""); setNewColDesc(""); setNewColDim(""); setNewColEntity(""); setNewColPii(false);
+        store.set("/user_columns", [...columns, { _key: genKey("col"), name: newColName.trim(), type: newColType, description: newColDesc.trim() || undefined, dimension: dim, pii: newColPii || undefined }]);
+        setNewColName(""); setNewColType(""); setNewColDesc(""); setNewColDim(""); setNewColPii(false);
         setShowAddCol(false);
       };
       const removeCol = (i: number) =>
@@ -456,19 +430,17 @@ export const { registry, handlers } = defineRegistry(catalog, {
         setEditType(columns[i].type);
         setEditDesc(columns[i].description ?? "");
         setEditDim(columns[i].dimension ?? "");
-        setEditEntity(columns[i].entity ?? "");
         setEditPii(columns[i].pii ?? false);
       };
       const saveEdit = () => {
         if (editIdx === null || !editName.trim()) return;
         const dim = editDim.trim() || undefined;
         if (dim && !SNAKE_CASE_RE.test(dim)) return;
-        if (dim && !editEntity.trim()) return;
-        updateCol(editIdx, { name: editName.trim(), type: editType, description: editDesc.trim() || undefined, dimension: dim, entity: dim ? editEntity.trim() : undefined, pii: editPii || undefined });
+        updateCol(editIdx, { name: editName.trim(), type: editType, description: editDesc.trim() || undefined, dimension: dim, pii: editPii || undefined });
         setEditIdx(null);
       };
       const cancelEdit = () => setEditIdx(null);
-      const closePopup = () => { setShowAddCol(false); cancelEdit(); setNewColName(""); setNewColType(""); setNewColDesc(""); setNewColDim(""); setNewColEntity(""); setNewColPii(false); };
+      const closePopup = () => { setShowAddCol(false); cancelEdit(); setNewColName(""); setNewColType(""); setNewColDesc(""); setNewColDim(""); setNewColPii(false); };
 
       const allPreviewCols = [...IMPLICIT_TOP, ...columns.filter((c) => c.name), ...IMPLICIT_BOTTOM];
 
@@ -653,23 +625,12 @@ export const { registry, handlers } = defineRegistry(catalog, {
                   {(() => {
                     const dimVal = editIdx !== null ? editDim : newColDim;
                     const dimInvalid = dimVal.length > 0 && !SNAKE_CASE_RE.test(dimVal);
-                    const entityVal = editIdx !== null ? editEntity : newColEntity;
-                    const needsEntity = dimVal.length > 0 && !entityVal.trim();
                     return (<div className="flex flex-col gap-1">
-                      <div className="flex items-center gap-2">
-                        <input type="text" value={dimVal}
-                          onChange={(e) => editIdx !== null ? setEditDim(e.target.value) : setNewColDim(e.target.value)}
-                          placeholder="Bind to dimension if applicable"
-                          className={`flex-1 min-w-0 bg-transparent text-xs text-stone-600 placeholder:text-stone-300 focus:outline-none ${dimInvalid ? "text-red-500" : ""}`} />
-                        {dimVal.length > 0 && (
-                          <input type="text" value={entityVal}
-                            onChange={(e) => editIdx !== null ? setEditEntity(e.target.value) : setNewColEntity(e.target.value)}
-                            placeholder="Entity"
-                            className={`w-24 bg-transparent text-xs text-stone-600 placeholder:text-stone-300 focus:outline-none text-right ${needsEntity ? "text-red-500" : ""}`} />
-                        )}
-                      </div>
+                      <input type="text" value={dimVal}
+                        onChange={(e) => editIdx !== null ? setEditDim(e.target.value) : setNewColDim(e.target.value)}
+                        placeholder="Bind to dimension if applicable"
+                        className={`flex-1 min-w-0 bg-transparent text-xs text-stone-600 placeholder:text-stone-300 focus:outline-none ${dimInvalid ? "text-red-500" : ""}`} />
                       {dimInvalid && <span className="text-[10px] text-red-500">Must be snake_case</span>}
-                      {needsEntity && <span className="text-[10px] text-red-500">Entity required</span>}
                     </div>);
                   })()}
 
