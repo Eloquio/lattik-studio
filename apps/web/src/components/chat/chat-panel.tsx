@@ -410,6 +410,7 @@ export function ChatPanel({
                                 key={i}
                                 suggestions={(p.output as { suggestions: ReviewSuggestion[] }).suggestions}
                                 onApply={onCanvasStateWrite}
+                                onComplete={(summary) => sendMessage({ text: summary })}
                               />
                             );
                           }

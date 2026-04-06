@@ -1,16 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, X } from "lucide-react";
 import type { ReviewSuggestion } from "@/extensions/data-architect/tools/review-definition";
 
 interface ReviewSuggestionsProps {
   suggestions: ReviewSuggestion[];
   onApply?: (changes: Array<{ path: string; value: unknown }>) => void;
+  onComplete?: (summary: string) => void;
 }
 
-export function ReviewSuggestions({ suggestions, onApply }: ReviewSuggestionsProps) {
+export function ReviewSuggestions({ suggestions, onApply, onComplete }: ReviewSuggestionsProps) {
   const [decisions, setDecisions] = useState<Record<string, "accepted" | "denied">>({});
+  const completedRef = useRef(false);
 
   const handleDecision = (s: ReviewSuggestion, decision: "accepted" | "denied") => {
     setDecisions((prev) => ({ ...prev, [s.id]: decision }));
@@ -18,6 +20,19 @@ export function ReviewSuggestions({ suggestions, onApply }: ReviewSuggestionsPro
       onApply(s.actions);
     }
   };
+
+  // Auto-advance when all suggestions are decided
+  const allDecided = suggestions.length > 0 && suggestions.every((s) => s.id in decisions);
+  useEffect(() => {
+    if (allDecided && !completedRef.current && onComplete) {
+      completedRef.current = true;
+      const lines = suggestions.map((s) => {
+        const d = decisions[s.id];
+        return `- ${d === "accepted" ? "Accepted" : "Denied"}: "${s.title}"`;
+      });
+      onComplete(`All suggestions reviewed:\n${lines.join("\n")}\n\nProceed to the next step.`);
+    }
+  }, [allDecided, decisions, suggestions, onComplete]);
 
   const severityBorder = (sev: string) =>
     sev === "error" ? "border-red-500/40" : sev === "warning" ? "border-amber-500/40" : "border-blue-400/30";
