@@ -52,7 +52,7 @@ When the user asks to review, call `reviewDefinition` with the `suggestions` arr
 The suggestions are rendered as interactive cards in the chat panel — do NOT render ReviewCard components on the canvas.
 
 ### Step 3: Accept/Deny Suggestions
-Wait for the user to respond with their decisions in the chat. The user will accept or deny each suggestion via buttons, then submit. Apply accepted changes to the definition on the canvas.
+The user will accept or deny each suggestion individually via buttons in the chat. Each decision sends a message immediately (e.g. `Accept: "Missing description"`). Apply each accepted change to the definition on the canvas right away by outputting an updated spec code fence. Denied suggestions require no action.
 
 ### Step 4: Static Checks
 Run `staticCheck` with the current definition. If checks fail, show errors and return to the canvas for fixes.
