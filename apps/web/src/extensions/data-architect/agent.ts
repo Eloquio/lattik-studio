@@ -1,20 +1,23 @@
 import { ToolLoopAgent, zodSchema, gateway, stepCountIs } from "ai";
 import { z } from "zod";
-import { pipelineDefinitionSchema } from "./schema";
-import type { PipelineDefinition } from "./schema";
 import type { ExtensionAgent, AgentOptions } from "../types";
 import { skills } from "./skills";
 import {
   getSkillTool,
   createReadCanvasStateTool,
-  reviewDefinitionTool,
-  staticCheckTool,
-  updateDefinitionTool,
-  submitPRTool,
+  renderEntityFormTool,
+  renderDimensionFormTool,
+  renderLoggerTableFormTool,
+  renderLattikTableFormTool,
+  renderMetricFormTool,
+  createReviewDefinitionTool,
+  createStaticCheckTool,
+  createUpdateDefinitionTool,
+  createGenerateYamlTool,
+  createSubmitPRTool,
   listDefinitionsTool,
   getDefinitionTool,
 } from "./tools";
-import { catalog } from "./canvas/catalog";
 
 const skillList = skills
   .map((s) => `- **${s.id}**: ${s.description}`)
@@ -43,14 +46,20 @@ When you've finished helping the user with their request, ask: "Is there anythin
 - Do NOT auto-complete. Only hand back when the user explicitly confirms.
 
 ## Canvas Rendering
-When you need to render UI on the canvas (forms, previews, tables), output JSONL patches in a \`\`\`spec code fence. The available components and format are described below.
+**Always render forms via the per-kind render tools** — \`renderEntityForm\`, \`renderDimensionForm\`, \`renderLoggerTableForm\`, \`renderLattikTableForm\`, \`renderMetricForm\`. Pick the one that matches the kind you're defining and pass any \`initialState\` you've gleaned from the user's request. The canvas form appears immediately. NEVER emit a \`spec\` code fence or any JSONL patches; these render tools are the only canvas-rendering mechanism for this agent. After calling one, acknowledge briefly in prose (one sentence) and let the user edit the form directly.
 
-${catalog.prompt({ mode: "inline" })}
+## PR Submission Flow
+After the user is happy with the form, the fixed sequence is:
+1. \`staticCheck\` — fix any errors before continuing.
+2. \`updateDefinition\` — save the draft.
+3. \`generateYaml\` — renders the editable, syntax-highlighted YAML on the canvas. STOP here, tell the user the YAML is ready, and ask whether they want to create the PR. The user may manually adjust the YAML in the editor before answering.
+4. \`submitPR\` — only after the user explicitly confirms. Reads the (possibly edited) YAML directly from canvas state.
+
+When \`submitPR\` returns \`status: "submitted"\`, you MUST share the \`prUrl\` with the user as a clickable markdown link (e.g. \`[PR #42](<prUrl>)\`) in the same response. Never paraphrase or omit the URL.
 
 ## Guidelines
 - Be concise.
 - Use clear, descriptive names (snake_case).
-- When updating the pipeline, always send the COMPLETE definition.
 - Proactively suggest best practices for retention, deduplication, and aggregation.`;
 
 export function dataArchitectAgent(options?: AgentOptions): ExtensionAgent {
@@ -58,27 +67,27 @@ export function dataArchitectAgent(options?: AgentOptions): ExtensionAgent {
     ? `[CONTEXT] ${options.resumeContext}\n\n${instructions}`
     : instructions;
 
+  const getCanvasState = () => options?.canvasState;
+
   return new ToolLoopAgent({
     id: "data-architect",
     model: gateway("anthropic/claude-haiku-4.5"),
     instructions: finalInstructions,
     tools: {
       getSkill: getSkillTool,
-      readCanvasState: createReadCanvasStateTool(
-        () => options?.canvasState
-      ),
-      reviewDefinition: reviewDefinitionTool,
-      staticCheck: staticCheckTool,
-      updateDefinition: updateDefinitionTool,
-      submitPR: submitPRTool,
+      readCanvasState: createReadCanvasStateTool(getCanvasState),
+      renderEntityForm: renderEntityFormTool,
+      renderDimensionForm: renderDimensionFormTool,
+      renderLoggerTableForm: renderLoggerTableFormTool,
+      renderLattikTableForm: renderLattikTableFormTool,
+      renderMetricForm: renderMetricFormTool,
+      reviewDefinition: createReviewDefinitionTool(getCanvasState),
+      staticCheck: createStaticCheckTool(getCanvasState),
+      updateDefinition: createUpdateDefinitionTool(getCanvasState),
+      generateYaml: createGenerateYamlTool(getCanvasState),
+      submitPR: createSubmitPRTool(getCanvasState),
       listDefinitions: listDefinitionsTool,
       getDefinition: getDefinitionTool,
-      updatePipeline: {
-        description:
-          "Update the pipeline definition displayed on the canvas. Always send the complete definition.",
-        inputSchema: zodSchema(pipelineDefinitionSchema),
-        execute: async (pipeline: PipelineDefinition) => pipeline,
-      },
       handback: {
         description:
           "Hand control away from this agent. Use type 'pause' when the user wants to work on something else (off-topic). Use type 'complete' when the current task is finished and the user has confirmed they don't need more help.",

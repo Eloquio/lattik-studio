@@ -32,38 +32,48 @@ All fields are required. Fields with a default are pre-populated but can be over
 ## Workflow
 
 ### Step 1: Render Draft on Canvas
-Output a `spec` code fence rendering the `LoggerTableForm` component with initial state pre-populated from the conversation. The form renders:
-- Inline editable table name and description
-- Retention and dedup window fields (pre-filled with defaults)
-- Columns table showing implicit columns (event_id, event_timestamp, ds, hour) and an "Add column" button for user-defined columns
+Call `renderLoggerTableForm({initialState: {...}})` with whatever values you can glean from the user's request. The tool builds the canonical form spec server-side and the canvas updates immediately.
 
-State keys: `name`, `description`, `retention` (default: `"30d"`), `dedup_window` (default: `"1h"`), `user_columns` (array of `{name, type}`).
+Initial state fields (all optional — pass what you know, leave the rest for the user):
+- `name` — qualified table name in `schema.table_name` format, e.g. `"ingest.click_events"`
+- `description` — what events the table captures (10-500 chars)
+- `retention` — defaults to `"30d"` if omitted
+- `dedup_window` — defaults to `"1h"` if omitted
+- `user_columns` — array of `{name, type, dimension?, description?, pii?}`. Implicit columns (`event_id`, `event_timestamp`, `ds`, `hour`) are added automatically by the form — do NOT include them here.
 
-Do NOT add a separate Heading element — the form already includes its own title.
+**Do NOT emit any `spec` code fence.** `renderLoggerTableForm` is the only canvas-rendering mechanism for logger tables. After calling it, acknowledge briefly in prose ("I've set up the click_events form with one user_id column") and wait for the user to edit the form or ask to review it.
 
 ### Step 2: AI Review
-When the user asks to review, call `reviewDefinition` with the `suggestions` array. Analyze the definition and include suggestions checking:
-- Is the name in `schema.table_name` format?
-- Do any columns collide with implicit column names?
-- Are column types appropriate for their data?
-- Are descriptions provided for all columns?
-- Are dimension references consistent with existing dimensions?
+When the user asks to review, call `reviewDefinition({kind: "logger_table"})`. The tool runs a focused reviewer on the canvas form state and returns actionable fixes — you do NOT generate the suggestions yourself.
 
-Each suggestion MUST include `actions` — an array of canvas state patches (`{path, value}`) that will be applied when the user accepts. Use canvas state paths like `/description`, `/user_columns`, `/retention`, etc. Example: `actions: [{path: "/description", value: "Tracks user click events on the platform"}]`.
+**After the tool returns, STAY OUT OF THE WAY.** The suggestions are already rendered as interactive cards in the chat — the user clicks ✓ or ✗ directly on each card. Your role at this moment is minimal:
 
-The suggestions are rendered as interactive cards in the chat panel — do NOT render ReviewCard components on the canvas and do NOT output any spec code fences.
+- **Do NOT** list, summarize, paraphrase, or repeat the suggestions in prose. The cards already show them.
+- **Do NOT** ask the user "would you like me to accept all / accept some / reject some". The cards have buttons — that IS the interface.
+- Either say nothing at all, or at most one short sentence like "Please review the suggestions above." Then STOP.
+- Wait silently for the auto-summary message ("All suggestions reviewed: …" or "Review complete: no issues found") that arrives after the user finishes. When it arrives, proceed to Step 4.
+
+If the reviewer returns an empty list, the chat shows a small "no issues found" note and an auto-summary fires immediately — proceed to Step 4 without any prose response.
+
+Do NOT render ReviewCard components on the canvas and do NOT output any spec code fences during this step.
 
 ### Step 3: Accept/Deny Suggestions
 The user accepts or denies each suggestion via buttons in the chat. Accepted suggestions are applied directly to the canvas — no chat message is sent. After the user finishes reviewing, proceed to static checks.
 
 ### Step 4: Static Checks
-Run `staticCheck` with the current definition. If checks fail, show errors and return to the canvas for fixes.
+Run `staticCheck` with `kind: "logger_table"`. The tool reads the current canvas form state directly — do NOT pass a spec or specJson. The canvas-to-spec converter handles the `user_columns` → `columns` rename automatically. If checks fail, show errors and return to the canvas for fixes.
 
-### Step 5: Generate and Submit
-Use `updateDefinition` to save, then `submitPR` to create a PR.
+### Step 5: Save Draft
+Call `updateDefinition` with `kind: "logger_table"` to save the draft. Reads the spec from canvas state — do NOT pass a spec, name, or specJson.
+
+### Step 6: Generate YAML
+Call `generateYaml` with `kind: "logger_table"`. The tool replaces the canvas with an editable, syntax-highlighted YAML editor pre-filled from the current spec. **STOP after this call.** Tell the user briefly that the YAML is ready and ask whether they'd like to create the PR. The user may manually adjust the YAML in the editor before answering — that's expected. Do NOT call `submitPR` yet.
+
+### Step 7: Submit PR (only after explicit user confirmation)
+Once the user confirms they want to create the PR, call `submitPR` with `kind: "logger_table"`. It reads the (possibly user-edited) YAML files directly from the canvas YAML editor — do NOT pass a spec or files. When the tool returns `status: "submitted"`, share the returned `prUrl` with the user as a clickable markdown link, e.g. `[PR #42](<prUrl>)`. Never paraphrase or omit the URL.
 
 ## Updating an Existing Logger Table
-Use `listDefinitions` to find existing tables and `getDefinition` to load one. Then follow steps 2-5 above.
+Use `listDefinitions` to find existing tables and `getDefinition` to load one. Then follow steps 2-7 above.
 
 **Immutable after merge:** name.
 

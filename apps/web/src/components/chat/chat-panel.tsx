@@ -260,6 +260,12 @@ export function ChatPanel({
   }, [status, sendMessage, messages.length, handoffTrigger]);
 
   // Extract canvas spec from json-render data parts in assistant messages.
+  // Spec patches are cumulative across the stream — a later message may emit
+  // only state-level patches (e.g. appending a column) that assume structural
+  // elements from earlier messages are already present. Calling
+  // buildSpecFromParts on a single message starts from an empty spec and
+  // would drop those structural elements, blanking the canvas. Collect spec
+  // parts from ALL assistant messages so the rebuild is cumulative.
   // Deduplicate: only push to onCanvasStateChange when spec content changes,
   // since buildSpecFromParts returns a new object on every call.
   // Throttled via rAF to prevent cascading re-renders during rapid streaming
@@ -269,30 +275,68 @@ export function ChatPanel({
   const pendingSpecRef = useRef<{ spec: unknown; json: string } | null>(null);
   const rafIdRef = useRef<number>(0);
   useEffect(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i];
-      if (msg.role !== "assistant") continue;
-      const spec = buildSpecFromParts(msg.parts);
-      if (spec) {
-        const json = JSON.stringify(spec);
-        if (json !== prevSpecJsonRef.current) {
-          pendingSpecRef.current = { spec, json };
-          if (!rafIdRef.current) {
-            rafIdRef.current = requestAnimationFrame(() => {
-              rafIdRef.current = 0;
-              const pending = pendingSpecRef.current;
-              if (pending) {
-                pendingSpecRef.current = null;
-                prevSpecJsonRef.current = pending.json;
-                onCanvasStateChange(pending.spec);
-              }
-            });
-          }
+    const allParts = messages
+      .filter((m) => m.role === "assistant")
+      .flatMap((m) => m.parts);
+    if (allParts.length === 0) return;
+    const spec = buildSpecFromParts(allParts);
+    if (!spec) return;
+    const json = JSON.stringify(spec);
+    if (json === prevSpecJsonRef.current) return;
+    pendingSpecRef.current = { spec, json };
+    if (!rafIdRef.current) {
+      rafIdRef.current = requestAnimationFrame(() => {
+        rafIdRef.current = 0;
+        const pending = pendingSpecRef.current;
+        if (pending) {
+          pendingSpecRef.current = null;
+          prevSpecJsonRef.current = pending.json;
+          onCanvasStateChange(pending.spec);
         }
-        return;
-      }
+      });
     }
   }, [messages, onCanvasStateChange]);
+
+  // Watch for tool results that return a canvas spec and push it into the
+  // canvas. This is the modern path used by the Data Architect agent — instead
+  // of free-form generating JSONL spec patches, the agent calls one of the per-
+  // kind render tools (renderEntityForm, renderLoggerTableForm, etc.) or
+  // generateYaml, and the tool returns a complete server-built spec. The
+  // matched tools are:
+  //   - tool-render*Form (form rendering)
+  //   - tool-generateYaml (YAML editor rendering)
+  // This effect must run after the JSONL stream-rebuild effect above so its
+  // setCanvasSpec call wins on conflict (in practice there is no conflict —
+  // an agent that uses these tools doesn't emit data-spec parts at all).
+  const prevRenderFormSpecJsonRef = useRef<string>("");
+  useEffect(() => {
+    let latestSpec: unknown = null;
+    for (const msg of messages) {
+      if (msg.role !== "assistant") continue;
+      for (const part of msg.parts) {
+        const isRenderFormPart =
+          part.type.startsWith("tool-render") && part.type.endsWith("Form");
+        const isGenerateYamlPart = part.type === "tool-generateYaml";
+        if (
+          (isRenderFormPart || isGenerateYamlPart) &&
+          "state" in part &&
+          (part as { state: string }).state === "output-available" &&
+          "output" in part
+        ) {
+          const output = (part as { output?: unknown }).output;
+          if (output && typeof output === "object" && "spec" in output) {
+            latestSpec = (output as { spec: unknown }).spec;
+          }
+        }
+      }
+    }
+    if (latestSpec === null) return;
+    const json = JSON.stringify(latestSpec);
+    if (json === prevRenderFormSpecJsonRef.current) return;
+    prevRenderFormSpecJsonRef.current = json;
+    onCanvasStateChange(latestSpec);
+  }, [messages, onCanvasStateChange]);
+
   useEffect(() => {
     return () => {
       if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
@@ -350,7 +394,7 @@ export function ChatPanel({
       </div>
 
       {/* Messages area */}
-      <div className="flex flex-1 flex-col overflow-y-auto px-6 py-4">
+      <div className="scrollbar-thin flex flex-1 flex-col overflow-y-auto px-6 py-4">
         {messages.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3">
             <h2 className="text-2xl font-bold text-white tracking-tight">
@@ -388,13 +432,39 @@ export function ChatPanel({
                     <span className="text-xs font-semibold text-[#e0a96e]">
                       {getAgentLabel(message.id)}
                     </span>
-                    <div className="mt-1 border-l-2 border-[#e0a96e]/40 pl-4 text-sm text-white/90 prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-headings:text-white prose-strong:text-white prose-code:text-[#e0a96e] prose-code:bg-white/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-pre:bg-white/5 prose-pre:border prose-pre:border-white/10">
+                    <div className="mt-1 border-l-2 border-[#e0a96e]/40 pl-4 text-sm text-white/90 prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-headings:text-white prose-strong:text-white prose-code:text-[#e0a96e] prose-code:bg-white/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-pre:bg-white/5 prose-pre:border prose-pre:border-white/10 prose-a:text-[#e0a96e] prose-a:font-medium prose-a:underline prose-a:decoration-[#e0a96e]/50 prose-a:underline-offset-2 hover:prose-a:text-[#f0bb84] hover:prose-a:decoration-[#e0a96e]">
                       {message.parts.map((part, i) => {
                         if (part.type === "text") {
-                          return <Markdown key={i} skipHtml disallowedElements={["script", "iframe", "object", "embed", "form"]}>{part.text}</Markdown>;
+                          return (
+                            <Markdown
+                              key={i}
+                              skipHtml
+                              disallowedElements={["script", "iframe", "object", "embed", "form"]}
+                              components={{
+                                a: ({ href, children, ...props }) => (
+                                  <a
+                                    {...props}
+                                    href={href}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                  >
+                                    {children}
+                                  </a>
+                                ),
+                              }}
+                            >
+                              {part.text}
+                            </Markdown>
+                          );
                         }
                         if (part.type.startsWith("tool-") && "state" in part) {
-                          const p = part as { state: string; input?: unknown; output?: unknown };
+                          const p = part as {
+                            state: string;
+                            input?: unknown;
+                            output?: unknown;
+                            rawInput?: unknown;
+                            errorText?: string;
+                          };
                           const name = part.type.slice(5);
                           // Render review suggestions as interactive cards
                           if (
@@ -419,8 +489,9 @@ export function ChatPanel({
                               key={i}
                               toolName={name}
                               state={p.state}
-                              input={p.input}
+                              input={p.input ?? p.rawInput}
                               output={p.output}
+                              errorText={p.errorText}
                             />
                           );
                         }

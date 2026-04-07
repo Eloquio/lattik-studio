@@ -66,13 +66,15 @@ export default function Home() {
     localStorage.setItem(CHAT_ID_KEY, chat.id);
   }, [chat.id]);
 
-  // When a new spec arrives from the AI stream, set it and open the canvas
+  // When a new spec arrives from the AI stream, apply it through
+  // applyStreamSpec so any locally-edited paths (form input, accepted
+  // suggestion patches) are preserved instead of clobbered by the rebuild.
   const handleSpecFromStream = useCallback((spec: unknown) => {
-    canvas.setCanvasSpec(spec as Spec | null);
+    canvas.applyStreamSpec(spec);
     if (spec !== null) {
       canvas.open();
     }
-  }, [canvas.setCanvasSpec, canvas.open]);
+  }, [canvas.applyStreamSpec, canvas.open]);
 
   const handleNewChat = useCallback(() => {
     setChat((prev) => ({ id: generateId(), renderKey: prev.renderKey + 1 }));

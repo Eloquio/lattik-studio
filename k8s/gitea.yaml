@@ -30,7 +30,7 @@ spec:
     spec:
       containers:
         - name: gitea
-          image: gitea/gitea:1.22-rootless
+          image: gitea/gitea:1.22
           ports:
             - containerPort: 3000
               name: http
