@@ -1,5 +1,4 @@
 import {
-  streamText,
   gateway,
   UIMessage,
   zodSchema,
@@ -91,7 +90,7 @@ export async function POST(req: Request) {
 
   // Rate limiting (30 requests per minute per user)
   const userId = session.user.id ?? session.user.email ?? "unknown";
-  const { allowed, remaining } = rateLimit(`chat:${userId}`, { maxRequests: 30, windowMs: 60_000 });
+  const { allowed, remaining } = await rateLimit(`chat:${userId}`, { maxRequests: 30, windowMs: 60_000 });
   if (!allowed) {
     return Response.json(
       { error: "Too many requests. Please wait before sending another message." },
@@ -147,9 +146,13 @@ export async function POST(req: Request) {
   if (agent) {
     const cleanMessages = cleanUIMessages(messages, agent.tools ?? {});
 
+    // Forward the request's abort signal so that closing the browser tab or
+    // navigating away mid-stream actually stops the upstream LLM call instead
+    // of leaving it generating tokens that nobody is reading.
     const stream = await createAgentUIStream({
       agent,
       uiMessages: cleanMessages,
+      abortSignal: req.signal,
     });
     return createUIMessageStreamResponse({
       stream: pipeJsonRender(stream),

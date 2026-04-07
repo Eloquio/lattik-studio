@@ -15,7 +15,7 @@ All fields are required.
 ## Workflow
 
 ### Step 1: Render Draft on Canvas
-Call `renderMetricForm({initialState: {...}})` with whatever values you can glean from the user's request. The tool builds the canonical form spec server-side and the canvas updates immediately.
+**FIRST ACTION on this workflow:** call `renderMetricForm` BEFORE writing any prose response and BEFORE asking any clarifying questions. Pass `initialState: {}` if you have nothing, or whatever scraps you can glean from the user's request. The form fields ARE the questions — do not ask the user for `name`, `calculations`, etc. in chat first. The canvas updates immediately and the user fills the form directly.
 
 Initial state fields (all optional — pass what you know, leave the rest for the user):
 - `name` — snake_case metric identifier (e.g. `"daily_active_users"`)

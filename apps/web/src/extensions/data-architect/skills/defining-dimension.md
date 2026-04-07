@@ -16,7 +16,7 @@ All fields are required.
 ## Workflow
 
 ### Step 1: Render Draft on Canvas
-Call `renderDimensionForm({initialState: {...}})` with whatever values you can glean from the user's request. The tool builds the canonical form spec server-side and the canvas updates immediately. If the referenced entity doesn't exist yet, suggest defining it first.
+**FIRST ACTION on this workflow:** call `renderDimensionForm` BEFORE writing any prose response and BEFORE asking any clarifying questions. Pass `initialState: {}` if you have nothing, or whatever scraps you can glean from the user's request. The form fields ARE the questions — do not ask the user for `name`, `entity`, `source_table`, etc. in chat first. The canvas updates immediately and the user fills the form directly. If the referenced entity doesn't exist yet, mention that briefly after rendering.
 
 Initial state fields (all optional — pass what you know, leave the rest for the user):
 - `name` — snake_case dimension identifier, typically prefixed with the entity name (e.g. `"user_home_country"`)

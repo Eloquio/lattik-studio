@@ -51,8 +51,17 @@ const skillsDir = join(
   dirname(fileURLToPath(import.meta.url))
 );
 
+// Skill markdown is immutable at runtime — cache it on first read so the
+// agent's per-call `getSkill` tool doesn't sync-read the same file on every
+// invocation. Keyed by skill id.
+const skillCache = new Map<string, string>();
+
 export function getSkillContent(skillId: string): string | null {
+  const cached = skillCache.get(skillId);
+  if (cached !== undefined) return cached;
   const skill = skills.find((s) => s.id === skillId);
   if (!skill) return null;
-  return readFileSync(join(skillsDir, skill.filename), "utf-8");
+  const content = readFileSync(join(skillsDir, skill.filename), "utf-8");
+  skillCache.set(skillId, content);
+  return content;
 }

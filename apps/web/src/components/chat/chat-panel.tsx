@@ -157,6 +157,15 @@ export function ChatPanel({
           const toolOutput = part.output as Record<string, unknown>;
           handoffProcessedRef.current.add(msg.id);
 
+          // If the server-side tool returned an error (e.g. max task depth
+          // reached), do NOT mutate the task stack or active agent. Mark
+          // processed and bail so we don't end up in a state where the
+          // client thinks we handed off but the server refused.
+          if ("error" in toolOutput && typeof toolOutput.error === "string") {
+            console.warn("[handoff] server rejected handoff:", toolOutput.error);
+            return;
+          }
+
           // CASE 1: Forward handoff (assistant → specialist)
           if ("handedOffTo" in toolOutput && toolOutput.handedOffTo) {
             const targetAgent = toolOutput.handedOffTo as string;

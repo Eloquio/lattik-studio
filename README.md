@@ -24,28 +24,43 @@ A glassmorphic AI chat application template built with Next.js, Vercel AI SDK, a
 
 ## Getting Started
 
-1. Clone the repo and install dependencies:
+1. Install pnpm (if you don't have it already):
+
+```bash
+# Via npm
+npm install -g pnpm
+
+# Or via Homebrew (macOS)
+brew install pnpm
+
+# Or via standalone script
+curl -fsSL https://get.pnpm.io/install.sh | sh -
+```
+
+See [pnpm.io/installation](https://pnpm.io/installation) for more options.
+
+2. Clone the repo and install dependencies:
 
 ```bash
 pnpm install
 ```
 
-2. Set up your Vercel project and pull environment variables:
+3. Set up your Vercel project and pull environment variables:
 
 ```bash
 vercel link
 vercel env pull
 ```
 
-3. Push the database schema to Neon:
+4. Push the database schema to Neon:
 
 ```bash
 cd apps/web && pnpm drizzle-kit push
 ```
 
-4. Add a background image at `apps/web/public/bg.avif`
+5. Add a background image at `apps/web/public/bg.avif`
 
-5. Start the dev server:
+6. Start the dev server:
 
 ```bash
 pnpm dev

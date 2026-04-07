@@ -33,32 +33,39 @@ export default function Home() {
     renderKey: 0,
   }));
 
-  // Restore last conversation on mount
+  // Restore last conversation on mount.
+  //
+  // React 18 auto-batches setState calls inside the same task, so the four
+  // updates below land in a single render. We still flush them in a fixed
+  // order — extensionId BEFORE canvasSpec — so the canvas component, which
+  // is keyed on extensionId, doesn't briefly mount with the wrong extension
+  // pointing at the new spec. `flushSync` would force individual paints; we
+  // explicitly want React's batching here.
   useEffect(() => {
     const savedId = localStorage.getItem(CHAT_ID_KEY);
-    if (savedId) {
-      getConversation(savedId).then((conv) => {
-        if (conv && Array.isArray(conv.messages)) {
-          setChat({
-            id: savedId,
-            renderKey: 1,
-            initialMessages: conv.messages as UIMessage[],
-            savedTitle: conv.title,
-          });
-          if (conv.canvasState) {
-            canvas.setCanvasSpec(conv.canvasState as Spec);
-          }
-          if (conv.taskStack) {
-            setTaskStack(conv.taskStack as TaskStackEntry[]);
-          }
-          if (conv.activeExtensionId) {
-            setActiveExtensionId(conv.activeExtensionId);
-          }
-        }
-      }).catch((error) => {
+    if (!savedId) return;
+    let cancelled = false;
+    getConversation(savedId)
+      .then((conv) => {
+        if (cancelled || !conv || !Array.isArray(conv.messages)) return;
+        // Apply non-canvas state first so the canvas component sees a
+        // consistent extension/task-stack pair when it (re)mounts.
+        setActiveExtensionId(conv.activeExtensionId ?? null);
+        setTaskStack((conv.taskStack as TaskStackEntry[]) ?? []);
+        canvas.setCanvasSpec((conv.canvasState as Spec) ?? null);
+        setChat({
+          id: savedId,
+          renderKey: 1,
+          initialMessages: conv.messages as UIMessage[],
+          savedTitle: conv.title,
+        });
+      })
+      .catch((error) => {
         console.error("Failed to restore conversation:", error);
       });
-    }
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Persist active chat ID

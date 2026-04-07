@@ -34,27 +34,23 @@ export async function updateDefinition(
   const user = await requireUser();
   const db = getDb();
 
-  // Verify the user owns this definition
-  const existing = await db
-    .select({ id: schema.definitions.id })
-    .from(schema.definitions)
+  // Ownership check is part of the UPDATE itself — a separate SELECT-then-UPDATE
+  // is racy: another request could rewrite the row's createdBy between the two
+  // statements, and PostgreSQL would happily run the UPDATE on the wrong row.
+  const [row] = await db
+    .update(schema.definitions)
+    .set({ ...data, updatedAt: new Date() })
     .where(
       and(
         eq(schema.definitions.id, id),
         eq(schema.definitions.createdBy, user.id!)
       )
     )
-    .limit(1);
+    .returning();
 
-  if (existing.length === 0) {
+  if (!row) {
     throw new Error("Definition not found or unauthorized");
   }
-
-  const [row] = await db
-    .update(schema.definitions)
-    .set({ ...data, updatedAt: new Date() })
-    .where(eq(schema.definitions.id, id))
-    .returning();
 
   return row;
 }
