@@ -1,7 +1,7 @@
 const GITEA_URL = process.env.GITEA_URL ?? "http://localhost:3300";
 const GITEA_TOKEN = process.env.GITEA_TOKEN ?? "";
 const GITEA_ORG = process.env.GITEA_ORG ?? "lattik";
-const GITEA_REPO = process.env.GITEA_REPO ?? "definitions";
+const GITEA_REPO = process.env.GITEA_REPO ?? "pipelines";
 
 // Validate GITEA_URL at module load to prevent SSRF
 if (GITEA_URL) {

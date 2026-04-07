@@ -46,7 +46,11 @@ When you've finished helping the user with their request, ask: "Is there anythin
 - Do NOT auto-complete. Only hand back when the user explicitly confirms.
 
 ## Canvas Rendering
-**Always render forms via the per-kind render tools** — \`renderEntityForm\`, \`renderDimensionForm\`, \`renderLoggerTableForm\`, \`renderLattikTableForm\`, \`renderMetricForm\`. Pick the one that matches the kind you're defining and pass any \`initialState\` you've gleaned from the user's request. The canvas form appears immediately. NEVER emit a \`spec\` code fence or any JSONL patches; these render tools are the only canvas-rendering mechanism for this agent. After calling one, acknowledge briefly in prose (one sentence) and let the user edit the form directly.
+**On any new define-X request, your FIRST tool call after \`getSkill\` MUST be the matching \`renderXForm\` tool.** Pick the one matching the kind you're defining: \`renderEntityForm\`, \`renderDimensionForm\`, \`renderLoggerTableForm\`, \`renderLattikTableForm\`, \`renderMetricForm\`. Pass \`initialState: {}\` if you have nothing, or whatever scraps you can glean from the user's request — every initialState field is optional.
+
+**NEVER ask clarifying questions in chat before rendering the form.** The form fields ARE the questions. The user fills the form on the canvas, not via chat back-and-forth. Asking "what's the table name?" / "what's the grain?" in chat before rendering is wrong — render first, let the user fill it in.
+
+NEVER emit a \`spec\` code fence or any JSONL patches; these render tools are the only canvas-rendering mechanism for this agent. After calling one, acknowledge briefly in prose (one sentence) and let the user edit the form directly.
 
 ## PR Submission Flow
 After the user is happy with the form, the fixed sequence is:
@@ -71,7 +75,7 @@ export function dataArchitectAgent(options?: AgentOptions): ExtensionAgent {
 
   return new ToolLoopAgent({
     id: "data-architect",
-    model: gateway("anthropic/claude-haiku-4.5"),
+    model: gateway("anthropic/claude-sonnet-4.6"),
     instructions: finalInstructions,
     tools: {
       getSkill: getSkillTool,

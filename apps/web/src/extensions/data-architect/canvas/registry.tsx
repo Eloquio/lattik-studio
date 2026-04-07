@@ -88,7 +88,7 @@ function genKey(prefix = "k") { return `${prefix}_${++_nextKey}_${Date.now()}`; 
 // ---- Entity combobox with inline create ----
 interface EntityOption { name: string; id_field: string; id_type: string }
 
-function EntityCombobox({ value, onChange, pkColumn, onSubmit }: { value: string; onChange: (v: string) => void; pkColumn: string; onSubmit?: () => void }) {
+function EntityCombobox({ value, onChange, pkColumn, onSubmit, variant = "pill" }: { value: string; onChange: (v: string) => void; pkColumn: string; onSubmit?: () => void; variant?: "pill" | "default" }) {
   const { refresh: refreshRegistry } = useEntityRegistry();
   const [open, setOpen] = useState(false);
   const [entities, setEntities] = useState<EntityOption[]>([]);
@@ -97,6 +97,8 @@ function EntityCombobox({ value, onChange, pkColumn, onSubmit }: { value: string
   const [creating, setCreating] = useState(false);
   const [newDesc, setNewDesc] = useState("");
   const [newIdType, setNewIdType] = useState("string");
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const fetchEntities = async () => {
@@ -142,14 +144,35 @@ function EntityCombobox({ value, onChange, pkColumn, onSubmit }: { value: string
   const inferredIdField = pkColumn || `${value}_id`;
 
   const handleCreate = async () => {
-    if (!value.trim()) return;
+    if (!value.trim() || submitting) return;
+    setSubmitting(true);
+    setCreateError(null);
     try {
       await createDefinition({ kind: "entity", name: value.trim(), spec: { name: value.trim(), description: newDesc.trim(), id_field: inferredIdField, id_type: newIdType } });
       setEntities((prev) => [...prev, { name: value.trim(), id_field: inferredIdField, id_type: newIdType }]);
       refreshRegistry();
       setCreating(false); setOpen(false); setNewDesc(""); setNewIdType("string");
-    } catch { /* silent — will fail at static check */ }
+    } catch (err) {
+      // Surface failures rather than swallowing them. The previous "silent —
+      // will fail at static check" path was misleading: static check runs
+      // *after* the entity is supposed to exist, so the user lost the
+      // entity-create attempt without ever knowing.
+      const message = err instanceof Error ? err.message : "Failed to create entity. Please try again.";
+      setCreateError(message);
+    } finally {
+      setSubmitting(false);
+    }
   };
+
+  // Variant-specific styling. The "pill" variant is the compact form used
+  // inside the lattik-table primary-key pill (tight spacing, blue text). The
+  // "default" variant is the full-size bordered input used in standalone form
+  // fields (DimensionForm.entity, DimensionCombobox create popover, etc.).
+  const isDefault = variant === "default";
+  const inputClass = isDefault
+    ? inputCls
+    : "w-14 bg-transparent text-[10px] text-blue-600 placeholder:text-stone-400 focus:outline-none";
+  const placeholder = isDefault ? "e.g. user" : "entity";
 
   return (
     <div ref={containerRef} className="relative">
@@ -158,10 +181,10 @@ function EntityCombobox({ value, onChange, pkColumn, onSubmit }: { value: string
         onFocus={() => { fetchEntities(); setOpen(true); setActiveIdx(-1); }}
         onBlur={(e) => { if (!containerRef.current?.contains(e.relatedTarget)) { setTimeout(() => { setOpen(false); setCreating(false); }, 150); } }}
         onKeyDown={handleKeyDown}
-        placeholder="entity" autoComplete="off" data-1p-ignore data-lpignore="true" data-form-type="other"
-        className="w-14 bg-transparent text-[10px] text-blue-600 placeholder:text-stone-400 focus:outline-none" />
+        placeholder={placeholder} autoComplete="off" data-1p-ignore data-lpignore="true" data-form-type="other"
+        className={inputClass} />
       {open && loaded && totalItems > 0 && !creating && (
-        <div className="absolute left-0 top-full z-20 mt-1 min-w-[10rem] rounded-md border border-stone-200 bg-white py-1 shadow-lg max-h-36 overflow-y-auto">
+        <div className="absolute left-0 top-full z-30 mt-1 min-w-[10rem] rounded-md border border-stone-200 bg-white py-1 shadow-lg max-h-36 overflow-y-auto">
           {filtered.map((e, i) => (
             <button key={e.name} onMouseDown={(e_) => { e_.preventDefault(); select(e.name); }}
               className={`block w-full px-2.5 py-1 text-left text-[10px] transition-colors ${i === activeIdx ? "bg-stone-100 text-amber-700 font-medium" : e.name === value ? "text-amber-700 font-medium" : "text-stone-700 hover:bg-stone-50"}`}>
@@ -178,7 +201,7 @@ function EntityCombobox({ value, onChange, pkColumn, onSubmit }: { value: string
         </div>
       )}
       {creating && (
-        <div data-entity-popover className="absolute left-0 top-full z-20 mt-1 w-[16rem] rounded-xl border border-stone-200 bg-white shadow-xl"
+        <div data-entity-popover className="absolute left-0 top-full z-30 mt-1 w-[16rem] rounded-xl border border-stone-200 bg-white shadow-xl"
           onMouseDown={(e) => e.preventDefault()}
           onKeyDown={(e) => { if (e.key === "Escape") { setCreating(false); setOpen(false); } if (e.key === "Enter") { e.preventDefault(); handleCreate(); } }}>
           <div className="flex items-center justify-between px-3 py-1.5 bg-amber-50 border-b border-amber-100 rounded-t-xl">
@@ -200,11 +223,262 @@ function EntityCombobox({ value, onChange, pkColumn, onSubmit }: { value: string
             <input type="text" value={newDesc} onChange={(e) => setNewDesc(e.target.value)}
               placeholder="Describe this entity..." autoFocus autoComplete="off" data-1p-ignore data-lpignore="true" data-form-type="other"
               className="w-full bg-transparent text-[10px] text-stone-600 placeholder:text-stone-300 focus:outline-none" />
+            {createError && (
+              <div className="rounded-md bg-red-50 px-2 py-1 text-[10px] text-red-600 border border-red-100">
+                {createError}
+              </div>
+            )}
             <div className="flex items-center justify-end gap-2 pt-1.5 border-t border-stone-100">
-              <button onMouseDown={(e) => { e.preventDefault(); setCreating(false); }}
+              <button onMouseDown={(e) => { e.preventDefault(); setCreating(false); setCreateError(null); }}
                 className="text-[10px] text-stone-400 hover:text-stone-600 transition-colors">Cancel</button>
               <button onMouseDown={(e) => { e.preventDefault(); handleCreate(); }}
-                className="rounded-full bg-stone-800 px-2.5 py-0.5 text-[10px] font-medium text-white hover:bg-stone-700 transition-colors">Create</button>
+                disabled={submitting}
+                className="rounded-full bg-stone-800 px-2.5 py-0.5 text-[10px] font-medium text-white hover:bg-stone-700 transition-colors disabled:opacity-50">{submitting ? "Creating..." : "Create"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- Dimension combobox with inline create ----
+//
+// Mirrors EntityCombobox but operates on dimensions. Used inside the Logger
+// Table column popup so users can pick or create a dimension without leaving
+// the table form. The create popover auto-fills source_table from the parent
+// table name and source_column / data_type from the column being added, so
+// the inline create only requires the user to confirm the entity + a short
+// description.
+interface DimensionOption { name: string; entity: string; source_table: string; source_column: string; data_type: string; description?: string }
+
+function DimensionCombobox({
+  value,
+  onChange,
+  parentTableName,
+  columnName,
+  columnType,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  parentTableName: string;
+  columnName: string;
+  columnType: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [dimensions, setDimensions] = useState<DimensionOption[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(-1);
+  const [creating, setCreating] = useState(false);
+  const [newEntity, setNewEntity] = useState("");
+  const [newSourceTable, setNewSourceTable] = useState("");
+  const [newSourceColumn, setNewSourceColumn] = useState("");
+  const [newDataType, setNewDataType] = useState("string");
+  const [newDesc, setNewDesc] = useState("");
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const dimInvalid = value.length > 0 && !SNAKE_CASE_RE.test(value);
+
+  const fetchDimensions = async () => {
+    if (loaded) return;
+    try {
+      const defs = await listDefinitions("dimension");
+      setDimensions(defs.map((d) => d.spec as DimensionOption));
+      setLoaded(true);
+    } catch { setLoaded(true); }
+  };
+
+  const filtered = dimensions.filter((d) => !value || d.name.includes(value.toLowerCase()));
+  const exactMatch = dimensions.some((d) => d.name === value);
+  const showCreateOption = !!value.trim() && !exactMatch && loaded && !dimInvalid;
+  const totalItems = filtered.length + (showCreateOption ? 1 : 0);
+
+  const select = (name: string) => { onChange(name); setOpen(false); setActiveIdx(0); };
+
+  // Reset highlight to first item whenever the option list changes
+  useEffect(() => {
+    if (open && totalItems > 0) setActiveIdx(0);
+    else setActiveIdx(-1);
+  }, [open, totalItems, value]);
+
+  // Seed the create popover defaults from the parent column context the
+  // moment the user opens it, so the popover always reflects the latest
+  // column name / type instead of stale state from a previous open.
+  const openCreate = () => {
+    setNewEntity("");
+    setNewSourceTable(parentTableName || "");
+    setNewSourceColumn(columnName || "");
+    setNewDataType(columnType || "string");
+    setNewDesc("");
+    setCreateError(null);
+    setCreating(true);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") { setOpen(false); setCreating(false); return; }
+    if (creating) return;
+    if (!open || totalItems === 0) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); setActiveIdx((prev) => (prev + 1) % totalItems); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActiveIdx((prev) => (prev <= 0 ? totalItems - 1 : prev - 1)); }
+    else if (e.key === "Enter") {
+      e.preventDefault(); e.stopPropagation();
+      const idx = activeIdx < 0 ? 0 : activeIdx;
+      if (idx < filtered.length) select(filtered[idx].name);
+      else if (showCreateOption) openCreate();
+    }
+  };
+
+  const handleCreate = async () => {
+    const name = value.trim();
+    if (!name || submitting) return;
+    if (!SNAKE_CASE_RE.test(name)) { setCreateError("Name must be snake_case"); return; }
+    if (!newEntity.trim()) { setCreateError("Entity is required"); return; }
+    if (!newSourceTable.trim()) { setCreateError("Source table is required"); return; }
+    if (!newSourceColumn.trim()) { setCreateError("Source column is required"); return; }
+    if (!newDataType.trim()) { setCreateError("Data type is required"); return; }
+    setSubmitting(true);
+    setCreateError(null);
+    try {
+      const spec = {
+        name,
+        description: newDesc.trim(),
+        entity: newEntity.trim(),
+        source_table: newSourceTable.trim(),
+        source_column: newSourceColumn.trim(),
+        data_type: newDataType,
+      };
+      await createDefinition({ kind: "dimension", name, spec });
+      setDimensions((prev) => [...prev, spec as DimensionOption]);
+      onChange(name);
+      setCreating(false);
+      setOpen(false);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to create dimension. Please try again.";
+      setCreateError(message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div ref={containerRef} className="relative">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => { onChange(e.target.value); setOpen(true); setActiveIdx(-1); }}
+        onFocus={() => { fetchDimensions(); setOpen(true); setActiveIdx(-1); }}
+        onBlur={(e) => { if (!containerRef.current?.contains(e.relatedTarget)) { setTimeout(() => { setOpen(false); setCreating(false); }, 150); } }}
+        onKeyDown={handleKeyDown}
+        placeholder="Bind to dimension if applicable"
+        autoComplete="off" data-1p-ignore data-lpignore="true" data-form-type="other"
+        className={`flex-1 min-w-0 w-full bg-transparent text-xs text-stone-600 placeholder:text-stone-300 focus:outline-none ${dimInvalid ? "text-red-500" : ""}`}
+      />
+      {dimInvalid && <span className="text-[10px] text-red-500">Must be snake_case</span>}
+      {open && loaded && totalItems > 0 && !creating && (
+        <div className="absolute left-0 top-full z-30 mt-1 min-w-[14rem] rounded-md border border-stone-200 bg-white py-1 shadow-lg max-h-44 overflow-y-auto">
+          {filtered.map((d, i) => (
+            <button
+              key={d.name}
+              onMouseDown={(e_) => { e_.preventDefault(); select(d.name); }}
+              className={`block w-full px-2.5 py-1 text-left text-[10px] transition-colors ${i === activeIdx ? "bg-stone-100 text-amber-700 font-medium" : d.name === value ? "text-amber-700 font-medium" : "text-stone-700 hover:bg-stone-50"}`}
+            >
+              <div className="flex items-center gap-1.5">
+                <span className="font-mono">{d.name}</span>
+                <span className="text-stone-400">{d.entity}</span>
+              </div>
+              <div className="text-[9px] text-stone-400 truncate">{d.source_table}.{d.source_column}</div>
+            </button>
+          ))}
+          {showCreateOption && (
+            <button
+              onMouseDown={(e) => { e.preventDefault(); openCreate(); }}
+              className={`block w-full px-2.5 py-1 text-left text-[10px] border-t border-stone-100 transition-colors ${activeIdx === filtered.length ? "bg-stone-100 text-amber-700 font-medium" : "text-amber-600 hover:bg-stone-50"}`}
+            >
+              <Plus className="inline h-2.5 w-2.5 mr-0.5" />Create &ldquo;{value}&rdquo;
+            </button>
+          )}
+        </div>
+      )}
+      {creating && (
+        <div
+          data-entity-popover
+          className="absolute left-0 top-full z-30 mt-1 w-[18rem] rounded-xl border border-stone-200 bg-white shadow-xl"
+          onMouseDown={(e) => e.preventDefault()}
+          onKeyDown={(e) => { if (e.key === "Escape") { setCreating(false); setOpen(false); } }}
+        >
+          <div className="flex items-center justify-between px-3 py-1.5 bg-amber-50 border-b border-amber-100 rounded-t-xl">
+            <span className="text-[10px] font-medium text-amber-700">Create Dimension &ldquo;{value}&rdquo;</span>
+            <button
+              onMouseDown={(e) => { e.preventDefault(); setCreating(false); }}
+              className="flex h-4 w-4 items-center justify-center rounded text-amber-400 hover:text-amber-700 transition-colors"
+            >
+              <X className="h-2.5 w-2.5" />
+            </button>
+          </div>
+          <div className="flex flex-col gap-2 px-3 py-2.5">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-stone-400 shrink-0 w-16">Entity:</span>
+              <div className="flex-1">
+                <EntityCombobox value={newEntity} onChange={setNewEntity} pkColumn="" />
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-stone-400 shrink-0 w-16">Source tbl:</span>
+              <input
+                type="text"
+                value={newSourceTable}
+                onChange={(e) => setNewSourceTable(e.target.value)}
+                placeholder="schema.table_name"
+                autoComplete="off" data-1p-ignore data-lpignore="true" data-form-type="other"
+                className="flex-1 min-w-0 bg-transparent text-[10px] font-mono text-stone-700 placeholder:text-stone-300 focus:outline-none"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-stone-400 shrink-0 w-16">Source col:</span>
+              <input
+                type="text"
+                value={newSourceColumn}
+                onChange={(e) => setNewSourceColumn(e.target.value)}
+                placeholder="column_name"
+                autoComplete="off" data-1p-ignore data-lpignore="true" data-form-type="other"
+                className="flex-1 min-w-0 bg-transparent text-[10px] font-mono text-stone-700 placeholder:text-stone-300 focus:outline-none"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-stone-400 shrink-0 w-16">Data type:</span>
+              <div className="flex-1">
+                <TypeCombobox value={newDataType} onChange={setNewDataType} />
+              </div>
+            </div>
+            <input
+              type="text"
+              value={newDesc}
+              onChange={(e) => setNewDesc(e.target.value)}
+              placeholder="Describe this dimension..."
+              autoFocus autoComplete="off" data-1p-ignore data-lpignore="true" data-form-type="other"
+              className="w-full bg-transparent text-[10px] text-stone-600 placeholder:text-stone-300 focus:outline-none border-t border-stone-100 pt-2"
+            />
+            {createError && (
+              <div className="rounded-md bg-red-50 px-2 py-1 text-[10px] text-red-600 border border-red-100">
+                {createError}
+              </div>
+            )}
+            <div className="flex items-center justify-end gap-2 pt-1.5 border-t border-stone-100">
+              <button
+                onMouseDown={(e) => { e.preventDefault(); setCreating(false); setCreateError(null); }}
+                className="text-[10px] text-stone-400 hover:text-stone-600 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onMouseDown={(e) => { e.preventDefault(); handleCreate(); }}
+                disabled={submitting}
+                className="rounded-full bg-stone-800 px-2.5 py-0.5 text-[10px] font-medium text-white hover:bg-stone-700 transition-colors disabled:opacity-50"
+              >
+                {submitting ? "Creating..." : "Create"}
+              </button>
             </div>
           </div>
         </div>
@@ -762,18 +1036,16 @@ export const { registry, handlers } = defineRegistry(catalog, {
                     placeholder="Describe the column"
                     className="w-full bg-transparent text-xs text-stone-500 placeholder:text-stone-300 focus:outline-none" />
 
-                  {/* Dimension + Entity */}
-                  {(() => {
-                    const dimVal = editIdx !== null ? editDim : newColDim;
-                    const dimInvalid = dimVal.length > 0 && !SNAKE_CASE_RE.test(dimVal);
-                    return (<div className="flex flex-col gap-1">
-                      <input type="text" value={dimVal}
-                        onChange={(e) => editIdx !== null ? setEditDim(e.target.value) : setNewColDim(e.target.value)}
-                        placeholder="Bind to dimension if applicable"
-                        className={`flex-1 min-w-0 bg-transparent text-xs text-stone-600 placeholder:text-stone-300 focus:outline-none ${dimInvalid ? "text-red-500" : ""}`} />
-                      {dimInvalid && <span className="text-[10px] text-red-500">Must be snake_case</span>}
-                    </div>);
-                  })()}
+                  {/* Dimension (with inline create) */}
+                  <div className="flex flex-col gap-1">
+                    <DimensionCombobox
+                      value={editIdx !== null ? editDim : newColDim}
+                      onChange={(v) => editIdx !== null ? setEditDim(v) : setNewColDim(v)}
+                      parentTableName={name}
+                      columnName={editIdx !== null ? editName : newColName}
+                      columnType={editIdx !== null ? editType : newColType}
+                    />
+                  </div>
 
                   {/* Actions */}
                   <div className="flex items-center justify-end gap-2 pt-2 border-t border-stone-100">
@@ -850,8 +1122,12 @@ export const { registry, handlers } = defineRegistry(catalog, {
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs font-semibold text-amber-800">Entity</label>
-            <input type="text" value={entity} onChange={(e) => store.set("/entity", e.target.value)}
-              placeholder="e.g. user" className={inputCls} />
+            <EntityCombobox
+              variant="default"
+              value={entity}
+              onChange={(v) => store.set("/entity", v)}
+              pkColumn=""
+            />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
@@ -941,7 +1217,7 @@ export const { registry, handlers } = defineRegistry(catalog, {
       const retention = (store.get("/retention") as string) ?? "30d";
 
       interface PK { _key: string; column: string; entity: string }
-      interface FCol { _key: string; name: string; agg?: string; merge?: string }
+      interface FCol { _key: string; name: string; type?: string; agg?: string; merge?: string; expr?: string }
       interface KM { _key: string; pk_column: string; source_column: string }
       interface CF { _key: string; name: string; source: string; key_mapping?: KM[]; columns: FCol[] }
       interface DC { _key: string; name: string; expr: string }
@@ -1030,6 +1306,88 @@ export const { registry, handlers } = defineRegistry(catalog, {
             </div>
           </div>
 
+          {/* Columns — shown once primary keys are provided */}
+          {pks.some((pk) => !!pk.column) && (
+            <div className="flex flex-col gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-stone-500">Columns</span>
+              <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-stone-200 bg-stone-50">
+                      <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Column</th>
+                      <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Type</th>
+                      <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Source</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {/* Primary key columns (locked — they define the grain) */}
+                    {pks.filter((pk) => pk.column).map((pk) => (
+                      <tr key={pk._key}
+                        className={`border-b border-stone-100 transition-colors ${hoveredCol === pk.column ? "bg-amber-50" : ""}`}
+                        onMouseEnter={() => setHoveredCol(pk.column)} onMouseLeave={() => setHoveredCol(null)}>
+                        <td className="px-2.5 py-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <Lock className="h-2.5 w-2.5 text-stone-400" />
+                            <span className="font-mono text-xs text-stone-800">{pk.column}</span>
+                            <span className="rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700">PK</span>
+                          </div>
+                        </td>
+                        <td className="px-2.5 py-1.5 text-xs text-stone-600 uppercase">
+                          {entityRegistry.get(pk.entity)?.id_type ?? "string"}
+                        </td>
+                        <td className="px-2.5 py-1.5 text-[10px] text-blue-600">
+                          {pk.entity || <span className="text-stone-400 italic">unbound</span>}
+                        </td>
+                      </tr>
+                    ))}
+
+                    {/* Column-family columns, grouped by family */}
+                    {families.map((cf) => cf.columns.filter((c) => c.name).map((c) => (
+                      <tr key={`${cf._key}:${c._key}`}
+                        className={`border-b border-stone-100 group transition-colors ${hoveredCol === c.name ? "bg-amber-50" : ""}`}
+                        onMouseEnter={() => setHoveredCol(c.name)} onMouseLeave={() => setHoveredCol(null)}>
+                        <td className="px-2.5 py-1.5">
+                          <span className="font-mono text-xs text-stone-800">{c.name}</span>
+                        </td>
+                        <td className="px-2.5 py-1.5 text-[10px] font-mono text-stone-600">
+                          {c.agg ?? c.expr ?? c.type ?? <span className="text-stone-400 italic">—</span>}
+                        </td>
+                        <td className="px-2.5 py-1.5 text-[10px] text-stone-500">
+                          <span className="rounded bg-stone-100 px-1 py-0.5 text-[9px] font-medium text-stone-600">{cf.name || "family"}</span>
+                          {cf.source && <span className="ml-1 font-mono text-stone-400">← {cf.source}</span>}
+                        </td>
+                      </tr>
+                    )))}
+
+                    {/* Derived columns */}
+                    {derived.filter((dc) => dc.name).map((dc) => (
+                      <tr key={dc._key}
+                        className={`border-b border-stone-100 transition-colors ${hoveredCol === dc.name ? "bg-amber-50" : ""}`}
+                        onMouseEnter={() => setHoveredCol(dc.name)} onMouseLeave={() => setHoveredCol(null)}>
+                        <td className="px-2.5 py-1.5">
+                          <span className="font-mono text-xs text-stone-800">{dc.name}</span>
+                        </td>
+                        <td className="px-2.5 py-1.5 text-[10px] font-mono text-stone-600">{dc.expr || <span className="text-stone-400 italic">—</span>}</td>
+                        <td className="px-2.5 py-1.5 text-[10px] text-stone-500">
+                          <span className="rounded bg-stone-100 px-1 py-0.5 text-[9px] font-medium text-stone-600">derived</span>
+                        </td>
+                      </tr>
+                    ))}
+
+                    {/* Empty hint when only PKs exist */}
+                    {families.every((cf) => cf.columns.filter((c) => c.name).length === 0) && derived.filter((dc) => dc.name).length === 0 && (
+                      <tr>
+                        <td colSpan={3} className="px-2.5 py-2 text-center text-[11px] text-stone-400 italic">
+                          No data columns yet — ask the agent to add column families or derived columns
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {/* Preview */}
           {previewCols.length > 0 && (
             <div className="flex flex-col gap-2">
@@ -1064,13 +1422,15 @@ export const { registry, handlers } = defineRegistry(catalog, {
           )}
 
           {/* Review table button */}
-          <button
-            onClick={() => sendChatMessage("Review table")}
-            className="flex items-center justify-center gap-2 rounded-lg bg-stone-800 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-700 transition-colors"
-          >
-            <Send className="h-3.5 w-3.5" />
-            Review Table
-          </button>
+          {previewCols.length > 0 && (
+            <button
+              onClick={() => sendChatMessage("Review table")}
+              className="flex items-center justify-center gap-2 rounded-lg bg-stone-800 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-700 transition-colors"
+            >
+              <Send className="h-3.5 w-3.5" />
+              Review Table
+            </button>
+          )}
         </div>
       );
     },

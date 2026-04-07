@@ -6,32 +6,34 @@ import { Renderer, JSONUIProvider } from "@json-render/react";
 import { CanvasActionsContext } from "@/components/canvas/canvas-actions-context";
 import { EntityRegistryProvider } from "./entity-registry-context";
 import { registry } from "./registry";
+import { dedupeArray } from "../canvas-to-spec";
 
 const EMPTY_STATE: Record<string, unknown> = {};
 
-/** Deduplicate array entries by _key (or by name as fallback) to guard against
- *  the agent streaming spec patches that repeatedly append the same entries. */
-function dedupeByKey(arr: unknown[]): unknown[] {
-  const seen = new Set<string>();
-  return arr.filter((item) => {
-    if (item && typeof item === "object") {
-      const rec = item as Record<string, unknown>;
-      const key = (rec._key as string) ?? (rec.name as string);
-      if (key) {
-        if (seen.has(key)) return false;
-        seen.add(key);
+/**
+ * Walk every array in the form state and run it through the shared
+ * `dedupeArray` (which uses the `dedupKey` identity rule). Doing this for the
+ * entire state — not just `user_columns` — keeps the rendered canvas in sync
+ * with what `sanitizeCanvasFormState` shows the agent. Previously the canvas
+ * deduped only `user_columns` while the tool sanitizer deduped everything by
+ * `name`, which let the agent see "duplicates" the user couldn't see and
+ * triggered review-loop bugs.
+ */
+function sanitizeState(state: Record<string, unknown>): Record<string, unknown> {
+  let mutated = false;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(state)) {
+    if (Array.isArray(value)) {
+      const deduped = dedupeArray(value);
+      if (deduped.length !== value.length) {
+        mutated = true;
+        out[key] = deduped;
+        continue;
       }
     }
-    return true;
-  });
-}
-
-function sanitizeState(state: Record<string, unknown>): Record<string, unknown> {
-  const cols = state.user_columns;
-  if (!Array.isArray(cols) || cols.length <= 1) return state;
-  const deduped = dedupeByKey(cols);
-  if (deduped.length === cols.length) return state;
-  return { ...state, user_columns: deduped };
+    out[key] = value;
+  }
+  return mutated ? out : state;
 }
 
 interface DataArchitectCanvasProps {

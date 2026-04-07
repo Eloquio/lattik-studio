@@ -140,6 +140,21 @@ export const userAgents = pgTable(
   ]
 );
 
+/**
+ * Rate-limit buckets keyed by `${scope}:${subject}` (e.g. `chat:${userId}`).
+ * Stores a sliding-window counter persisted across server restarts and across
+ * serverless instances. The counter resets when `resetAt` has passed.
+ */
+export const rateLimits = pgTable(
+  "rate_limit",
+  {
+    key: text("key").primaryKey(),
+    count: integer("count").notNull().default(0),
+    resetAt: timestamp("resetAt", { mode: "date" }).notNull(),
+  },
+  (t) => [index("idx_rate_limits_resetAt").on(t.resetAt)]
+);
+
 export const verificationTokens = pgTable(
   "verificationToken",
   {

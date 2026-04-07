@@ -32,7 +32,7 @@ All fields are required. Fields with a default are pre-populated but can be over
 ## Workflow
 
 ### Step 1: Render Draft on Canvas
-Call `renderLoggerTableForm({initialState: {...}})` with whatever values you can glean from the user's request. The tool builds the canonical form spec server-side and the canvas updates immediately.
+**FIRST ACTION on this workflow:** call `renderLoggerTableForm` BEFORE writing any prose response and BEFORE asking any clarifying questions. Pass `initialState: {}` if you have nothing, or whatever scraps you can glean from the user's request. The form fields ARE the questions — do not ask the user for `name`, `user_columns`, etc. in chat first. The canvas updates immediately and the user fills the form directly.
 
 Initial state fields (all optional — pass what you know, leave the rest for the user):
 - `name` — qualified table name in `schema.table_name` format, e.g. `"ingest.click_events"`

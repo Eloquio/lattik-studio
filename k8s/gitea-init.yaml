@@ -76,12 +76,12 @@ spec:
                 -d '{"username": "lattik", "visibility": "private"}' \
                 || echo "Org may already exist, continuing..."
 
-              # Create definitions repo (ignore if exists)
+              # Create pipelines repo (ignore if exists)
               curl -sf -X POST "$GITEA_URL/api/v1/orgs/lattik/repos" \
                 -H "Content-Type: application/json" \
                 -u "lattik-admin:lattik-local" \
                 -d '{
-                  "name": "definitions",
+                  "name": "pipelines",
                   "description": "Lattik pipeline definitions",
                   "private": true,
                   "auto_init": true,

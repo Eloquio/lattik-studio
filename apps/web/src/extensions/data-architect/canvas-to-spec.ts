@@ -45,12 +45,52 @@ export function getDefinitionNameFromCanvas(canvasState: unknown): string | null
 }
 
 /**
+ * Pick the deduplication identity for an array entry. Prefer the synthetic
+ * React `_key` (every form row sets one), and fall back to `name` for entries
+ * the agent appended without going through the form. Returning `null` means
+ * "no stable identity" — those entries are never deduplicated.
+ *
+ * Both the live canvas (`DataArchitectCanvas`) and the tool-read sanitizer
+ * MUST use this function so that what the reviewer sees and what the user
+ * sees agree. Mismatched identity rules previously caused spurious
+ * "duplicate column" loops where the agent's view contained columns the
+ * canvas had already merged away.
+ */
+export function dedupKey(item: unknown): string | null {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+  const rec = item as Record<string, unknown>;
+  if (typeof rec._key === "string" && rec._key.length > 0) return `k:${rec._key}`;
+  if (typeof rec.name === "string" && rec.name.length > 0) return `n:${rec.name}`;
+  return null;
+}
+
+/**
+ * Deduplicate an array of items by their `dedupKey` (preserves order, keeps
+ * the first occurrence). Used by the canvas component to guard against the
+ * agent streaming duplicate spec patches.
+ */
+export function dedupeArray<T>(arr: readonly T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const item of arr) {
+    const key = dedupKey(item);
+    if (key !== null) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    out.push(item);
+  }
+  return out;
+}
+
+/**
  * Return a cleaned-up copy of the canvas form state suitable for showing to a
  * downstream LLM (the reviewer). Strips React-only `_key` fields recursively
- * and deduplicates array entries by `name` so spec-stream loops (e.g. Haiku
- * occasionally emitting hundreds of duplicate columns) don't poison the
- * reviewer's context. The shape is preserved exactly otherwise — paths the
- * reviewer returns are still valid against the live canvas state.
+ * and deduplicates array entries (using `dedupKey` — the same identity rule
+ * the canvas component uses) so spec-stream loops (e.g. Haiku occasionally
+ * emitting hundreds of duplicate columns) don't poison the reviewer's
+ * context. The shape is preserved exactly otherwise — paths the reviewer
+ * returns are still valid against the live canvas state.
  */
 export function sanitizeCanvasFormState(
   canvasState: unknown
@@ -61,22 +101,10 @@ export function sanitizeCanvasFormState(
 
 function cleanValue(v: unknown): unknown {
   if (Array.isArray(v)) {
-    const seen = new Set<string>();
-    const out: unknown[] = [];
-    for (const item of v) {
-      const cleaned = cleanValue(item);
-      // Deduplicate object entries by `name` (the canonical identity field on
-      // every list item shape — columns, primary keys, calculations, etc.).
-      if (cleaned && typeof cleaned === "object" && !Array.isArray(cleaned)) {
-        const name = (cleaned as { name?: unknown }).name;
-        if (typeof name === "string" && name.length > 0) {
-          if (seen.has(name)) continue;
-          seen.add(name);
-        }
-      }
-      out.push(cleaned);
-    }
-    return out;
+    // Dedupe BEFORE stripping `_key` so the synthetic React identity is
+    // available for matching. After dedup, recurse into each surviving entry
+    // to strip `_key` and clean nested arrays.
+    return dedupeArray(v).map(cleanValue);
   }
   if (v && typeof v === "object") {
     const out: Record<string, unknown> = {};

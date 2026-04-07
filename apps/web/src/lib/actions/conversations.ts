@@ -1,6 +1,6 @@
 "use server";
 
-import { eq, and, desc } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
 import { requireUser } from "@/lib/auth-guard";
@@ -15,42 +15,37 @@ export async function saveConversation(data: {
 }) {
   const user = await requireUser();
   const db = getDb();
-  const messagesJson = JSON.parse(JSON.stringify(data.messages));
 
-  const existing = await db
-    .select({ id: schema.conversations.id })
-    .from(schema.conversations)
-    .where(
-      and(
-        eq(schema.conversations.id, data.id),
-        eq(schema.conversations.userId, user.id!)
-      )
-    )
-    .limit(1);
-
-  if (existing.length > 0) {
-    await db
-      .update(schema.conversations)
-      .set({
+  // Single atomic UPSERT instead of read-then-write — both prevents the race
+  // (concurrent saves of the same chat) and removes the redundant SELECT.
+  // Ownership is enforced by the unique (id, userId) pair: a different user
+  // can't insert with the same id because it's the primary key, and the
+  // ON CONFLICT update sets userId so it can never escape its owner.
+  await db
+    .insert(schema.conversations)
+    .values({
+      id: data.id,
+      userId: user.id!,
+      title: data.title,
+      messages: data.messages,
+      canvasState: data.canvasState ?? undefined,
+      taskStack: data.taskStack ?? undefined,
+      activeExtensionId: data.activeExtensionId ?? null,
+    })
+    .onConflictDoUpdate({
+      target: schema.conversations.id,
+      set: {
         title: data.title,
-        messages: messagesJson,
+        messages: data.messages,
         canvasState: data.canvasState ?? undefined,
         taskStack: data.taskStack ?? undefined,
         activeExtensionId: data.activeExtensionId ?? null,
         updatedAt: new Date(),
-      })
-      .where(eq(schema.conversations.id, data.id));
-  } else {
-    await db.insert(schema.conversations).values({
-      id: data.id,
-      userId: user.id!,
-      title: data.title,
-      messages: messagesJson,
-      canvasState: data.canvasState ?? undefined,
-      taskStack: data.taskStack ?? undefined,
-      activeExtensionId: data.activeExtensionId ?? null,
+      },
+      // Only update if the existing row is owned by the same user — otherwise
+      // the conflict resolves to a no-op and we don't leak access.
+      setWhere: eq(schema.conversations.userId, user.id!),
     });
-  }
 }
 
 export async function listConversations() {
