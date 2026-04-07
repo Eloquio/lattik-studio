@@ -8,7 +8,7 @@
     "db:start": "kind create cluster --name lattik --config k8s/kind-config.yaml && kubectl apply -f k8s/postgres.yaml && until kubectl get pod -l app=postgres 2>/dev/null | grep -q postgres; do sleep 2; done && kubectl wait --for=condition=ready pod -l app=postgres --timeout=120s",
     "db:stop": "kind delete cluster --name lattik",
     "db:push": "cd apps/web && npx drizzle-kit push",
-    "db:seed": "cd apps/web && pnpm tsx src/db/seed.ts",
+    "db:seed": "cd apps/web && pnpm tsx --env-file=.env src/db/seed.ts",
     "gitea:start": "kubectl apply -f k8s/gitea.yaml && until kubectl get pod -l app=gitea 2>/dev/null | grep -q gitea; do sleep 2; done && kubectl wait --for=condition=ready pod -l app=gitea --timeout=120s && kubectl apply -f k8s/gitea-init.yaml",
     "gitea:logs": "kubectl logs -l app=gitea -f",
     "gitea:init-logs": "kubectl logs job/gitea-init -f",
