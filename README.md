@@ -1,26 +1,34 @@
-# AI Chat Template
+# Lattik Studio
 
-A glassmorphic AI chat application template built with Next.js, Vercel AI SDK, and shadcn/ui.
+Agentic analytics platform. Users solve analytics needs through chat-driven workflows — building data pipelines, asking business questions, root cause analysis, ML feature engineering. Lattik Studio connects to the Data Lake (S3 + Iceberg) and serves as a control plane for infra, logger tables, and pipelines.
+
+Extensions are specialized AI agents (e.g. a Data Architect, a Root Cause Analysis Agent). Extension authors define the agent logic and what renders on the canvas (charts, tables, YAML editors, etc.).
 
 ## Features
 
 - Three-column layout: nav sidebar, chat panel, resizable canvas
 - Dark frosted glass (glassmorphic) theme
-- AI chat powered by Vercel AI Gateway (Claude)
-- Resizable canvas panel with localStorage persistence
+- Agentic chat powered by Vercel AI Gateway (Claude Sonnet 4)
+- Extension framework for building specialized AI agents
+- Streaming canvas rendered with [`@json-render/react`](https://github.com/vercel-labs/json-render); conversation + canvas state persisted to Postgres and restored on reload
 - Google OAuth via NextAuth (Auth.js v5)
-- Neon Postgres database with Drizzle ORM
+- Local PostgreSQL via a kind (Kubernetes in Docker) cluster, managed with Drizzle ORM
+- Local Gitea (also in kind) for the pipeline PR review workflow
 - shadcn/ui components (Base Nova style)
 - Inter + Geist Mono + Homemade Apple fonts
 
 ## Tech Stack
 
-- **Framework:** Next.js 16 (App Router) with Turborepo
-- **AI:** Vercel AI SDK v6 + AI Gateway
-- **UI:** shadcn/ui + Tailwind CSS v4
-- **Auth:** NextAuth (Auth.js v5) with Google provider
-- **Database:** Neon (Postgres) + Drizzle ORM
-- **Package Manager:** pnpm
+- **Framework:** Next.js 16 (App Router) + React 19 + TypeScript
+- **Monorepo:** Turborepo + pnpm workspaces
+- **AI:** Vercel AI SDK v6 + AI Gateway (Claude Sonnet 4)
+- **Auth:** NextAuth v5 (Auth.js beta) with Google provider
+- **Database:** PostgreSQL (local via kind) + Drizzle ORM
+- **UI:** shadcn/ui (Base Nova) + Tailwind CSS v4
+- **Dev server:** [portless](https://github.com/vercel-labs/portless) (`https://lattik-studio.dev` via `--tld dev`)
+- **Canvas rendering:** [`@json-render/core`](https://github.com/vercel-labs/json-render) + `@json-render/react`
+- **Expression engine:** `@eloquio/lattik-expression` (parse, type-check, emit SQL)
+- **Git (local dev):** Gitea in kind cluster for the PR review workflow
 
 ## Getting Started
 
@@ -39,39 +47,51 @@ curl -fsSL https://get.pnpm.io/install.sh | sh -
 
 See [pnpm.io/installation](https://pnpm.io/installation) for more options.
 
-2. Clone the repo and install dependencies:
+2. Install [kind](https://kind.sigs.k8s.io/) (used to run PostgreSQL and Gitea locally in a Kubernetes cluster). kind requires a container runtime — Docker Desktop is the easiest option on macOS:
+
+```bash
+# macOS (Homebrew)
+brew install kind
+
+# Linux / other (download the binary)
+# See https://kind.sigs.k8s.io/docs/user/quick-start/#installation
+```
+
+Make sure Docker Desktop (or another supported runtime) is running before continuing.
+
+3. Clone the repo and install dependencies:
 
 ```bash
 pnpm install
 ```
 
-3. Set up your environment variables by copying `apps/web/.env.example` to `apps/web/.env` and filling in the values:
+4. Set up your environment variables by copying `apps/web/.env.example` to `apps/web/.env` and filling in the values:
 
 ```bash
 cp apps/web/.env.example apps/web/.env
 ```
 
-4. Start the local PostgreSQL cluster (runs in kind) and push the database schema:
+5. Start the local PostgreSQL cluster (runs in kind) and push the database schema:
 
 ```bash
 pnpm db:start
 pnpm db:push
 ```
 
-5. Start the [portless](https://github.com/vercel-labs/portless) proxy with the `.dev` TLD (required for Google OAuth, which expects `https://lattik-studio.dev`):
+6. Start the [portless](https://github.com/vercel-labs/portless) proxy with the `.dev` TLD (required for Google OAuth, which expects `https://lattik-studio.dev`):
 
 ```bash
 portless proxy start --tld dev
 ```
 
-6. (Optional) Start Gitea for the PR review workflow, then grab the API token from the init logs and set `GITEA_TOKEN` in `apps/web/.env`:
+7. (Optional) Start Gitea for the PR review workflow, then grab the API token from the init logs and set `GITEA_TOKEN` in `apps/web/.env`:
 
 ```bash
 pnpm gitea:start
 pnpm gitea:init-logs
 ```
 
-7. Start the dev server:
+8. Start the dev server:
 
 ```bash
 pnpm dev
