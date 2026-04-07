@@ -88,7 +88,6 @@ export const catalog = defineCatalog(schema, {
         suggestionId: z.string(),
         title: z.string(),
         description: z.string(),
-        severity: z.enum(["info", "warning", "error"]).optional(),
       }),
       description: "Accept/deny card for AI review suggestions.",
     },
@@ -128,7 +127,12 @@ export const catalog = defineCatalog(schema, {
     LattikTableForm: {
       props: z.object({}),
       description:
-        "Lattik table definition form. Renders its own title — never pair with a Heading. State: name, description, primary_key[], column_families[], derived_columns[].",
+        "Lattik table definition form. Renders its own title — never pair with a Heading. State: name, description, retention, primary_key[], column_families[], derived_columns[].",
+    },
+    YamlEditor: {
+      props: z.object({}),
+      description:
+        "Multi-file YAML editor with syntax highlighting. Renders one tab per generated YAML file and lets the user manually edit the contents before submitting a PR. State: kind, name, files[] ({path, content}), active_file (number index).",
     },
   },
   actions: {},

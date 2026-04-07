@@ -1,11 +1,15 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { defineRegistry, useStateStore } from "@json-render/react";
-import { Check, X, Plus, Trash2, Lock, Table2, Send } from "lucide-react";
+import { Check, X, Plus, Trash2, Lock, Table2, Send, FileCode } from "lucide-react";
+import CodeMirror from "@uiw/react-codemirror";
+import { yaml as yamlLanguage } from "@codemirror/lang-yaml";
 import { useCanvasActions } from "@/components/canvas/canvas-actions-context";
 import type { ScalarTypeKind } from "@eloquio/lattik-expression";
 import { fromColumnType } from "@eloquio/lattik-expression";
+import { listDefinitions, createDefinition } from "@/lib/actions/definitions";
+import { useEntityRegistry } from "./entity-registry-context";
 import { catalog } from "./catalog";
 
 // ---- State helper hook ----
@@ -80,6 +84,134 @@ function TypeCombobox({ value, onChange }: { value: string; onChange: (v: string
 }
 let _nextKey = 0;
 function genKey(prefix = "k") { return `${prefix}_${++_nextKey}_${Date.now()}`; }
+
+// ---- Entity combobox with inline create ----
+interface EntityOption { name: string; id_field: string; id_type: string }
+
+function EntityCombobox({ value, onChange, pkColumn, onSubmit }: { value: string; onChange: (v: string) => void; pkColumn: string; onSubmit?: () => void }) {
+  const { refresh: refreshRegistry } = useEntityRegistry();
+  const [open, setOpen] = useState(false);
+  const [entities, setEntities] = useState<EntityOption[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(-1);
+  const [creating, setCreating] = useState(false);
+  const [newDesc, setNewDesc] = useState("");
+  const [newIdType, setNewIdType] = useState("string");
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const fetchEntities = async () => {
+    if (loaded) return;
+    try {
+      const defs = await listDefinitions("entity");
+      setEntities(defs.map((d) => d.spec as EntityOption));
+      setLoaded(true);
+    } catch { setLoaded(true); }
+  };
+
+  const filtered = entities.filter((e) => !value || e.name.includes(value.toLowerCase()));
+  const exactMatch = entities.some((e) => e.name === value);
+  const showCreateOption = !!value.trim() && !exactMatch && loaded;
+  const totalItems = filtered.length + (showCreateOption ? 1 : 0);
+
+  const select = (name: string) => { onChange(name); setOpen(false); setActiveIdx(0); onSubmit?.(); };
+
+  // Reset highlight to first item whenever the option list changes
+  useEffect(() => {
+    if (open && totalItems > 0) setActiveIdx(0);
+    else setActiveIdx(-1);
+  }, [open, totalItems, value]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") { setOpen(false); setCreating(false); return; }
+    if (creating) return;
+    if (!open || totalItems === 0) {
+      // Dropdown closed: Enter exits edit mode
+      if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); onSubmit?.(); }
+      return;
+    }
+    if (e.key === "ArrowDown") { e.preventDefault(); setActiveIdx((prev) => (prev + 1) % totalItems); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActiveIdx((prev) => (prev <= 0 ? totalItems - 1 : prev - 1)); }
+    else if (e.key === "Enter") {
+      e.preventDefault(); e.stopPropagation();
+      const idx = activeIdx < 0 ? 0 : activeIdx;
+      if (idx < filtered.length) select(filtered[idx].name);
+      else if (showCreateOption) setCreating(true);
+    }
+  };
+
+  const inferredIdField = pkColumn || `${value}_id`;
+
+  const handleCreate = async () => {
+    if (!value.trim()) return;
+    try {
+      await createDefinition({ kind: "entity", name: value.trim(), spec: { name: value.trim(), description: newDesc.trim(), id_field: inferredIdField, id_type: newIdType } });
+      setEntities((prev) => [...prev, { name: value.trim(), id_field: inferredIdField, id_type: newIdType }]);
+      refreshRegistry();
+      setCreating(false); setOpen(false); setNewDesc(""); setNewIdType("string");
+    } catch { /* silent — will fail at static check */ }
+  };
+
+  return (
+    <div ref={containerRef} className="relative">
+      <input type="text" value={value}
+        onChange={(e) => { onChange(e.target.value); setOpen(true); setActiveIdx(-1); }}
+        onFocus={() => { fetchEntities(); setOpen(true); setActiveIdx(-1); }}
+        onBlur={(e) => { if (!containerRef.current?.contains(e.relatedTarget)) { setTimeout(() => { setOpen(false); setCreating(false); }, 150); } }}
+        onKeyDown={handleKeyDown}
+        placeholder="entity" autoComplete="off" data-1p-ignore data-lpignore="true" data-form-type="other"
+        className="w-14 bg-transparent text-[10px] text-blue-600 placeholder:text-stone-400 focus:outline-none" />
+      {open && loaded && totalItems > 0 && !creating && (
+        <div className="absolute left-0 top-full z-20 mt-1 min-w-[10rem] rounded-md border border-stone-200 bg-white py-1 shadow-lg max-h-36 overflow-y-auto">
+          {filtered.map((e, i) => (
+            <button key={e.name} onMouseDown={(e_) => { e_.preventDefault(); select(e.name); }}
+              className={`block w-full px-2.5 py-1 text-left text-[10px] transition-colors ${i === activeIdx ? "bg-stone-100 text-amber-700 font-medium" : e.name === value ? "text-amber-700 font-medium" : "text-stone-700 hover:bg-stone-50"}`}>
+              <span className="font-mono">{e.name}</span>
+              <span className="ml-1.5 text-stone-400">{e.id_field}</span>
+            </button>
+          ))}
+          {showCreateOption && (
+            <button onMouseDown={(e) => { e.preventDefault(); setCreating(true); }}
+              className={`block w-full px-2.5 py-1 text-left text-[10px] border-t border-stone-100 transition-colors ${activeIdx === filtered.length ? "bg-stone-100 text-amber-700 font-medium" : "text-amber-600 hover:bg-stone-50"}`}>
+              <Plus className="inline h-2.5 w-2.5 mr-0.5" />Create &ldquo;{value}&rdquo;
+            </button>
+          )}
+        </div>
+      )}
+      {creating && (
+        <div data-entity-popover className="absolute left-0 top-full z-20 mt-1 w-[16rem] rounded-xl border border-stone-200 bg-white shadow-xl"
+          onMouseDown={(e) => e.preventDefault()}
+          onKeyDown={(e) => { if (e.key === "Escape") { setCreating(false); setOpen(false); } if (e.key === "Enter") { e.preventDefault(); handleCreate(); } }}>
+          <div className="flex items-center justify-between px-3 py-1.5 bg-amber-50 border-b border-amber-100 rounded-t-xl">
+            <span className="text-[10px] font-medium text-amber-700">Create Entity &ldquo;{value}&rdquo;</span>
+            <button onMouseDown={(e) => { e.preventDefault(); setCreating(false); }}
+              className="flex h-4 w-4 items-center justify-center rounded text-amber-400 hover:text-amber-700 transition-colors">
+              <X className="h-2.5 w-2.5" />
+            </button>
+          </div>
+          <div className="flex flex-col gap-2 px-3 py-2.5">
+            <div className="flex items-center gap-2 text-[10px] text-stone-500">
+              <span className="text-stone-400">ID field:</span>
+              <span className="font-mono text-stone-700">{inferredIdField}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-stone-400 shrink-0">ID type:</span>
+              <TypeCombobox value={newIdType} onChange={(v) => setNewIdType(v)} />
+            </div>
+            <input type="text" value={newDesc} onChange={(e) => setNewDesc(e.target.value)}
+              placeholder="Describe this entity..." autoFocus autoComplete="off" data-1p-ignore data-lpignore="true" data-form-type="other"
+              className="w-full bg-transparent text-[10px] text-stone-600 placeholder:text-stone-300 focus:outline-none" />
+            <div className="flex items-center justify-end gap-2 pt-1.5 border-t border-stone-100">
+              <button onMouseDown={(e) => { e.preventDefault(); setCreating(false); }}
+                className="text-[10px] text-stone-400 hover:text-stone-600 transition-colors">Cancel</button>
+              <button onMouseDown={(e) => { e.preventDefault(); handleCreate(); }}
+                className="rounded-full bg-stone-800 px-2.5 py-0.5 text-[10px] font-medium text-white hover:bg-stone-700 transition-colors">Create</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const IMPLICIT_TOP = [
   { name: "event_id", type: "string", description: "Unique event identifier for deduplication" },
@@ -346,12 +478,10 @@ export const { registry, handlers } = defineRegistry(catalog, {
     ReviewCard: ({ props }) => {
       const [decision, setDecision] = useField(`review_${props.suggestionId}`);
       const d = decision as "accepted" | "denied" | undefined;
-      const sev = props.severity ?? "info";
-      const borderColor = sev === "error" ? "border-red-300" : sev === "warning" ? "border-amber-300" : "border-blue-200";
       const bgColor = d === "accepted" ? "bg-green-50/50" : d === "denied" ? "bg-red-50/30" : "bg-white";
 
       return (
-        <div className={`rounded-lg border ${borderColor} ${bgColor} px-3 py-2 transition-colors`}>
+        <div className={`rounded-lg border border-stone-200 ${bgColor} px-3 py-2 transition-colors`}>
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1">
               <div className="text-xs font-semibold text-stone-800">{props.title}</div>
@@ -804,147 +934,243 @@ export const { registry, handlers } = defineRegistry(catalog, {
     },
 
     LattikTableForm: () => {
+      const { sendChatMessage } = useCanvasActions();
       const store = useStateStore();
       const name = (store.get("/name") as string) ?? "";
       const description = (store.get("/description") as string) ?? "";
+      const retention = (store.get("/retention") as string) ?? "30d";
 
       interface PK { _key: string; column: string; entity: string }
       interface FCol { _key: string; name: string; agg?: string; merge?: string }
-      interface CF { _key: string; name: string; source: string; columns: FCol[] }
+      interface KM { _key: string; pk_column: string; source_column: string }
+      interface CF { _key: string; name: string; source: string; key_mapping?: KM[]; columns: FCol[] }
       interface DC { _key: string; name: string; expr: string }
 
       const pks = (store.get("/primary_key") as PK[]) ?? [];
       const families = (store.get("/column_families") as CF[]) ?? [];
+
+      const [editPkIdx, setEditPkIdx] = useState<number | null>(null);
+      const updatePk = (i: number, patch: Partial<PK>) =>
+        store.set("/primary_key", pks.map((p, j) => j === i ? { ...p, ...patch } : p));
+      const pkColRef = useRef<HTMLInputElement>(null);
+      const pkPillRef = useRef<HTMLSpanElement>(null);
       const derived = (store.get("/derived_columns") as DC[]) ?? [];
 
-      const MERGE = ["sum", "max", "min", "replace"] as const;
+      const [hoveredCol, setHoveredCol] = useState<string | null>(null);
+
+      // Build preview columns: PK columns + family columns + derived columns
+      const { entities: entityRegistry } = useEntityRegistry();
+      const previewCols: { name: string; type: string; source?: string }[] = [
+        ...pks.filter((pk) => pk.column).map((pk) => ({ name: pk.column, type: entityRegistry.get(pk.entity)?.id_type ?? "string", source: "pk" })),
+        ...families.flatMap((cf) => cf.columns.filter((c) => c.name).map((c) => ({ name: c.name, type: c.agg ? "agg" : "expr", source: cf.name || "family" }))),
+        ...derived.filter((dc) => dc.name).map((dc) => ({ name: dc.name, type: "expr", source: "derived" })),
+      ];
 
       return (
         <div className="flex flex-col gap-5">
-          <h2 className="text-lg font-semibold text-amber-900">Define a New Lattik Table</h2>
+          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-stone-800">
+            <Table2 className="h-4 w-4 text-stone-400" />Lattik Table
+          </h2>
           <div className="flex flex-col gap-1">
             <input type="text" value={name} onChange={(e) => store.set("/name", e.target.value)}
-              placeholder="table_name" className="w-full bg-transparent text-base font-semibold text-amber-900 placeholder:text-amber-400/40 focus:outline-none" />
+              placeholder="schema.table_name"
+              className="w-full border-b border-stone-200 bg-transparent pb-1 text-base font-semibold text-stone-800 placeholder:text-stone-400 focus:border-amber-500 focus:outline-none transition-colors" />
             <input type="text" value={description} onChange={(e) => store.set("/description", e.target.value)}
               placeholder="Describe what this table represents..."
-              className="w-full bg-transparent text-sm text-amber-700/70 placeholder:text-amber-400/40 focus:outline-none" />
+              className="w-full bg-transparent text-sm text-stone-600 placeholder:text-stone-400 focus:outline-none" />
           </div>
 
-          {/* Primary Key */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-amber-700/60">Primary Key</span>
-              <button onClick={() => store.set("/primary_key", [...pks, { _key: genKey("pk"), column: "", entity: "" }])}
-                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-amber-600 hover:bg-amber-100/50 transition-colors">
-                <Plus className="h-3 w-3" /> Add
+          {/* Retention & Primary Key */}
+          <div className="flex flex-col gap-1">
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-xs text-stone-400">Retention:</span>
+              <input type="text" value={retention} onChange={(e) => store.set("/retention", e.target.value)}
+                placeholder="30d"
+                className="w-12 bg-transparent text-xs font-medium text-stone-800 placeholder:text-stone-400 focus:outline-none border-b border-transparent focus:border-amber-500 transition-colors" />
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs text-stone-400">Primary Key:</span>
+              {pks.map((pk, i) => (
+                editPkIdx === i ? (
+                  <span key={pk._key} ref={pkPillRef}
+                    className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 ring-1 ring-amber-300 px-2 py-0.5 text-[10px] font-medium text-stone-700 transition-all">
+                    <input ref={pkColRef} type="text" value={pk.column}
+                      onChange={(e) => updatePk(i, { column: e.target.value })}
+                      onBlur={(e) => { setTimeout(() => { if (!pkPillRef.current?.contains(document.activeElement) && !document.querySelector("[data-entity-popover]")) setEditPkIdx(null); }, 100); }}
+                      onKeyDown={(e) => { if (e.key === "Escape") setEditPkIdx(null); if (e.key === "Enter") { e.preventDefault(); setEditPkIdx(null); } }}
+                      placeholder="column" autoFocus autoComplete="off" data-1p-ignore data-lpignore="true" data-form-type="other"
+                      className="w-16 bg-transparent font-mono text-[10px] text-stone-800 placeholder:text-stone-400 focus:outline-none" />
+                    <span className="text-stone-300">/</span>
+                    <EntityCombobox value={pk.entity} onChange={(v) => updatePk(i, { entity: v })} pkColumn={pk.column} onSubmit={() => setEditPkIdx(null)} />
+                    <button onClick={() => { store.set("/primary_key", pks.filter((_, j) => j !== i)); setEditPkIdx(null); }}
+                      className="ml-0.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full text-stone-400 hover:text-red-500 hover:bg-red-50 transition-colors">
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </span>
+                ) : (
+                  <button key={pk._key} onClick={() => setEditPkIdx(i)}
+                    className="group inline-flex items-center gap-1 rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-medium text-stone-700 hover:bg-stone-200/70 transition-colors cursor-pointer">
+                    <span className="font-mono">{pk.column || "column"}</span>
+                    {pk.entity && <span className="text-blue-600">({pk.entity})</span>}
+                    {!pk.entity && !pk.column && <span className="text-stone-400 italic">unnamed</span>}
+                    <span onClick={(e) => { e.stopPropagation(); store.set("/primary_key", pks.filter((_, j) => j !== i)); }}
+                      className="ml-0.5 hidden group-hover:inline-flex h-3.5 w-3.5 items-center justify-center rounded-full text-stone-400 hover:text-red-500 hover:bg-red-50 transition-colors">
+                      <X className="h-2.5 w-2.5" />
+                    </span>
+                  </button>
+                )
+              ))}
+              <button onClick={() => {
+                store.set("/primary_key", [...pks, { _key: genKey("pk"), column: "", entity: "" }]);
+                setTimeout(() => setEditPkIdx(pks.length), 0);
+              }}
+                className="inline-flex items-center gap-0.5 rounded-full border border-dashed border-stone-300 px-2 py-0.5 text-[10px] text-stone-400 hover:border-amber-500 hover:text-amber-600 transition-colors">
+                <Plus className="h-2.5 w-2.5" /> add
               </button>
             </div>
-            {pks.map((pk, i) => (
-              <div key={pk._key} className="flex items-center gap-1.5">
-                <input type="text" value={pk.column} onChange={(e) => store.set("/primary_key", pks.map((p, j) => j === i ? { ...p, column: e.target.value } : p))}
-                  placeholder="column" className={`flex-1 ${inputCls}`} />
-                <input type="text" value={pk.entity} onChange={(e) => store.set("/primary_key", pks.map((p, j) => j === i ? { ...p, entity: e.target.value } : p))}
-                  placeholder="entity" className={`flex-1 ${inputCls}`} />
-                <button onClick={() => store.set("/primary_key", pks.filter((_, j) => j !== i))}
-                  className="flex h-5 w-5 items-center justify-center rounded text-amber-400 hover:text-red-500 transition-colors">
-                  <Trash2 className="h-3 w-3" />
-                </button>
-              </div>
-            ))}
-            {pks.length === 0 && (
-              <button onClick={() => store.set("/primary_key", [{ _key: genKey("pk"), column: "", entity: "" }])}
-                className="rounded-md border border-dashed border-amber-300/50 px-3 py-2 text-xs text-amber-600/60 hover:bg-amber-50/50 transition-colors">
-                Add primary key column...
-              </button>
-            )}
           </div>
 
-          {/* Column Families */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-amber-700/60">Column Families</span>
-              <button onClick={() => store.set("/column_families", [...families, { _key: genKey("cf"), name: "", source: "", columns: [] }])}
-                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-amber-600 hover:bg-amber-100/50 transition-colors">
-                <Plus className="h-3 w-3" /> Add Family
-              </button>
-            </div>
-            {families.map((cf, fi) => (
-              <div key={cf._key} className="flex flex-col gap-2 rounded-lg border border-amber-200/30 bg-white/60 p-2.5">
-                <div className="flex items-center gap-1.5">
-                  <input type="text" value={cf.name} onChange={(e) => store.set("/column_families", families.map((f, j) => j === fi ? { ...f, name: e.target.value } : f))}
-                    placeholder="Family name" className={`flex-1 ${inputCls}`} />
-                  <input type="text" value={cf.source} onChange={(e) => store.set("/column_families", families.map((f, j) => j === fi ? { ...f, source: e.target.value } : f))}
-                    placeholder="Source table" className={`flex-1 ${inputCls}`} />
-                  <button onClick={() => store.set("/column_families", families.filter((_, j) => j !== fi))}
-                    className="flex h-5 w-5 items-center justify-center rounded text-amber-400 hover:text-red-500 transition-colors">
-                    <Trash2 className="h-3 w-3" />
-                  </button>
-                </div>
-                <div className="ml-2 flex flex-col gap-1">
-                  {cf.columns.map((col, ci) => (
-                    <div key={col._key} className="flex items-center gap-1">
-                      <input type="text" value={col.name} onChange={(e) => {
-                        const newFams = families.map((f, j) => j === fi ? { ...f, columns: f.columns.map((c, k) => k === ci ? { ...c, name: e.target.value } : c) } : f);
-                        store.set("/column_families", newFams);
-                      }} placeholder="name" className={`flex-1 min-w-0 ${inputCls} font-mono`} />
-                      <input type="text" value={col.agg ?? ""} onChange={(e) => {
-                        const newFams = families.map((f, j) => j === fi ? { ...f, columns: f.columns.map((c, k) => k === ci ? { ...c, agg: e.target.value } : c) } : f);
-                        store.set("/column_families", newFams);
-                      }} placeholder="agg expr" className={`flex-1 min-w-0 ${inputCls} font-mono`} />
-                      <select value={col.merge ?? ""} onChange={(e) => {
-                        const newFams = families.map((f, j) => j === fi ? { ...f, columns: f.columns.map((c, k) => k === ci ? { ...c, merge: e.target.value || undefined } : c) } : f);
-                        store.set("/column_families", newFams);
-                      }} className={`w-20 ${inputCls}`}>
-                        <option value="">merge</option>
-                        {MERGE.map((m) => <option key={m} value={m}>{m}</option>)}
-                      </select>
-                      <button onClick={() => {
-                        const newFams = families.map((f, j) => j === fi ? { ...f, columns: f.columns.filter((_, k) => k !== ci) } : f);
-                        store.set("/column_families", newFams);
-                      }} className="flex h-5 w-5 items-center justify-center rounded text-amber-400 hover:text-red-500 transition-colors">
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ))}
-                  <button onClick={() => {
-                    const newFams = families.map((f, j) => j === fi ? { ...f, columns: [...f.columns, { _key: genKey("fc"), name: "" }] } : f);
-                    store.set("/column_families", newFams);
-                  }} className="flex items-center gap-1 rounded px-1 py-0.5 text-[10px] text-amber-600 hover:bg-amber-100/50 transition-colors">
-                    <Plus className="h-3 w-3" /> Add column
-                  </button>
+          {/* Preview */}
+          {previewCols.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-stone-500">Preview</span>
+              <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-stone-200 bg-stone-50">
+                        {previewCols.map((c) => (
+                          <th key={c.name} className={`px-2.5 py-1.5 text-left font-semibold whitespace-nowrap transition-colors ${hoveredCol === c.name ? "bg-amber-100 text-amber-800" : "text-stone-600"}`}>
+                            {c.name}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Array.from({ length: 3 }, (_, i) => (
+                        <tr key={i} className="border-b border-stone-100 last:border-b-0">
+                          {previewCols.map((c) => (
+                            <td key={c.name} className={`px-2.5 py-1 font-mono text-[10px] whitespace-nowrap transition-colors ${hoveredCol === c.name ? "bg-amber-50 text-amber-700" : "text-stone-500"}`}>
+                              {c.source === "pk" ? mockValue(c.type, i, c.name) : c.type === "agg" ? String(1000 + i * 7) : `val_${i + 1}`}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
-            ))}
-          </div>
-
-          {/* Derived Columns */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-amber-700/60">Derived Columns</span>
-              <button onClick={() => store.set("/derived_columns", [...derived, { _key: genKey("dc"), name: "", expr: "" }])}
-                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-amber-600 hover:bg-amber-100/50 transition-colors">
-                <Plus className="h-3 w-3" /> Add
-              </button>
             </div>
-            {derived.map((dc, i) => (
-              <div key={dc._key} className="flex items-center gap-1.5">
-                <input type="text" value={dc.name} onChange={(e) => store.set("/derived_columns", derived.map((d, j) => j === i ? { ...d, name: e.target.value } : d))}
-                  placeholder="name" className={`flex-1 min-w-0 ${inputCls} font-mono`} />
-                <input type="text" value={dc.expr} onChange={(e) => store.set("/derived_columns", derived.map((d, j) => j === i ? { ...d, expr: e.target.value } : d))}
-                  placeholder="expression" className={`flex-1 min-w-0 ${inputCls} font-mono`} />
-                <button onClick={() => store.set("/derived_columns", derived.filter((_, j) => j !== i))}
-                  className="flex h-5 w-5 items-center justify-center rounded text-amber-400 hover:text-red-500 transition-colors">
-                  <Trash2 className="h-3 w-3" />
-                </button>
-              </div>
-            ))}
-            {derived.length === 0 && (
-              <button onClick={() => store.set("/derived_columns", [{ _key: genKey("dc"), name: "", expr: "" }])}
-                className="rounded-md border border-dashed border-amber-300/50 px-3 py-2 text-xs text-amber-600/60 hover:bg-amber-50/50 transition-colors">
-                Add derived column...
-              </button>
+          )}
+
+          {/* Review table button */}
+          <button
+            onClick={() => sendChatMessage("Review table")}
+            className="flex items-center justify-center gap-2 rounded-lg bg-stone-800 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-700 transition-colors"
+          >
+            <Send className="h-3.5 w-3.5" />
+            Review Table
+          </button>
+        </div>
+      );
+    },
+
+    YamlEditor: () => {
+      const { sendChatMessage } = useCanvasActions();
+      const store = useStateStore();
+      const kind = (store.get("/kind") as string) ?? "";
+      const name = (store.get("/name") as string) ?? "";
+      const files =
+        (store.get("/files") as { _key?: string; path: string; content: string }[]) ?? [];
+      const activeFile = (store.get("/active_file") as number) ?? 0;
+      const safeIdx = files.length === 0 ? 0 : Math.min(Math.max(activeFile, 0), files.length - 1);
+      const current = files[safeIdx];
+
+      const updateContent = (value: string) => {
+        const next = files.map((f, i) => (i === safeIdx ? { ...f, content: value } : f));
+        store.set("/files", next);
+      };
+
+      const kindLabel = kind ? kind.replace(/_/g, " ") : "definition";
+
+      return (
+        <div className="flex flex-col gap-4">
+          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-stone-800">
+            <FileCode className="h-4 w-4 text-stone-400" />
+            YAML Preview
+            {name && (
+              <span className="ml-1 text-xs font-normal text-stone-500">
+                — {kindLabel}: <span className="font-mono">{name}</span>
+              </span>
             )}
-          </div>
+          </h2>
+
+          <p className="text-xs text-stone-500">
+            Review the generated YAML below. You can edit it directly before submitting a PR.
+          </p>
+
+          {/* File tabs */}
+          {files.length > 1 && (
+            <div className="flex flex-wrap items-center gap-1 border-b border-stone-200">
+              {files.map((f, i) => {
+                const fileName = f.path.split("/").pop() ?? f.path;
+                const isActive = i === safeIdx;
+                return (
+                  <button
+                    key={f._key ?? f.path}
+                    onClick={() => store.set("/active_file", i)}
+                    className={`flex items-center gap-1.5 rounded-t-md border-b-2 px-3 py-1.5 text-xs transition-colors ${
+                      isActive
+                        ? "border-amber-500 bg-amber-50/50 font-medium text-amber-700"
+                        : "border-transparent text-stone-500 hover:bg-stone-50 hover:text-stone-700"
+                    }`}
+                    title={f.path}
+                  >
+                    <FileCode className="h-3 w-3" />
+                    {fileName}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Editor */}
+          {current ? (
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between text-[10px] text-stone-400">
+                <span className="font-mono">{current.path}</span>
+                <span>{current.content.split("\n").length} lines</span>
+              </div>
+              <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
+                <CodeMirror
+                  value={current.content}
+                  onChange={updateContent}
+                  extensions={[yamlLanguage()]}
+                  basicSetup={{
+                    lineNumbers: true,
+                    foldGutter: true,
+                    highlightActiveLine: true,
+                    bracketMatching: true,
+                  }}
+                  style={{ fontSize: "12px" }}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-stone-300 p-4 text-center text-xs text-stone-400">
+              No YAML files generated.
+            </div>
+          )}
+
+          {/* Submit PR button */}
+          <button
+            onClick={() => sendChatMessage("Create the PR")}
+            disabled={files.length === 0}
+            className="flex items-center justify-center gap-2 rounded-lg bg-stone-800 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Send className="h-3.5 w-3.5" />
+            Create PR
+          </button>
         </div>
       );
     },

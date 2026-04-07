@@ -1,8 +1,17 @@
 export { getSkillTool } from "./get-skill";
 export { createReadCanvasStateTool } from "./read-canvas-state";
-export { reviewDefinitionTool } from "./review-definition";
-export { staticCheckTool } from "./static-check";
-export { updateDefinitionTool } from "./update-definition";
-export { submitPRTool } from "./submit-pr";
+export {
+  renderEntityFormTool,
+  renderDimensionFormTool,
+  renderLoggerTableFormTool,
+  renderLattikTableFormTool,
+  renderMetricFormTool,
+  RENDER_FORM_TOOL_NAMES,
+} from "./render-form";
+export { createReviewDefinitionTool } from "./review-definition";
+export { createStaticCheckTool } from "./static-check";
+export { createUpdateDefinitionTool } from "./update-definition";
+export { createGenerateYamlTool } from "./generate-yaml";
+export { createSubmitPRTool } from "./submit-pr";
 export { listDefinitionsTool } from "./list-definitions";
 export { getDefinitionTool } from "./get-definition";

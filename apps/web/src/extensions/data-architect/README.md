@@ -77,7 +77,7 @@ Forms are built from these registered json-render components:
 | `ColumnList` | Editable list of columns with name + type |
 | `MockedTablePreview` | Read-only table with auto-generated sample data |
 | `DataTable` | Static read-only table |
-| `ReviewCard` | Accept/deny card for AI suggestions (severity: info/warning/error) |
+| `ReviewCard` | Accept/deny card for AI suggestions |
 | `StatusBadge` | Colored status pill (draft, reviewing, checks-passed, etc.) |
 | `ExpressionEditor` | lattik-expression input with live validation |
 

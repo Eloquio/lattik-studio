@@ -4,6 +4,7 @@ import { useMemo, useRef } from "react";
 import type { Spec } from "@json-render/core";
 import { Renderer, JSONUIProvider } from "@json-render/react";
 import { CanvasActionsContext } from "@/components/canvas/canvas-actions-context";
+import { EntityRegistryProvider } from "./entity-registry-context";
 import { registry } from "./registry";
 
 const EMPTY_STATE: Record<string, unknown> = {};
@@ -66,16 +67,18 @@ export function DataArchitectCanvas({ spec, loading, onStateChange, onSendMessag
   }
 
   return (
-    <CanvasActionsContext value={actions}>
-      <JSONUIProvider
-        registry={registry}
-        initialState={prevStateRef.current}
-        onStateChange={onStateChange}
-      >
-        <div className="relative flex flex-1 flex-col gap-4 p-5">
-          <Renderer spec={spec} registry={registry} loading={loading} />
-        </div>
-      </JSONUIProvider>
-    </CanvasActionsContext>
+    <EntityRegistryProvider>
+      <CanvasActionsContext value={actions}>
+        <JSONUIProvider
+          registry={registry}
+          initialState={prevStateRef.current}
+          onStateChange={onStateChange}
+        >
+          <div className="relative flex flex-1 flex-col gap-4 p-5">
+            <Renderer spec={spec} registry={registry} loading={loading} />
+          </div>
+        </JSONUIProvider>
+      </CanvasActionsContext>
+    </EntityRegistryProvider>
   );
 }

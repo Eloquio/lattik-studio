@@ -1,3 +1,4 @@
+import type { z } from "zod";
 import type { ValidationError } from "./naming";
 import { validateName, validateQualifiedName, validateDescription, validateRetention, validateDedupWindow } from "./naming";
 import { validateExpression } from "./expressions";
@@ -11,38 +12,77 @@ import {
   validateColumnExists,
 } from "./referential";
 import type { DefinitionKind } from "@/db/schema";
-import type {
-  Entity,
-  Dimension,
-  LoggerTable,
-  LattikTable,
-  Metric,
+import {
+  entitySchema,
+  dimensionSchema,
+  loggerTableSchema,
+  lattikTableSchema,
+  metricSchema,
+  type Entity,
+  type Dimension,
+  type LoggerTable,
+  type LattikTable,
+  type Metric,
 } from "../schema";
 
 export type { ValidationError };
+
+const SCHEMAS = {
+  entity: entitySchema,
+  dimension: dimensionSchema,
+  logger_table: loggerTableSchema,
+  lattik_table: lattikTableSchema,
+  metric: metricSchema,
+} as const;
+
+function zodIssuesToValidationErrors(error: z.ZodError): ValidationError[] {
+  return error.issues.map((issue) => ({
+    field: issue.path.length > 0 ? issue.path.join(".") : "(root)",
+    message: issue.message,
+  }));
+}
 
 export async function validate(
   kind: DefinitionKind,
   spec: unknown
 ): Promise<{ passed: boolean; errors: ValidationError[] }> {
+  // Shape check via Zod first. This guarantees the per-kind validators below
+  // see well-typed input and never crash on missing fields — any structural
+  // problems become structured errors instead of thrown exceptions.
+  const schema = SCHEMAS[kind];
+  const parsed = schema.safeParse(spec);
+  if (!parsed.success) {
+    return { passed: false, errors: zodIssuesToValidationErrors(parsed.error) };
+  }
+
   const errors: ValidationError[] = [];
 
-  switch (kind) {
-    case "entity":
-      errors.push(...validateEntity(spec as Entity));
-      break;
-    case "dimension":
-      errors.push(...(await validateDimension(spec as Dimension)));
-      break;
-    case "logger_table":
-      errors.push(...(await validateLoggerTable(spec as LoggerTable)));
-      break;
-    case "lattik_table":
-      errors.push(...(await validateLattikTable(spec as LattikTable)));
-      break;
-    case "metric":
-      errors.push(...(await validateMetric(spec as Metric)));
-      break;
+  try {
+    switch (kind) {
+      case "entity":
+        errors.push(...validateEntity(parsed.data as Entity));
+        break;
+      case "dimension":
+        errors.push(...(await validateDimension(parsed.data as Dimension)));
+        break;
+      case "logger_table":
+        errors.push(...(await validateLoggerTable(parsed.data as LoggerTable)));
+        break;
+      case "lattik_table":
+        errors.push(...(await validateLattikTable(parsed.data as LattikTable)));
+        break;
+      case "metric":
+        errors.push(...(await validateMetric(parsed.data as Metric)));
+        break;
+    }
+  } catch (e) {
+    // Last-resort safety net: an unexpected runtime error (e.g. a referential
+    // loader failing) becomes a structured validation error so the agent can
+    // recover instead of the tool call crashing.
+    errors.push({
+      field: "(root)",
+      message: `Unexpected validation error: ${e instanceof Error ? e.message : String(e)}`,
+    });
   }
 
   return { passed: errors.length === 0, errors };

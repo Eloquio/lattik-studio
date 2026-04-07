@@ -16,15 +16,23 @@ export function ReviewSuggestions({ suggestions, onApply, onComplete }: ReviewSu
 
   const handleDecision = (s: ReviewSuggestion, decision: "accepted" | "denied") => {
     setDecisions((prev) => ({ ...prev, [s.id]: decision }));
-    if (decision === "accepted" && s.actions?.length && onApply) {
+    if (decision === "accepted" && s.actions.length > 0 && onApply) {
       onApply(s.actions);
     }
   };
 
-  // Auto-advance when all suggestions are decided
+  // Auto-advance when all suggestions are decided. When suggestions is empty,
+  // the reviewer found nothing actionable — fire onComplete immediately so the
+  // agent moves on to the next workflow step without waiting for user input.
   const allDecided = suggestions.length > 0 && suggestions.every((s) => s.id in decisions);
   useEffect(() => {
-    if (allDecided && !completedRef.current && onComplete) {
+    if (completedRef.current || !onComplete) return;
+    if (suggestions.length === 0) {
+      completedRef.current = true;
+      onComplete("Review complete: no issues found. Proceed to the next step.");
+      return;
+    }
+    if (allDecided) {
       completedRef.current = true;
       const lines = suggestions.map((s) => {
         const d = decisions[s.id];
@@ -34,8 +42,14 @@ export function ReviewSuggestions({ suggestions, onApply, onComplete }: ReviewSu
     }
   }, [allDecided, decisions, suggestions, onComplete]);
 
-  const severityBorder = (sev: string) =>
-    sev === "error" ? "border-red-500/40" : sev === "warning" ? "border-amber-500/40" : "border-blue-400/30";
+  if (suggestions.length === 0) {
+    return (
+      <div className="my-2 flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-300">
+        <Check className="h-3.5 w-3.5 shrink-0" />
+        <span>Review complete — no issues found.</span>
+      </div>
+    );
+  }
 
   return (
     <div className="my-2 flex flex-col gap-2">
@@ -47,7 +61,7 @@ export function ReviewSuggestions({ suggestions, onApply, onComplete }: ReviewSu
         return (
           <div
             key={s.id}
-            className={`rounded-lg border ${severityBorder(s.severity)} px-3 py-2 transition-colors ${
+            className={`rounded-lg border border-white/10 px-3 py-2 transition-colors ${
               d === "accepted" ? "bg-green-500/10" : d === "denied" ? "bg-red-500/10" : "bg-white/5"
             }`}
           >

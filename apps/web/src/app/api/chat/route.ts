@@ -53,6 +53,34 @@ ${agentList}
 - When handing off, briefly tell the user which agent you're routing them to and why${stackNote}`;
 }
 
+/**
+ * Strip tool parts that don't belong to the target agent and remove empty
+ * text parts so the Anthropic API never receives `{type:"text", text:""}`.
+ * Messages left with no parts are dropped entirely.
+ */
+function cleanUIMessages(
+  messages: UIMessage[],
+  agentTools: Record<string, unknown>
+): UIMessage[] {
+  return messages
+    .map((msg) => ({
+      ...msg,
+      parts: (msg.parts ?? []).filter((part) => {
+        // Drop tool parts that aren't in the target agent's tool set
+        if (part.type.startsWith("tool-") && "toolCallId" in part) {
+          const toolName = part.type.slice(5);
+          return toolName in agentTools;
+        }
+        // Drop empty text parts
+        if (part.type === "text" && "text" in part && (part as { text: string }).text === "") {
+          return false;
+        }
+        return true;
+      }),
+    }))
+    .filter((msg) => msg.parts.length > 0);
+}
+
 export async function POST(req: Request) {
   // Auth check
   const { auth } = await import("@/auth");
@@ -117,17 +145,7 @@ export async function POST(req: Request) {
     : undefined;
 
   if (agent) {
-    // Strip tool parts from other agents (e.g. handoff) to avoid schema validation errors
-    const cleanMessages = messages.map((msg) => ({
-      ...msg,
-      parts: (msg.parts ?? []).filter((part) => {
-        if (part.type.startsWith("tool-") && "toolCallId" in part) {
-          const toolName = part.type.slice(5);
-          return toolName in (agent.tools ?? {});
-        }
-        return true;
-      }),
-    }));
+    const cleanMessages = cleanUIMessages(messages, agent.tools ?? {});
 
     const stream = await createAgentUIStream({
       agent,
@@ -169,17 +187,7 @@ export async function POST(req: Request) {
     stopWhen: stepCountIs(5),
   });
 
-  // Strip tool parts from specialist agents to avoid schema validation errors
-  const cleanAssistantMessages = messages.map((msg) => ({
-    ...msg,
-    parts: (msg.parts ?? []).filter((part) => {
-      if (part.type.startsWith("tool-") && "toolCallId" in part) {
-        const toolName = part.type.slice(5);
-        return toolName in (assistantAgent.tools ?? {});
-      }
-      return true;
-    }),
-  }));
+  const cleanAssistantMessages = cleanUIMessages(messages, assistantAgent.tools ?? {});
 
   return createAgentUIStreamResponse({
     agent: assistantAgent,
