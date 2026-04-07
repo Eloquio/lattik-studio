@@ -71,11 +71,12 @@ pnpm install
 cp apps/web/.env.example apps/web/.env
 ```
 
-5. Start the local PostgreSQL cluster (runs in kind) and push the database schema:
+5. Start the local PostgreSQL cluster (runs in kind), push the database schema, and seed the first-party agents (Data Architect, etc.) into the marketplace:
 
 ```bash
 pnpm db:start
 pnpm db:push
+pnpm db:seed
 ```
 
 6. Start the [portless](https://github.com/vercel-labs/portless) proxy with the `.dev` TLD (required for Google OAuth, which expects `https://lattik-studio.dev`):
