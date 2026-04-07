@@ -45,47 +45,34 @@ See [pnpm.io/installation](https://pnpm.io/installation) for more options.
 pnpm install
 ```
 
-3. Set up your Vercel project and pull environment variables:
+3. Set up your environment variables by copying `apps/web/.env.example` to `apps/web/.env` and filling in the values:
 
 ```bash
-vercel link
-vercel env pull
+cp apps/web/.env.example apps/web/.env
 ```
 
-4. Push the database schema to Neon:
+4. Start the local PostgreSQL cluster (runs in kind) and push the database schema:
 
 ```bash
-cd apps/web && pnpm drizzle-kit push
+pnpm db:start
+pnpm db:push
 ```
 
-5. Add a background image at `apps/web/public/bg.avif`
+5. Start the [portless](https://github.com/vercel-labs/portless) proxy with the `.dev` TLD (required for Google OAuth, which expects `https://lattik-studio.dev`):
 
-6. Start the dev server:
+```bash
+portless proxy start --tld dev
+```
+
+6. (Optional) Start Gitea for the PR review workflow, then grab the API token from the init logs and set `GITEA_TOKEN` in `apps/web/.env`:
+
+```bash
+pnpm gitea:start
+pnpm gitea:init-logs
+```
+
+7. Start the dev server:
 
 ```bash
 pnpm dev
-```
-
-## Environment Variables
-
-See `apps/web/.env.example`:
-
-- `VERCEL_OIDC_TOKEN` — Vercel AI Gateway token
-- `DATABASE_URL` — Neon Postgres connection string
-- `AUTH_SECRET` — NextAuth secret
-- `AUTH_GOOGLE_ID` — Google OAuth client ID
-- `AUTH_GOOGLE_SECRET` — Google OAuth client secret
-
-## Project Structure
-
-```
-apps/
-  web/              — Next.js web app
-    src/
-      app/          — Pages and API routes
-      components/   — UI components (chat, canvas, nav, ui)
-      hooks/        — Custom React hooks
-      auth/         — NextAuth configuration
-      db/           — Drizzle schema and connection
-packages/           — Shared packages (future)
 ```
