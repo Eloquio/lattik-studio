@@ -11,6 +11,7 @@ Extensions are specialized AI agents (e.g. a Root Cause Analysis Agent). Extensi
 - **AI:** Vercel AI SDK v6 with AI Gateway (Claude Sonnet 4)
 - **Auth:** NextAuth v5 (Auth.js beta) with Google OAuth
 - **Database:** PostgreSQL (local via kind) + Drizzle ORM
+- **Local data lake:** Trino + Iceberg REST catalog + MinIO, all in kind ([`docs/local-data-lake.md`](docs/local-data-lake.md))
 - **UI:** shadcn/ui (Base Nova) + Tailwind CSS v4
 - **Dev server:** portless (`https://lattik-studio.dev` via `--tld dev`)
 - **Canvas rendering:** `@json-render/core` + `@json-render/react` ([vercel-labs/json-render](https://github.com/vercel-labs/json-render))
@@ -34,8 +35,8 @@ apps/web/              Next.js app
   src/hooks/           React hooks
   src/lib/             Server actions and utilities
   src/proxy.ts         Auth middleware (protects all routes except /sign-in, /api/auth, /api/webhooks)
-docs/                  Architecture docs (agent-handoff, canvas-rendering, progressive-disclosure)
-k8s/                   Kubernetes manifests (kind cluster, PostgreSQL, Gitea)
+docs/                  Architecture docs (agent-handoff, canvas-rendering, progressive-disclosure, data-model, local-data-lake)
+k8s/                   Kubernetes manifests (kind cluster, PostgreSQL, Gitea, Trino + iceberg-rest + MinIO)
 packages/              Shared packages (future)
 ```
 
@@ -63,7 +64,7 @@ pnpm dev
 # Build
 pnpm build
 
-# Tear down everything (deletes the kind cluster — host data persists under /var/lib/lattik)
+# Tear down everything (deletes the kind cluster — PVCs go with it, data is wiped)
 pnpm dev:down
 ```
 
@@ -115,8 +116,32 @@ kubectl get pods -l app=postgres
 - **Connection:** `src/db/index.ts` — singleton with `globalThis` for HMR safety
 - **Schema:** `src/db/schema.ts` — tables: users, accounts, sessions, verificationTokens (NextAuth), conversations (chat + canvas state), definitions (pipeline definitions lifecycle), agents, user_agents (marketplace)
 - **Migrations:** `drizzle-kit push` (schema-first, no migration files)
-- **K8s manifests:** `k8s/kind-config.yaml` (cluster), `k8s/postgres.yaml` (Secret, Deployment, Service)
+- **K8s manifests:** `k8s/kind-config.yaml` (cluster), `k8s/postgres.yaml` (PVC, Secret, Deployment, Service)
 - **Port:** PostgreSQL exposed at `localhost:5432` via NodePort 30432
+
+## Local data lake
+
+A local mirror of the production data lake (S3 + Iceberg) running in the same kind cluster, with [Trino](https://trino.io) as the query engine. Used for developing and testing anything that touches Iceberg tables without hitting real S3. See [`docs/local-data-lake.md`](docs/local-data-lake.md) for the full architecture, query examples, image-pull workarounds, and troubleshooting.
+
+```bash
+# Start the data lake stack (assumes the cluster is already up)
+pnpm trino:start
+
+# Open a SQL shell against the in-cluster Trino coordinator
+pnpm trino:cli
+
+# Tail Trino logs
+pnpm trino:logs
+
+# Tear down (data is lost — PVCs go with the manifests)
+pnpm trino:stop
+```
+
+- **Services:** Trino (`trinodb/trino:468`), Iceberg REST catalog (`tabulario/iceberg-rest:1.6.0`, sqlite-backed), MinIO (object store, `warehouse` bucket)
+- **K8s manifests:** `k8s/trino.yaml`, `k8s/iceberg-rest.yaml`, `k8s/minio.yaml` — each with its own PVC
+- **Ports:** Trino UI / API at `localhost:8080`, MinIO S3 API at `localhost:9000`, MinIO console at `localhost:9001`
+- **Catalogs registered with Trino:** `iceberg` (the local data lake), `tpch` (built-in synthetic data, no storage required — handy for smoke tests)
+- **Persistence:** all PVC-backed via kind's default StorageClass; survives pod restarts but **not** `pnpm dev:down`. Snapshot via `mc cp` or `pg_dump` if you need cross-recreate persistence.
 
 ## Auth
 
