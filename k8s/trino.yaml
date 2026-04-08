@@ -1,0 +1,135 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trino-config
+data:
+  node.properties: |
+    node.environment=lattik
+    node.data-dir=/data/trino
+  jvm.config: |
+    -server
+    -Xmx2G
+    -XX:InitialRAMPercentage=80
+    -XX:MaxRAMPercentage=80
+    -XX:G1HeapRegionSize=32M
+    -XX:+ExplicitGCInvokesConcurrent
+    -XX:+ExitOnOutOfMemoryError
+    -XX:+HeapDumpOnOutOfMemoryError
+    -XX:-OmitStackTraceInFastThrow
+    -XX:ReservedCodeCacheSize=512M
+    -XX:PerMethodRecompilationCutoff=10000
+    -XX:PerBytecodeRecompilationCutoff=10000
+    -Djdk.attach.allowAttachSelf=true
+    -Djdk.nio.maxCachedBufferSize=2000000
+    -Dfile.encoding=UTF-8
+    -XX:+UnlockDiagnosticVMOptions
+    -XX:GCLockerRetryAllocationCount=32
+  config.properties: |
+    coordinator=true
+    node-scheduler.include-coordinator=true
+    http-server.http.port=8080
+    discovery.uri=http://localhost:8080
+    query.max-memory=1GB
+    query.max-memory-per-node=512MB
+  log.properties: |
+    io.trino=INFO
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trino-catalogs
+data:
+  iceberg.properties: |
+    connector.name=iceberg
+    iceberg.catalog.type=rest
+    iceberg.rest-catalog.uri=http://iceberg-rest:8181
+    iceberg.rest-catalog.warehouse=s3://warehouse/
+    fs.native-s3.enabled=true
+    s3.endpoint=http://minio:9000
+    s3.region=us-east-1
+    s3.path-style-access=true
+    s3.aws-access-key=lattik
+    s3.aws-secret-key=lattik-local
+  tpch.properties: |
+    connector.name=tpch
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trino
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: trino
+  template:
+    metadata:
+      labels:
+        app: trino
+    spec:
+      containers:
+        - name: trino
+          image: trinodb/trino:468
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "3Gi"
+              cpu: "2000m"
+          readinessProbe:
+            httpGet:
+              path: /v1/info
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /v1/info
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          volumeMounts:
+            - name: config
+              mountPath: /etc/trino/node.properties
+              subPath: node.properties
+            - name: config
+              mountPath: /etc/trino/jvm.config
+              subPath: jvm.config
+            - name: config
+              mountPath: /etc/trino/config.properties
+              subPath: config.properties
+            - name: config
+              mountPath: /etc/trino/log.properties
+              subPath: log.properties
+            - name: catalogs
+              mountPath: /etc/trino/catalog
+            - name: trino-data
+              mountPath: /data/trino
+      volumes:
+        - name: config
+          configMap:
+            name: trino-config
+        - name: catalogs
+          configMap:
+            name: trino-catalogs
+        - name: trino-data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trino
+spec:
+  type: NodePort
+  selector:
+    app: trino
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: 30808

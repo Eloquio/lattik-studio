@@ -42,15 +42,16 @@ packages/              Shared packages (future)
 ## Development
 
 ```bash
-# First time: create kind cluster and deploy PostgreSQL
-pnpm db:start
+# Bring up the full dev stack: kind cluster + postgres + gitea + trino/minio/iceberg-rest
+pnpm dev:up
+
+# Or, for a minimum env (cluster + postgres only — much faster, ~6 GB less RAM):
+pnpm cluster:up && pnpm db:start
 
 # Push database schema
 pnpm db:push
 
-# Start Gitea (optional — needed for PR workflow)
-pnpm gitea:start
-# Check init logs for GITEA_TOKEN:
+# If gitea is running, grab the API token from the init logs and set GITEA_TOKEN in apps/web/.env
 pnpm gitea:init-logs
 
 # Start portless proxy with .dev TLD (required for Google OAuth)
@@ -62,9 +63,15 @@ pnpm dev
 # Build
 pnpm build
 
-# Stop database cluster
-pnpm db:stop
+# Tear down everything (deletes the kind cluster — host data persists under /var/lib/lattik)
+pnpm dev:down
 ```
+
+### Script naming
+
+- `cluster:up` / `cluster:down` — kind cluster lifecycle only. `cluster:down` deletes the cluster, which kills every service inside it.
+- `db:start` / `db:stop`, `gitea:start` / `gitea:stop`, `trino:start` / `trino:stop` — per-service. Each `*:start` assumes the cluster is already up.
+- `dev:up` / `dev:down` — convenience aggregations. `dev:up` brings up the cluster + every service in sequence; `dev:down` is an alias for `cluster:down`.
 
 ## Environment variables
 
@@ -84,14 +91,18 @@ Set in `apps/web/.env` (gitignored):
 PostgreSQL runs locally in a kind (Kubernetes in Docker) cluster. Data persists at `/var/lib/lattik/postgres-data`.
 
 ```bash
-# Start cluster + PostgreSQL
+# Start the cluster, then deploy postgres into it
+pnpm cluster:up
 pnpm db:start
 
 # Push Drizzle schema to the database
 pnpm db:push
 
-# Stop and delete the cluster
+# Stop just the postgres deployment (cluster keeps running, gitea/trino unaffected)
 pnpm db:stop
+
+# Tear down the entire cluster (kills postgres, gitea, trino, everything)
+pnpm cluster:down
 
 # Connect via psql
 psql postgresql://lattik:lattik-local@localhost:5432/lattik_studio
