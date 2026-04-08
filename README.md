@@ -71,13 +71,16 @@ pnpm install
 cp apps/web/.env.example apps/web/.env
 ```
 
-5. Start the local PostgreSQL cluster (runs in kind), push the database schema, and seed the first-party agents (Data Architect, etc.) into the marketplace:
+5. Create the kind cluster, deploy PostgreSQL into it, push the database schema, and seed the first-party agents (Data Architect, etc.) into the marketplace:
 
 ```bash
+pnpm cluster:up
 pnpm db:start
 pnpm db:push
 pnpm db:seed
 ```
+
+> Tip: `pnpm dev:up` brings up the cluster *and* every optional service (postgres, gitea, trino + minio + iceberg-rest) in one command. Use it once you've finished the rest of this setup and want a one-shot way to start your dev env. `pnpm dev:down` tears it all down.
 
 6. Start the [portless](https://github.com/vercel-labs/portless) proxy with the `.dev` TLD (required for Google OAuth, which expects `https://lattik-studio.dev`):
 

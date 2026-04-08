@@ -12,8 +12,21 @@ nodes:
       - containerPort: 30222
         hostPort: 2222
         protocol: TCP
+      - containerPort: 30808
+        hostPort: 8080
+        protocol: TCP
+      - containerPort: 30900
+        hostPort: 9000
+        protocol: TCP
+      - containerPort: 30901
+        hostPort: 9001
+        protocol: TCP
     extraMounts:
       - hostPath: /var/lib/lattik/postgres-data
         containerPath: /var/local/postgres-data
       - hostPath: /var/lib/lattik/gitea-data
         containerPath: /var/local/gitea-data
+      - hostPath: /var/lib/lattik/minio-data
+        containerPath: /var/local/minio-data
+      - hostPath: /var/lib/lattik/iceberg-data
+        containerPath: /var/local/iceberg-data
