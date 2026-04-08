@@ -71,14 +71,7 @@ pnpm install
 cp apps/web/.env.example apps/web/.env
 ```
 
-5. Create the host directories that the in-cluster services bind-mount their data into. These are persistent across cluster recreates, so anything written by postgres / gitea / minio / the iceberg catalog survives `pnpm dev:down`. The `chmod 777` is required because the iceberg-rest image runs as a non-root user and otherwise can't write the catalog sqlite db; postgres/gitea/minio chown their own dirs at startup so the wide perms don't matter to them:
-
-```bash
-sudo mkdir -p /var/lib/lattik/{postgres,gitea,minio,iceberg}-data
-sudo chmod 777 /var/lib/lattik/{postgres,gitea,minio,iceberg}-data
-```
-
-6. Create the kind cluster, deploy PostgreSQL into it, push the database schema, and seed the first-party agents (Data Architect, etc.) into the marketplace:
+5. Create the kind cluster, deploy PostgreSQL into it, push the database schema, and seed the first-party agents (Data Architect, etc.) into the marketplace:
 
 ```bash
 pnpm cluster:up
@@ -87,22 +80,24 @@ pnpm db:push
 pnpm db:seed
 ```
 
+> All in-cluster services (postgres, gitea, minio, iceberg-rest) store their data on PVCs backed by kind's default StorageClass. Data persists across pod restarts and `pnpm db:stop`/`pnpm db:start` cycles, but is wiped when you `pnpm dev:down` (which deletes the kind cluster). For most local-dev work this is fine; if you need to keep something across a recreate, snapshot it out (`pg_dump`, `mc cp`, etc.) first.
+
 > Tip: `pnpm dev:up` brings up the cluster *and* every optional service (postgres, gitea, trino + minio + iceberg-rest) in one command. Use it once you've finished the rest of this setup and want a one-shot way to start your dev env. `pnpm dev:down` tears it all down.
 
-7. Start the [portless](https://github.com/vercel-labs/portless) proxy with the `.dev` TLD (required for Google OAuth, which expects `https://lattik-studio.dev`):
+6. Start the [portless](https://github.com/vercel-labs/portless) proxy with the `.dev` TLD (required for Google OAuth, which expects `https://lattik-studio.dev`):
 
 ```bash
 portless proxy start --tld dev
 ```
 
-8. (Optional) Start Gitea for the PR review workflow, then grab the API token from the init logs and set `GITEA_TOKEN` in `apps/web/.env`:
+7. (Optional) Start Gitea for the PR review workflow, then grab the API token from the init logs and set `GITEA_TOKEN` in `apps/web/.env`:
 
 ```bash
 pnpm gitea:start
 pnpm gitea:init-logs
 ```
 
-9. Start the dev server:
+8. Start the dev server:
 
 ```bash
 pnpm dev

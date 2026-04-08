@@ -88,7 +88,7 @@ Set in `apps/web/.env` (gitignored):
 
 ## Database
 
-PostgreSQL runs locally in a kind (Kubernetes in Docker) cluster. Data persists at `/var/lib/lattik/postgres-data`.
+PostgreSQL runs locally in a kind (Kubernetes in Docker) cluster, backed by a `PersistentVolumeClaim` against kind's default StorageClass. Data persists across pod restarts, image upgrades, and `pnpm db:stop`/`pnpm db:start` cycles. **It does not survive `pnpm dev:down`** — that deletes the kind cluster, and the PV's backing dir lives inside the cluster's filesystem. Re-seed with `pnpm db:push && pnpm db:seed` after a recreate. Same persistence story applies to gitea, minio, and iceberg-rest.
 
 ```bash
 # Start the cluster, then deploy postgres into it

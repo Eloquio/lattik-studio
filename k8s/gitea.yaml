@@ -1,4 +1,15 @@
 apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gitea-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
 kind: Secret
 metadata:
   name: gitea-secret
@@ -63,9 +74,8 @@ spec:
               mountPath: /data
       volumes:
         - name: gitea-data
-          hostPath:
-            path: /var/local/gitea-data
-            type: DirectoryOrCreate
+          persistentVolumeClaim:
+            claimName: gitea-data
 ---
 apiVersion: v1
 kind: Service

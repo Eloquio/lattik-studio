@@ -1,4 +1,15 @@
 apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
 kind: Secret
 metadata:
   name: minio-secret
@@ -57,9 +68,8 @@ spec:
               mountPath: /data
       volumes:
         - name: minio-data
-          hostPath:
-            path: /var/local/minio-data
-            type: DirectoryOrCreate
+          persistentVolumeClaim:
+            claimName: minio-data
 ---
 apiVersion: v1
 kind: Service
