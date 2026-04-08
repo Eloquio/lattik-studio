@@ -49,7 +49,7 @@ spec:
               TOKEN_RESPONSE=$(curl -sf -X POST "$GITEA_URL/api/v1/users/lattik-admin/tokens" \
                 -H "Content-Type: application/json" \
                 -u "lattik-admin:lattik-local" \
-                -d '{"name": "lattik-api", "scopes": ["all"]}')
+                -d '{"name": "lattik-api", "scopes": ["all"]}') || TOKEN_RESPONSE=""
               echo "Token response: $TOKEN_RESPONSE"
 
               # Extract token value — try sha1 first, then plain token field
