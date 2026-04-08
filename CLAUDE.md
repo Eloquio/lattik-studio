@@ -137,7 +137,7 @@ pnpm trino:logs
 pnpm trino:stop
 ```
 
-- **Services:** Trino (`trinodb/trino:468`), Iceberg REST catalog (`tabulario/iceberg-rest:1.6.0`, sqlite-backed), MinIO (object store, `warehouse` bucket)
+- **Services:** Trino (`trinodb/trino:480`), Iceberg REST catalog (`tabulario/iceberg-rest:1.6.0`, sqlite-backed), MinIO (object store, `warehouse` bucket)
 - **K8s manifests:** `k8s/trino.yaml`, `k8s/iceberg-rest.yaml`, `k8s/minio.yaml` — each with its own PVC
 - **Ports:** Trino UI / API at `localhost:8080`, MinIO S3 API at `localhost:9000`, MinIO console at `localhost:9001`
 - **Catalogs registered with Trino:** `iceberg` (the local data lake), `tpch` (built-in synthetic data, no storage required — handy for smoke tests)

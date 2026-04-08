@@ -6,7 +6,7 @@ A local mirror of the production data lake (S3 + Iceberg) running in the kind cl
 
 | Service | Role | Image | Port (in cluster) |
 |---|---|---|---|
-| **Trino** | Distributed SQL query engine. Single-node coordinator-and-worker for local dev. | `trinodb/trino:468` | `8080` |
+| **Trino** | Distributed SQL query engine. Single-node coordinator-and-worker for local dev. | `trinodb/trino:480` | `8080` |
 | **iceberg-rest** | Iceberg REST catalog. Stores which tables exist and where their metadata lives. SQLite-backed. | `tabulario/iceberg-rest:1.6.0` | `8181` |
 | **MinIO** | S3-compatible object storage. Holds the actual parquet data files and Iceberg metadata.json files. | `minio/minio` | `9000` (S3 API), `9001` (web console) |
 
@@ -135,13 +135,13 @@ If you hit `ImagePullBackOff` on any of these:
 
 ```bash
 # Pull on the host first (uses Docker Desktop's network, more reliable)
-docker pull trinodb/trino:468
+docker pull trinodb/trino:480
 docker pull tabulario/iceberg-rest:1.6.0
 docker pull minio/minio:RELEASE.2025-01-20T14-49-07Z
 docker pull minio/mc:RELEASE.2025-01-17T23-25-50Z
 
 # Side-load into the kind node (no registry pull needed)
-kind load docker-image trinodb/trino:468 --name lattik
+kind load docker-image trinodb/trino:480 --name lattik
 kind load docker-image tabulario/iceberg-rest:1.6.0 --name lattik
 kind load docker-image minio/minio:RELEASE.2025-01-20T14-49-07Z --name lattik
 kind load docker-image minio/mc:RELEASE.2025-01-17T23-25-50Z --name lattik

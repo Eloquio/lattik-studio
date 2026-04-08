@@ -8,22 +8,19 @@ data:
     node.data-dir=/data/trino
   jvm.config: |
     -server
-    -Xmx2G
+    -agentpath:/usr/lib/trino/bin/libjvmkill.so
     -XX:InitialRAMPercentage=80
     -XX:MaxRAMPercentage=80
     -XX:G1HeapRegionSize=32M
     -XX:+ExplicitGCInvokesConcurrent
-    -XX:+ExitOnOutOfMemoryError
     -XX:+HeapDumpOnOutOfMemoryError
+    -XX:+ExitOnOutOfMemoryError
     -XX:-OmitStackTraceInFastThrow
-    -XX:ReservedCodeCacheSize=512M
+    -XX:ReservedCodeCacheSize=256M
     -XX:PerMethodRecompilationCutoff=10000
     -XX:PerBytecodeRecompilationCutoff=10000
     -Djdk.attach.allowAttachSelf=true
     -Djdk.nio.maxCachedBufferSize=2000000
-    -Dfile.encoding=UTF-8
-    -XX:+UnlockDiagnosticVMOptions
-    -XX:GCLockerRetryAllocationCount=32
   config.properties: |
     coordinator=true
     node-scheduler.include-coordinator=true
@@ -69,7 +66,7 @@ spec:
     spec:
       containers:
         - name: trino
-          image: trinodb/trino:468
+          image: trinodb/trino:480
           ports:
             - name: http
               containerPort: 8080
