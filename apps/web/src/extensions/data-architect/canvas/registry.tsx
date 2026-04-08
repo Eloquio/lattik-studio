@@ -1217,10 +1217,10 @@ export const { registry, handlers } = defineRegistry(catalog, {
       const retention = (store.get("/retention") as string) ?? "30d";
 
       interface PK { _key: string; column: string; entity: string }
-      interface FCol { _key: string; name: string; type?: string; agg?: string; merge?: string; expr?: string }
+      interface FCol { _key: string; name: string; type?: string; agg?: string; merge?: string; expr?: string; description?: string }
       interface KM { _key: string; pk_column: string; source_column: string }
       interface CF { _key: string; name: string; source: string; key_mapping?: KM[]; columns: FCol[] }
-      interface DC { _key: string; name: string; expr: string }
+      interface DC { _key: string; name: string; expr: string; description?: string }
 
       const pks = (store.get("/primary_key") as PK[]) ?? [];
       const families = (store.get("/column_families") as CF[]) ?? [];
@@ -1233,6 +1233,43 @@ export const { registry, handlers } = defineRegistry(catalog, {
       const derived = (store.get("/derived_columns") as DC[]) ?? [];
 
       const [hoveredCol, setHoveredCol] = useState<string | null>(null);
+
+      // Add Column popup state
+      const DERIVED_KEY = "__derived__";
+      type MergeStrategy = "" | "sum" | "max" | "min" | "replace";
+      const [showAddCol, setShowAddCol] = useState(false);
+      const [newColName, setNewColName] = useState("");
+      const [newColExpr, setNewColExpr] = useState("");
+      const [newColMerge, setNewColMerge] = useState<MergeStrategy>("");
+      const [newColFamilyKey, setNewColFamilyKey] = useState<string>(DERIVED_KEY);
+      const [newColDesc, setNewColDesc] = useState("");
+
+      const closeAddCol = () => {
+        setShowAddCol(false);
+        setNewColName(""); setNewColExpr(""); setNewColMerge(""); setNewColFamilyKey(DERIVED_KEY); setNewColDesc("");
+      };
+
+      const addCol = () => {
+        const colName = newColName.trim();
+        const colExpr = newColExpr.trim();
+        if (!colName || !colExpr) return;
+        const desc = newColDesc.trim() || undefined;
+        if (newColFamilyKey === DERIVED_KEY) {
+          store.set("/derived_columns", [
+            ...derived,
+            { _key: genKey("dc"), name: colName, expr: colExpr, ...(desc ? { description: desc } : {}) },
+          ]);
+        } else {
+          const newCol: FCol = newColMerge
+            ? { _key: genKey("fc"), name: colName, agg: colExpr, merge: newColMerge, ...(desc ? { description: desc } : {}) }
+            : { _key: genKey("fc"), name: colName, expr: colExpr, ...(desc ? { description: desc } : {}) };
+          store.set(
+            "/column_families",
+            families.map((f) => (f._key === newColFamilyKey ? { ...f, columns: [...f.columns, newCol] } : f)),
+          );
+        }
+        closeAddCol();
+      };
 
       // Build preview columns: PK columns + family columns + derived columns
       const { entities: entityRegistry } = useEntityRegistry();
@@ -1306,6 +1343,39 @@ export const { registry, handlers } = defineRegistry(catalog, {
             </div>
           </div>
 
+          {/* Preview */}
+          {previewCols.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-stone-500">Preview</span>
+              <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-stone-200 bg-stone-50">
+                        {previewCols.map((c) => (
+                          <th key={c.name} className={`px-2.5 py-1.5 text-left font-semibold whitespace-nowrap transition-colors ${hoveredCol === c.name ? "bg-amber-100 text-amber-800" : "text-stone-600"}`}>
+                            {c.name}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Array.from({ length: 3 }, (_, i) => (
+                        <tr key={i} className="border-b border-stone-100 last:border-b-0">
+                          {previewCols.map((c) => (
+                            <td key={c.name} className={`px-2.5 py-1 font-mono text-[10px] whitespace-nowrap transition-colors ${hoveredCol === c.name ? "bg-amber-50 text-amber-700" : "text-stone-500"}`}>
+                              {c.source === "pk" ? mockValue(c.type, i, c.name) : c.type === "agg" ? String(1000 + i * 7) : `val_${i + 1}`}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Columns — shown once primary keys are provided */}
           {pks.some((pk) => !!pk.column) && (
             <div className="flex flex-col gap-2">
@@ -1374,49 +1444,17 @@ export const { registry, handlers } = defineRegistry(catalog, {
                       </tr>
                     ))}
 
-                    {/* Empty hint when only PKs exist */}
-                    {families.every((cf) => cf.columns.filter((c) => c.name).length === 0) && derived.filter((dc) => dc.name).length === 0 && (
-                      <tr>
-                        <td colSpan={3} className="px-2.5 py-2 text-center text-[11px] text-stone-400 italic">
-                          No data columns yet — ask the agent to add column families or derived columns
-                        </td>
-                      </tr>
-                    )}
+                    {/* Add column button */}
+                    <tr>
+                      <td colSpan={3} className="px-2.5 py-1.5">
+                        <button onClick={() => setShowAddCol(true)}
+                          className="flex items-center gap-1.5 rounded-md border border-dashed border-stone-300 px-2.5 py-1.5 text-[11px] text-stone-500 hover:border-amber-500 hover:text-amber-700 hover:bg-amber-50/50 transition-colors w-full justify-center">
+                          <Plus className="h-3 w-3" /> Add column
+                        </button>
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
-              </div>
-            </div>
-          )}
-
-          {/* Preview */}
-          {previewCols.length > 0 && (
-            <div className="flex flex-col gap-2">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-stone-500">Preview</span>
-              <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="border-b border-stone-200 bg-stone-50">
-                        {previewCols.map((c) => (
-                          <th key={c.name} className={`px-2.5 py-1.5 text-left font-semibold whitespace-nowrap transition-colors ${hoveredCol === c.name ? "bg-amber-100 text-amber-800" : "text-stone-600"}`}>
-                            {c.name}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {Array.from({ length: 3 }, (_, i) => (
-                        <tr key={i} className="border-b border-stone-100 last:border-b-0">
-                          {previewCols.map((c) => (
-                            <td key={c.name} className={`px-2.5 py-1 font-mono text-[10px] whitespace-nowrap transition-colors ${hoveredCol === c.name ? "bg-amber-50 text-amber-700" : "text-stone-500"}`}>
-                              {c.source === "pk" ? mockValue(c.type, i, c.name) : c.type === "agg" ? String(1000 + i * 7) : `val_${i + 1}`}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
               </div>
             </div>
           )}
@@ -1430,6 +1468,82 @@ export const { registry, handlers } = defineRegistry(catalog, {
               <Send className="h-3.5 w-3.5" />
               Review Table
             </button>
+          )}
+
+          {/* Add column popup */}
+          {showAddCol && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/10 backdrop-blur-[1px] rounded-lg" onClick={closeAddCol}>
+              <div className="w-[22rem] rounded-xl border border-stone-200 bg-white shadow-xl" onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => { if (e.key === "Escape") closeAddCol(); if (e.key === "Enter") { e.preventDefault(); addCol(); } }}>
+                {/* Header */}
+                <div className="flex items-center justify-between px-4 py-2 bg-amber-50 border-b border-amber-100 rounded-t-xl">
+                  <span className="text-[11px] font-medium text-amber-700">Add Column</span>
+                  <button onClick={closeAddCol} className="flex h-5 w-5 items-center justify-center rounded text-amber-400 hover:text-amber-700 transition-colors">
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+
+                {/* Body */}
+                <div className="flex flex-col gap-3 px-4 py-4">
+                  {/* Name */}
+                  <input type="text" value={newColName} onChange={(e) => setNewColName(e.target.value)}
+                    placeholder="new_column_name" autoFocus maxLength={60}
+                    className="w-full bg-transparent text-sm font-semibold font-mono text-stone-800 placeholder:text-stone-300 placeholder:font-sans placeholder:font-normal focus:outline-none" />
+
+                  {/* Expression */}
+                  <input type="text" value={newColExpr} onChange={(e) => setNewColExpr(e.target.value)}
+                    placeholder={newColFamilyKey !== DERIVED_KEY && newColMerge ? "e.g. sum(amount)" : "e.g. last(status)"}
+                    className="w-full bg-transparent text-xs font-mono text-stone-600 placeholder:text-stone-300 placeholder:font-sans focus:outline-none" />
+
+                  {/* Source family */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] uppercase tracking-wider text-stone-400">Source</span>
+                    <select value={newColFamilyKey} onChange={(e) => { setNewColFamilyKey(e.target.value); if (e.target.value === DERIVED_KEY) setNewColMerge(""); }}
+                      className="flex-1 bg-transparent text-xs text-stone-700 focus:outline-none">
+                      <option value={DERIVED_KEY}>derived (no source table)</option>
+                      {families.map((cf) => (
+                        <option key={cf._key} value={cf._key}>
+                          {cf.name || "family"}{cf.source ? ` ← ${cf.source}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Merge (only when source is a family) */}
+                  {newColFamilyKey !== DERIVED_KEY && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] uppercase tracking-wider text-stone-400">Merge</span>
+                      <select value={newColMerge} onChange={(e) => setNewColMerge(e.target.value as MergeStrategy)}
+                        className="flex-1 bg-transparent text-xs text-stone-700 focus:outline-none">
+                        <option value="">none (expression)</option>
+                        <option value="sum">sum</option>
+                        <option value="max">max</option>
+                        <option value="min">min</option>
+                        <option value="replace">replace</option>
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Description */}
+                  <input type="text" value={newColDesc} onChange={(e) => setNewColDesc(e.target.value)}
+                    placeholder="Describe the column"
+                    className="w-full bg-transparent text-xs text-stone-500 placeholder:text-stone-300 focus:outline-none" />
+
+                  {/* Actions */}
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-stone-100">
+                    <button onClick={closeAddCol}
+                      className="text-[11px] text-stone-400 hover:text-stone-600 transition-colors">
+                      Cancel
+                    </button>
+                    <button onClick={addCol}
+                      disabled={!newColName.trim() || !newColExpr.trim()}
+                      className="rounded-full bg-stone-800 px-3 py-1 text-[11px] font-medium text-white hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors">
+                      Add
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       );
