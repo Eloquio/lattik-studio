@@ -71,10 +71,11 @@ pnpm install
 cp apps/web/.env.example apps/web/.env
 ```
 
-5. Create the host directories that the in-cluster services bind-mount their data into. These are persistent across cluster recreates, so anything written by postgres / gitea / minio / the iceberg catalog survives `pnpm dev:down`:
+5. Create the host directories that the in-cluster services bind-mount their data into. These are persistent across cluster recreates, so anything written by postgres / gitea / minio / the iceberg catalog survives `pnpm dev:down`. The `chmod 777` is required because the iceberg-rest image runs as a non-root user and otherwise can't write the catalog sqlite db; postgres/gitea/minio chown their own dirs at startup so the wide perms don't matter to them:
 
 ```bash
 sudo mkdir -p /var/lib/lattik/{postgres,gitea,minio,iceberg}-data
+sudo chmod 777 /var/lib/lattik/{postgres,gitea,minio,iceberg}-data
 ```
 
 6. Create the kind cluster, deploy PostgreSQL into it, push the database schema, and seed the first-party agents (Data Architect, etc.) into the marketplace:
