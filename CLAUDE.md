@@ -113,7 +113,7 @@ Each service lives in its own namespace so PVCs, secrets, and pods stay isolated
 | `trino` | Trino coordinator+worker deployment, configmaps, service |
 | `spark-operator` | Spark Operator pod (helm-managed) |
 | `kafka` | Kafka KRaft broker deployment, PVC, service |
-| `schema-registry` | Confluent Schema Registry deployment, service (stateless — data in Kafka) |
+| `schema-registry` | Confluent Schema Registry deployment, service `sr` (stateless — data in Kafka). Service named `sr` to avoid Kubernetes env var conflict with `SCHEMA_REGISTRY_*` |
 | `workloads` | Spark `SparkApplication`s and the driver/executor pods they spawn, plus the `spark-driver` ServiceAccount |
 | `airflow` | Airflow api-server, scheduler, dag-processor, init Job (see [`docs/local-airflow.md`](docs/local-airflow.md)) |
 

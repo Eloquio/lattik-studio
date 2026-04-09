@@ -1,8 +1,13 @@
 # Confluent Schema Registry — stores Protobuf schemas for Logger Table
 # payloads in Kafka (topic: _schemas). Stateless: no PVC needed.
 #
-# In-cluster:  schema-registry.schema-registry:8081
+# In-cluster:  sr.schema-registry:8081
 # From host:   localhost:8081  (via NodePort 30081)
+#
+# The Service is named "sr" (not "schema-registry") to avoid a conflict:
+# Kubernetes auto-injects env vars like SCHEMA_REGISTRY_PORT=tcp://...
+# from a Service named "schema-registry", and the Confluent image treats
+# every SCHEMA_REGISTRY_* env var as a config property, causing a crash.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -58,7 +63,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: schema-registry
+  name: sr
   namespace: schema-registry
 spec:
   type: NodePort
