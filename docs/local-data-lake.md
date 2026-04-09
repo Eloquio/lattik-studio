@@ -27,7 +27,7 @@ Each service lives in its own namespace so PVCs, secrets, and pods stay isolated
 | `trino` | Trino coordinator+worker deployment + configmaps + service |
 | `spark-operator` | Spark Operator pod (helm-managed) |
 | `kafka` | Kafka KRaft broker + PVC + service |
-| `schema-registry` | Confluent Schema Registry deployment + service (stateless — data in Kafka) |
+| `schema-registry` | Confluent Schema Registry deployment + service `sr` (stateless — data in Kafka) |
 | `workloads` | `SparkApplication`s + driver/executor pods + `spark-driver` ServiceAccount + local copy of MinIO credentials |
 | `airflow` | Airflow control plane + worker pods (see [`local-airflow.md`](local-airflow.md)) |
 
