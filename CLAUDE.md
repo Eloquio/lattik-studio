@@ -12,6 +12,7 @@ Extensions are specialized AI agents (e.g. a Root Cause Analysis Agent). Extensi
 - **Auth:** NextAuth v5 (Auth.js beta) with Google OAuth
 - **Database:** PostgreSQL (local via kind) + Drizzle ORM
 - **Local data lake:** Trino + Iceberg REST catalog + MinIO, all in kind ([`docs/local-data-lake.md`](docs/local-data-lake.md))
+- **Local compute:** Spark 4.0.2 + Iceberg 1.10.1, run as `SparkApplication`s under kubeflow's Spark Operator. Custom image `lattik/spark-iceberg:4.0.2-1.10.1` built from [`k8s/spark/Dockerfile`](k8s/spark/Dockerfile)
 - **Orchestration (local dev):** Airflow 3.2.0 with KubernetesExecutor in the same kind cluster, sharing the postgres metadata DB ([`docs/local-airflow.md`](docs/local-airflow.md))
 - **UI:** shadcn/ui (Base Nova) + Tailwind CSS v4
 - **Dev server:** portless (`https://lattik-studio.dev` via `--tld dev`)
@@ -37,7 +38,18 @@ apps/web/              Next.js app
   src/lib/             Server actions and utilities
   src/proxy.ts         Auth middleware (protects all routes except /sign-in, /api/auth, /api/webhooks)
 docs/                  Architecture docs (agent-handoff, canvas-rendering, progressive-disclosure, data-model, local-data-lake, local-airflow)
-k8s/                   Kubernetes manifests (kind cluster, PostgreSQL, Gitea, Trino + iceberg-rest + MinIO, Airflow)
+k8s/                   Kubernetes manifests
+  namespaces.yaml      All seven namespaces (postgres, gitea, minio, iceberg, trino, spark-operator, workloads)
+  postgres.yaml        Postgres in `postgres` ns
+  gitea.yaml           Gitea in `gitea` ns
+  minio.yaml           MinIO + bucket-init Job in `minio` ns
+  iceberg-rest.yaml    Iceberg REST catalog (sqlite-backed) in `iceberg` ns
+  trino.yaml           Trino coordinator+worker in `trino` ns
+  airflow.yaml         Airflow 3.x in `airflow` ns (RBAC + init Job + 3 Deployments + NodePort)
+  spark/Dockerfile     Custom Spark image (apache/spark:4.0.2 + iceberg jars)
+  spark/operator-values.yaml  Helm values for the kubeflow Spark Operator
+  spark-rbac.yaml      `spark-driver` SA + Role + RoleBinding in `workloads` ns
+  spark-example.yaml   Example SparkApplication that round-trips through iceberg
 airflow/dags/          Local Airflow DAGs (hostPath-mounted into the airflow pods — edit live, no restart)
 packages/              Shared packages (future)
 ```
@@ -45,7 +57,8 @@ packages/              Shared packages (future)
 ## Development
 
 ```bash
-# Bring up the full dev stack: kind cluster + postgres + gitea + trino/minio/iceberg-rest + airflow
+# Bring up the full dev stack: kind cluster + namespaces + postgres + gitea + trino/minio/iceberg-rest + airflow
+# (Spark Operator is opt-in via `pnpm spark:start` since it pulls a separate operator image)
 pnpm dev:up
 
 # Or, for a minimum env (cluster + postgres only — much faster, ~6 GB less RAM):
@@ -72,9 +85,27 @@ pnpm dev:down
 
 ### Script naming
 
-- `cluster:up` / `cluster:down` — kind cluster lifecycle only. `cluster:down` deletes the cluster, which kills every service inside it.
+- `cluster:up` / `cluster:down` — kind cluster lifecycle. `cluster:up` also applies [`k8s/namespaces.yaml`](k8s/namespaces.yaml) so every per-service script can assume its namespace exists. `cluster:down` deletes the cluster, which kills every service and PVC inside it.
 - `db:start` / `db:stop`, `gitea:start` / `gitea:stop`, `trino:start` / `trino:stop`, `airflow:start` / `airflow:stop` — per-service. Each `*:start` assumes the cluster is already up. `airflow:start` additionally assumes `db:start` has run, since Airflow's metadata DB is the existing postgres.
-- `dev:up` / `dev:down` — convenience aggregations. `dev:up` brings up the cluster + every service in sequence; `dev:down` is an alias for `cluster:down`.
+- `spark:image-build` / `spark:start` / `spark:stop` / `spark:logs` / `spark:submit-example` — Spark stack. `spark:image-build` builds and `kind load`s the custom `lattik/spark-iceberg` image; `spark:start` helm-installs the operator; `spark:submit-example` round-trips an Iceberg write+read through the same catalog Trino uses.
+- `dev:up` / `dev:down` — convenience aggregations. `dev:up` brings up the cluster + every service in sequence (Spark Operator excluded); `dev:down` is an alias for `cluster:down`.
+
+### Namespace layout
+
+Each service lives in its own namespace so PVCs, secrets, and pods stay isolated. Cross-namespace references use the form `<service>.<namespace>` (e.g. Trino's iceberg catalog points at `http://iceberg-rest.iceberg:8181`). The full layout:
+
+| Namespace | Contents |
+|---|---|
+| `postgres` | postgres deployment, PVC, secret, service |
+| `gitea` | gitea deployment, PVC, secret, service, init Job |
+| `minio` | MinIO deployment, PVC, secret, service, bucket-init Job |
+| `iceberg` | iceberg-rest deployment, PVC, service, local copy of MinIO credentials secret |
+| `trino` | Trino coordinator+worker deployment, configmaps, service |
+| `spark-operator` | Spark Operator pod (helm-managed) |
+| `workloads` | Spark `SparkApplication`s and the driver/executor pods they spawn, plus the `spark-driver` ServiceAccount |
+| `airflow` | Airflow api-server, scheduler, dag-processor, init Job (see [`docs/local-airflow.md`](docs/local-airflow.md)) |
+
+Kubernetes Secrets are namespace-scoped, so any service that needs to authenticate to MinIO from a different namespace gets its own local copy of the credentials (currently iceberg-rest and Spark drivers). Keep the values in lockstep with [`k8s/minio.yaml`](k8s/minio.yaml).
 
 ## Environment variables
 
@@ -139,11 +170,40 @@ pnpm trino:logs
 pnpm trino:stop
 ```
 
-- **Services:** Trino (`trinodb/trino:480`), Iceberg REST catalog (`tabulario/iceberg-rest:1.6.0`, sqlite-backed), MinIO (object store, `warehouse` bucket)
+- **Services:** Trino (`trinodb/trino:480`) in `trino` ns, Iceberg REST catalog (`tabulario/iceberg-rest:1.6.0`, sqlite-backed) in `iceberg` ns, MinIO in `minio` ns (object store, `warehouse` bucket)
 - **K8s manifests:** `k8s/trino.yaml`, `k8s/iceberg-rest.yaml`, `k8s/minio.yaml` — each with its own PVC
 - **Ports:** Trino UI / API at `localhost:8080`, MinIO S3 API at `localhost:9000`, MinIO console at `localhost:9001`
 - **Catalogs registered with Trino:** `iceberg` (the local data lake), `tpch` (built-in synthetic data, no storage required — handy for smoke tests)
+- **Cross-engine reads/writes:** Spark and Trino share the same iceberg-rest catalog and the same MinIO warehouse. A table written by Spark is immediately visible from Trino and vice versa. See the Local compute section below.
 - **Persistence:** all PVC-backed via kind's default StorageClass; survives pod restarts but **not** `pnpm dev:down`. Snapshot via `mc cp` or `pg_dump` if you need cross-recreate persistence.
+
+## Local compute (Spark)
+
+Apache Spark 4.0.2 with the Iceberg 1.10.1 runtime, run as `SparkApplication` resources under [kubeflow's Spark Operator](https://github.com/kubeflow/spark-operator). Used for batch jobs that read or write Iceberg tables — the same tables Trino can query. The custom image bakes the Iceberg Spark runtime + iceberg-aws-bundle into `apache/spark:4.0.2`. See [`docs/local-data-lake.md`](docs/local-data-lake.md) for the architecture diagram and an end-to-end example.
+
+```bash
+# One-time (and after editing k8s/spark/Dockerfile): build + kind load
+pnpm spark:image-build
+
+# Helm-install the Spark Operator into the spark-operator namespace and apply the workloads RBAC
+pnpm spark:start
+
+# Submit the example SparkApplication that round-trips an Iceberg write+read
+pnpm spark:submit-example
+
+# Tail the operator's logs (separate from any individual SparkApplication's driver logs)
+pnpm spark:logs
+
+# Uninstall the operator and delete the workloads RBAC
+pnpm spark:stop
+```
+
+- **Operator:** `kubeflow/spark-operator` Helm chart, installed in the `spark-operator` namespace; configured to watch the `workloads` namespace for `SparkApplication` CRDs.
+- **Image:** `lattik/spark-iceberg:4.0.2-1.10.1` (built locally, never pushed to a registry; loaded into the kind node via `kind load`). Bumping the Iceberg version means editing [`k8s/spark/Dockerfile`](k8s/spark/Dockerfile) and re-running `pnpm spark:image-build`.
+- **K8s manifests:** [`k8s/spark/Dockerfile`](k8s/spark/Dockerfile), [`k8s/spark/operator-values.yaml`](k8s/spark/operator-values.yaml), [`k8s/spark-rbac.yaml`](k8s/spark-rbac.yaml) (`spark-driver` ServiceAccount + Role + RoleBinding + local copy of MinIO credentials), [`k8s/spark-example.yaml`](k8s/spark-example.yaml) (a ConfigMap-mounted PySpark script + a `SparkApplication` that creates `iceberg.spark_demo.events` and writes three rows).
+- **Iceberg catalog config:** every SparkApplication needs the same set of `spark.sql.catalog.iceberg.*` properties — see [`k8s/spark-example.yaml`](k8s/spark-example.yaml#L93-L113) for the canonical set. The two non-obvious bits: `spark.sql.extensions` must include `IcebergSparkSessionExtensions`, and `AWS_REGION` must be set as an env var on driver and executor pods (not just in sparkConf — the parquet writer code path uses the SDK's default chain, which doesn't see sparkConf).
+- **Persistence:** the operator pod itself is stateless; the `workloads` namespace has no long-lived PVCs. Driver/executor pods are created and torn down per-job. Output data lives in MinIO via the iceberg-rest catalog.
+- **Helm dependency:** `helm` is required as a host-side prereq for `pnpm spark:start`. Install via `brew install helm` on macOS.
 
 ## Local orchestration (Airflow)
 

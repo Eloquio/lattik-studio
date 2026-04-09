@@ -1,0 +1,46 @@
+# Namespaces for the in-cluster lattik-studio dev stack.
+#
+# Apply this BEFORE any of the per-service manifests — kubectl will refuse
+# to create a resource in a namespace that doesn't exist yet.
+#
+# Layout:
+#   - Each persistent service gets its own namespace (postgres, gitea,
+#     minio, iceberg, trino) so its PVCs, secrets, and pods stay isolated.
+#   - The Spark operator pod lives in `spark-operator`. SparkApplication
+#     CRDs and the driver/executor pods they spawn live in `workloads`.
+#   - This mirrors projects/testenv's namespace conventions so anyone
+#     bouncing between the two repos sees the same shape.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: postgres
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitea
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: minio
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: iceberg
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: trino
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spark-operator
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: workloads

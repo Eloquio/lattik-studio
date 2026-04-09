@@ -2,6 +2,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: gitea-init
+  namespace: gitea
 spec:
   activeDeadlineSeconds: 300
   backoffLimit: 3
