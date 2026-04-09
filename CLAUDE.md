@@ -96,6 +96,7 @@ pnpm dev:down
 - `db:start` / `db:stop`, `gitea:start` / `gitea:stop`, `trino:start` / `trino:stop`, `airflow:start` / `airflow:stop` — per-service. Each `*:start` assumes the cluster is already up. `airflow:start` additionally assumes `db:start` has run, since Airflow's metadata DB is the existing postgres.
 - `spark:image-build` / `spark:start` / `spark:stop` / `spark:logs` / `spark:submit-example` — Spark stack. `spark:image-build` builds and `kind load`s the custom `lattik/spark-iceberg` image; `spark:start` helm-installs the operator; `spark:submit-example` round-trips an Iceberg write+read through the same catalog Trino uses.
 - `airflow:image-build` — builds the custom `lattik/airflow:3.2.0` image (adds `boto3` for S3 access) and loads it into the kind cluster. Must be run before `airflow:start` on a fresh cluster.
+- `airflow:dags-sync` — copies DAG files from `airflow/dags/` into the kind node. Called automatically by `airflow:start`.
 - `kafka:start` / `kafka:stop` / `kafka:logs` / `kafka:cli` — Kafka broker. `kafka:start` deploys a single-node KRaft broker; `kafka:cli` opens a shell in the pod (Kafka CLI tools live in `/opt/kafka/bin/`).
 - `schema-registry:start` / `schema-registry:stop` / `schema-registry:logs` — Confluent Schema Registry. Requires `kafka:start` first. Stateless — schemas are stored in Kafka.
 - `dev:up` / `dev:down` — convenience aggregations. `dev:up` brings up the cluster + every service in sequence (Spark Operator, Kafka, and Schema Registry excluded); `dev:down` is an alias for `cluster:down`.
