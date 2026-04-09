@@ -37,6 +37,10 @@
     "schema-registry:start": "kubectl apply -f k8s/schema-registry.yaml && until kubectl -n schema-registry get pod -l app=schema-registry 2>/dev/null | grep -q schema-registry; do sleep 2; done && kubectl -n schema-registry wait --for=condition=ready pod -l app=schema-registry --timeout=120s && echo 'Schema Registry ready — in-cluster: sr.schema-registry:8081, host: localhost:8081'",
     "schema-registry:stop": "kubectl delete -f k8s/schema-registry.yaml --ignore-not-found",
     "schema-registry:logs": "kubectl -n schema-registry logs -l app=schema-registry -f",
+    "ingest:image-build": "docker build -t lattik/ingest:latest -f apps/ingest/Dockerfile apps/ingest && kind load docker-image lattik/ingest:latest --name lattik",
+    "ingest:start": "kubectl apply -f k8s/ingest.yaml && until kubectl -n workloads get pod -l app=ingest 2>/dev/null | grep -q ingest; do sleep 2; done && kubectl -n workloads wait --for=condition=ready pod -l app=ingest --timeout=120s && echo 'Ingest ready — in-cluster: ingest.workloads:8090, host: localhost:8090'",
+    "ingest:stop": "kubectl delete -f k8s/ingest.yaml --ignore-not-found",
+    "ingest:logs": "kubectl -n workloads logs -l app=ingest -f",
     "dev:up": "pnpm cluster:up && pnpm db:start && pnpm gitea:start && pnpm trino:start && pnpm airflow:image-build && pnpm airflow:start",
     "dev:down": "pnpm cluster:down",
     "test:e2e": "cd apps/web && pnpm test:e2e"
