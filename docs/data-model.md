@@ -71,18 +71,30 @@ A **Logger Table** is a raw, append-only event stream — narrow rows representi
 
 Logger Tables are the **input** layer to the pipeline. They are not normally read directly to answer business queries — orgs typically configure cost or scan-size policies that limit ad-hoc Logger Table aggregation, and Lattik Tables / Cubes exist precisely to make those queries cheap.
 
+Applications send events to Logger Tables via `@eloquio/lattik-logger`. The SDK serializes each event into a Protobuf **Envelope** (`table`, `event_id`, `event_timestamp`, opaque `payload` bytes) and delivers it to the ingestion service, which routes envelopes to per-table Kafka topics. A per-table `.proto` is auto-generated from the Logger Table's column definitions at build time via `buf`.
+
 ### Lattik Table
 
 Defined in [defining-lattik-table.md](../apps/web/src/extensions/data-architect/skills/defining-lattik-table.md). Schema: [`lattikTableSchema`](../apps/web/src/extensions/data-architect/schema.ts).
 
-A **Lattik Table** is a super-wide, denormalized table at a fixed grain. The grain is defined by its `primary_key`, a list of `{column, dimension}` pairs. A Lattik Table with `primary_key: [{column: user_id, dimension: user_id}]` is a per-user wide table; with `[{column: user_id, dimension: user_id}, {column: ds, dimension: ds}]` it is a per-user-per-day snapshot. Each `dimension` reference is the canonical Dimension that the column carries — typically the implicit id Dimension of an Entity (`user_id` from the `user` entity), but any Dimension that names the grain works (`ds` for date grain). The Dimension's own `entity` field carries the entity transitively, so the system can still answer "what entity is this table keyed on" without the PK referencing the entity directly.
+A **Lattik Table** is a super-wide, denormalized table at a fixed granularity level. The grain is defined by its `primary_key`s, a list of `{column, dimension}` pairs where each `dimension` reference is the canonical Dimension that the corresponding PK column carries — typically the implicit id Dimension of an Entity (`user_id` from the `user` entity). The Dimension's own `entity` field carries the entity transitively, so the system can answer "what entity is this table keyed on" without the PK referencing the entity directly.
 
-Lattik Tables are built from `column_families`, each of which declares a `source` (Logger or Lattik table), a `key_mapping` from this table's PK columns to the source's columns, and a list of aggregated or computed columns. They are the **canonical denormalized layer**: the place where "everything we know about a user at this grain" lives. They serve two roles:
+A Lattik Table with `primary_key: [{column: user_id, dimension: user_id}]` is a per-user wide table. Multi-entity grains like `[{column: user_id, dimension: user_id}, {column: product_id, dimension: product_id}]` are also valid (one row per (user, product)). **Time is never a PK component.** A Lattik Table is the *current state* at a chosen point in time; the time axis enters queries via Iceberg-style **as-of semantics** (see [Time semantics](#time-semantics)), not via per-day or per-hour PK columns.
+
+Lattik Tables are built from `column_families`, each of which declares a `source` (Logger or Lattik table), a `key_mapping` from this table's PK columns to the source's columns, an optional `load_cadence` (`daily` or `hourly`, inferred from the source if omitted), and a list of aggregated or computed columns. Whether a column carries **snapshot** or **cumulative** semantics is determined by its `agg` + `merge` definition, independently of cadence and PK shape:
+
+- `agg: sum(amount), merge: sum` — cumulative lifetime sum (each load adds to the prior value)
+- `agg: sum(amount), merge: replace` — current-period snapshot (each load replaces the prior value)
+- `expr: last(country)` — most recent observed value
+
+Cadence, snapshot/cumulative, and PK are three independent dials. None of them put time in the data model.
+
+Lattik Tables are the **canonical denormalized layer**: the place where "everything we know about a user" (or any other entity grain) lives. They serve two roles:
 
 1. **Resolution-binding host.** Every Dimension's resolution binding (where the planner reads its value at query time) lives on a Lattik Table at the appropriate entity grain. Without a Lattik Table at user grain, no `user`-entity Dimensions are queryable.
 2. **Aggregation source.** Metric aggregation expressions can target Lattik Tables (or Logger Tables, but Lattik Tables are usually preferred because they are pre-rolled).
 
-In ML / warehousing terms, a Lattik Table at grain `[entity_id]` is essentially a **feature store entity table** or a **Kimball conformed wide dimension**. At a snapshot grain like `[entity_id, ds]` it is a daily fact / snapshot table.
+In ML / warehousing terms, a Lattik Table is essentially a **feature store entity table**, or a **Kimball conformed dimension** with as-of time-travel built in (Type 2 SCD semantics achieved via the storage layer rather than via dated PK rows).
 
 ### Dimension
 
@@ -235,9 +247,21 @@ When a Cube exists for a query shape that subsumes the incoming query, the plann
 
 The full routing preference order is roughly: **Cube > Lattik Table > Logger Table (if policy allows) > refuse**.
 
+### Time semantics
+
+The three table types treat time differently. The doc spells out the Lattik Table case in full; Logger Table and Cube time semantics are deferred and need their own design pass.
+
+| Table type | How time works | Status |
+|---|---|---|
+| **Lattik Table** | Iceberg-style **as-of** semantics. Time is not in the data model, not in the PK, not a Dimension. Queries name an as-of timestamp (default = "now") and the storage layer returns the snapshot of the table that was current at that point. Snapshot vs cumulative is a per-column property. The load cadence (`daily`/`hourly` on each column family) controls how often new snapshots are produced. | Designed |
+| **Logger Table** | Append-only, partitioned by `ds`/`hour`. Logger queries do not use as-of — the time axis is the *natural axis* of the data. Queries against logger sources need to express a time range explicitly. | TBD — see gap list |
+| **Cube** | A Cube is a precomputed result for a specific workload shape. Time semantics depend on what the Cube was materialized for, and the rules for how an incoming as-of query gets routed to a Cube are not yet designed. | TBD — see gap list |
+
+The key invariant for the Lattik layer: **time-travel happens at query time, not at modeling time**. Users do not declare `ds` or `hour` in PKs and do not create per-day Lattik Tables. If you want "revenue on 2026-04-01," you query the existing entity-grain `lattik.user_revenue` as-of `2026-04-01`. If you want "revenue every day for the last 30 days," that's a Cube workload, not a Lattik Table modeling decision.
+
 ## Worked example: end to end
 
-Suppose the goal is "daily revenue per user home country, in the US."
+Suppose the goal is "as of 2026-04-01, total revenue per user home country, for US users."
 
 **Entities:**
 
@@ -245,12 +269,9 @@ Suppose the goal is "daily revenue per user home country, in the US."
 - name: user
   id_field: user_id
   id_type: int64
-- name: date
-  id_field: ds
-  id_type: string
 ```
 
-Defining `user` implicitly creates a Dimension `user_id` whose entity is `user`. Defining `date` implicitly creates `ds` whose entity is `date`.
+Defining `user` implicitly creates a Dimension `user_id` whose entity is `user`. There is no `date` entity — time is not in the logical layer.
 
 **Logger Tables (raw input):**
 
@@ -259,21 +280,21 @@ Defining `user` implicitly creates a Dimension `user_id` whose entity is `user`.
   columns:
     - name: actor_id        # raw column name from the producer
       type: int64
-      dimension: user_id    # semantic-equivalence tag: this is the user join key
+      semantic_equivalence: [user_id]    # tag: this is the user join key
     - name: amount
       type: double
-      dimension: purchase_amount
+      semantic_equivalence: [purchase_amount]
     - name: country
       type: string
-      dimension: purchase_country
+      semantic_equivalence: [purchase_country]
 - name: ingest.signups
   columns:
     - name: user_id
       type: int64
-      dimension: user_id
+      semantic_equivalence: [user_id]
     - name: country
       type: string
-      dimension: user_home_country  # tag, NOT a resolution binding
+      semantic_equivalence: [user_home_country]  # tag, NOT a resolution binding
 ```
 
 **Dimensions (logical):**
@@ -285,18 +306,14 @@ Defining `user` implicitly creates a Dimension `user_id` whose entity is `user`.
   resolution_bindings:
     - table: lattik.user_attributes
       column: user_id
+    - table: lattik.user_revenue
+      column: user_id
 - name: user_home_country
   entity: user
   data_type: string
   resolution_bindings:
     - table: lattik.user_attributes
       column: home_country
-- name: purchase_amount
-  entity: purchase   # or whatever entity makes sense; could be order/transaction
-  data_type: double
-  resolution_bindings:
-    - table: lattik.user_daily_revenue
-      column: revenue
 ```
 
 **Metric (logical):**
@@ -304,10 +321,12 @@ Defining `user` implicitly creates a Dimension `user_id` whose entity is `user`.
 ```yaml
 - name: revenue
   calculations:
-    - expression: sum(purchase_amount)
+    - kind: aggregation
+      expression: sum(amount)
       source_table: ingest.purchases
-    - expression: sum(revenue)
-      source_table: lattik.user_daily_revenue
+    - kind: aggregation
+      expression: sum(lifetime_revenue)
+      source_table: lattik.user_revenue
 ```
 
 **Lattik Tables (physical resolution targets):**
@@ -320,36 +339,38 @@ Defining `user` implicitly creates a Dimension `user_id` whose entity is `user`.
   column_families:
     - name: home
       source: ingest.signups
+      load_cadence: daily            # optional; would be inferred from source if omitted
       key_mapping: { user_id: user_id }
       columns:
         - name: home_country
           expr: last(country)
 
-- name: lattik.user_daily_revenue   # snapshot grain: one row per (user, day)
+- name: lattik.user_revenue         # entity-grain: one row per user
   primary_key:
     - column: user_id
       dimension: user_id
-    - column: ds
-      dimension: ds
   column_families:
     - name: revenue
       source: ingest.purchases
+      load_cadence: hourly
       key_mapping: { user_id: actor_id }
       columns:
-        - name: revenue
+        - name: lifetime_revenue
           agg: sum(amount)
-          merge: sum
+          merge: sum                 # cumulative — each load adds to the prior value
 ```
 
-**The query** `revenue × user_home_country where ds = today and country = 'US'` is answered as follows:
+Note that `lattik.user_revenue` has PK `[user_id]`, *not* `[user_id, ds]`. There's one row per user. The `lifetime_revenue` column is cumulative (`merge: sum`), so at any as-of timestamp it gives you "total revenue accumulated up to that point." The hourly load cadence determines how frequently the value refreshes; the table itself remains entity-grain.
 
-1. The planner sees that `revenue` has bindings on both `ingest.purchases` (Logger) and `lattik.user_daily_revenue` (Lattik). It prefers the Lattik binding.
-2. It sees that `user_home_country` has a binding on `lattik.user_attributes`. The `signups` tag is *not* a candidate.
-3. It joins `lattik.user_daily_revenue` to `lattik.user_attributes` on `user_id` (both are user-keyed Lattik Tables, so the join is a star-schema lookup).
-4. It applies the `country = 'US'` filter on `lattik.user_attributes.home_country`.
-5. It groups by `home_country` and sums `revenue`.
+**The query** *"as of `2026-04-01`, give me `revenue × user_home_country` filtered to `user_home_country = 'US'`"* is answered as follows:
 
-If the user wants this query to be even faster, they can declare a **Cube** with intent `revenue × user_home_country` filtered by `country = 'US'`. The system will then materialize a precomputed table — possibly an Iceberg rollup, possibly a Druid segment — and the planner will route subsequent matching queries to it directly, skipping the join.
+1. The planner sees that `revenue` has bindings on both `ingest.purchases` (Logger) and `lattik.user_revenue` (Lattik). It prefers the Lattik binding.
+2. It sees that `user_home_country` has a binding on `lattik.user_attributes`. The `ingest.signups` tag is *not* a candidate.
+3. Both Lattik Tables are at user grain, so the join is a star-schema lookup on `user_id`. The query opens both tables **as of `2026-04-01`** — Iceberg time-travel reads the snapshot of each table that was current on that date.
+4. It applies the `home_country = 'US'` filter on `lattik.user_attributes.home_country` (as of the same timestamp).
+5. It groups by `home_country` and sums `lifetime_revenue`.
+
+If the user wants this query to be even faster — or wants a result that *isn't* tied to an as-of point and instead reflects, say, "month-end revenue for each of the last 12 months" — they can declare a **Cube** with the appropriate intent. The system will materialize a precomputed table on the right backend, and the planner will route subsequent matching queries to it directly. (How time semantics work inside a Cube is covered separately — see the [Time semantics](#time-semantics) section.)
 
 ## Comparison with semantic layers
 
@@ -373,6 +394,7 @@ Lattik's data model overlaps significantly with Cube.dev, dbt Semantic Layer (Me
 | **Semantic-equivalence tag (column → Dimension)** | implicit (the column *is* the dimension; no separate tag) | implicit | implicit | implicit |
 | **Resolution binding** | implicit (each dimension is anchored to its containing cube's `sql_table`) | implicit (each dimension is anchored to its containing semantic model) | implicit | implicit |
 | **Query planner picks among bindings** | yes for pre-aggregations (matches an incoming query to a rollup) | no (compiles to one SQL plan against one model graph) | partial (aggregate awareness picks among PDTs) | no |
+| **Time-travel as a query primitive** | no (time is a column on the fact table, typically `created_at` / `event_date`) | no (time is a `time_dimension` on the semantic model) | no (time is a column you `dimension_group` on) | no (time is a column) |
 
 The dimmer cells in the right four columns are essentially the gaps Lattik aims to close.
 
@@ -384,13 +406,14 @@ The dimmer cells in the right four columns are essentially the gaps Lattik aims 
 - **The two-relationships split (tag vs binding).** No other tool explicitly separates "this column means the same thing as this dimension" from "this is where queries should read this dimension." In Cube.dev/LookML/MetricFlow/Malloy, defining a dimension *is* declaring its read source — the two are conflated. Lattik's split lets the same dimension exist in many physical places (provenance) while still routing queries to one canonical materialized location.
 - **Workload-driven Cubes.** A first-class user concept where the user expresses query intent and the system picks the materialization shape and storage backend. Cube.dev's `pre_aggregations` is the closest analog and is meaningfully less abstract — the user still has to declare the rollup keys and granularity. No other tool offers this.
 - **Heterogeneous storage backends behind one logical layer.** Cubes can land on Iceberg, Druid, or other backends depending on the cost/latency profile. Cube.dev is single-backend per deployment, MetricFlow is single-warehouse, LookML is single-database, Malloy is single-database.
+- **As-of time-travel as a query primitive.** Lattik Tables are queried with an as-of timestamp; the storage layer returns the snapshot current at that point, with no `ds`/`hour` columns in the data model. The other tools require time to be modeled as a column on the fact table and joined/grouped explicitly. Lattik's approach avoids the "time everywhere in the schema" tax for the common "as of date X" use case.
 
 **What the others have that Lattik doesn't (or doesn't yet):**
 
 - **Polished IDE / authoring experience.** LookML in particular has years of investment in dev ergonomics. Cube.dev has a strong developer UI. Lattik's data-architect canvas workflow is the analog and is still maturing.
 - **A query language for ad-hoc consumption.** Malloy in particular is built around an expressive query language; LookML has explores; Cube.dev exposes a JSON query API. Lattik has lattik-expression for definitions but the user-facing query interface is still an open question.
 - **Mature semantic-layer integrations.** dbt Semantic Layer integrates with downstream BI tools via a metric API. Cube.dev exposes REST/SQL/GraphQL endpoints. Lattik would need similar surfaces for these dimensions and metrics to be consumed by external tools.
-- **Time-grain modeling for metrics.** MetricFlow has first-class `time_dimension` and cumulative/rolling/window metric types. LookML has measure filters and time granularities baked in. Lattik's snapshot grain via `[entity_id, ds]` Lattik Tables is more general but less ergonomic for the common "give me 7-day rolling DAU" pattern.
+- **Time-grain modeling for metrics.** MetricFlow has first-class `time_dimension` and cumulative/rolling/window metric types. LookML has measure filters and time granularities baked in. Lattik's answer to "give me 7-day rolling DAU" routes through the Cube layer (workload-driven materialization) rather than through fact-table column conventions, which is more powerful but requires the user to declare the workload up front rather than ad-hoc.
 - **Joins as first-class config.** LookML explores and Cube.dev cube `joins` make join paths an explicit declared object. Lattik infers joins from entity bindings, which is cleaner when it works but offers less control when the user needs to override.
 
 ### Where Lattik is most differentiated
@@ -416,26 +439,31 @@ This doc describes the target model. Several pieces of the existing implementati
 4. **Metric row-level composition.** `metricCalculationSchema` currently only supports `{expression, source_table}` (aggregation against a physical table). A second flavor — row-level composition over other Metrics, with no `source_table` — needs to be added. Suggested shape: a discriminated union with `kind: "aggregation" | "composition"`.
 5. **Cube definition.** No `cubeSchema` exists yet. A Cube needs at minimum: `name`, `dimensions: string[]`, `metrics: string[]`, `filters?: ...`, `latency_target?`, `cost_target?`, optional `materialization_hint`. The system uses these to generate the materialization pipeline.
 6. **Lattik Table column-level semantic-equivalence tags.** Lattik Table columns may also carry tags (especially for the convention "column name = Dimension name" — a tag would make this explicit). `familyColumnSchema` and `derivedColumnSchema` should allow an optional `semantic_equivalence` field.
-7. **Lattik Table primary_key reference change.** `primaryKeySchema` currently has `{column, entity}`. This should become `{column, dimension}` so that the PK reference points at the canonical Dimension (typically the implicit id Dimension of an Entity, but allowing other Dimensions for grains like `ds`/`hour`/`week_start`). The Dimension's own `entity` field carries the entity transitively, so no information is lost. This unifies the model: every reference to a logical concept goes through a Dimension name, never directly through an Entity name.
+7. **Lattik Table primary_key reference change.** `primaryKeySchema` currently has `{column, entity}`. This should become `{column, dimension}` so that the PK reference points at the canonical entity-id Dimension (the implicit id Dimension created by the Entity). The Dimension's own `entity` field carries the entity transitively, so no information is lost. This unifies the model: every reference to a logical concept goes through a Dimension name, never directly through an Entity name. **PKs reference entity Dimensions only — never time Dimensions like `ds`/`hour`** (time is not in the data model; see gap #9).
+8. **Column family load cadence.** `columnFamilySchema` should gain an optional `load_cadence: "daily" | "hourly"` field. When omitted, it is inferred from the source (specific inference rule TBD — likely "inherit from source if source is a Lattik Table, otherwise default to a system-wide value"). Multiple column families on the same Lattik Table may declare different cadences; querying such a table requires the user to be deliberate about as-of granularity.
+9. **As-of query primitive on Lattik Tables.** Time is not in the data model. Lattik Tables are queried with an as-of timestamp; the storage layer (Iceberg) returns the snapshot current at that point. The schema does not need a field for this — it lives at the query API. But there should be no PK column for `ds`/`hour` and no `date` entity. **Migration:** any existing pipelines that put `ds` or `hour` in a Lattik Table PK need to be flagged and migrated to entity-grain. Validation should refuse new Lattik Table definitions whose PK references a time-shaped column.
+10. **Logger Table time semantics — design TBD.** Logger Tables don't use as-of; they use time ranges over their physical `ds`/`hour` partitions. The query interface for "give me a Metric whose only binding is a Logger Table" needs a design pass: how the user expresses the time range, how the org-configured cost guards interact with it, and whether `event_timestamp` or `ds`/`hour` is the canonical filter axis.
+11. **Cube time semantics — design TBD.** A Cube is a precomputed result for a workload shape. The rules for how an as-of query on a Lattik Table can be routed to a Cube, and how a Cube declares the time range it covers, need a design pass. Until designed, the planner cannot use Cubes to satisfy time-aware queries.
 
 ### Skill doc updates
 
-8. [defining-entity.md](../apps/web/src/extensions/data-architect/skills/defining-entity.md) should mention the implicit Dimension created from `id_field`.
-9. [defining-entity.md](../apps/web/src/extensions/data-architect/skills/defining-entity.md) should also relax the `id_field` suffix rule from "must end with `_id`" to "by convention ends with `_id`, but any valid identifier is allowed." Real-world cases this unblocks: `uuid`, external-system IDs (`stripe_customer_id`, `auth0_sub`), and shops with their own naming conventions. If [validation/naming.ts](../apps/web/src/extensions/data-architect/validation/naming.ts) ever picks up this rule, it should match.
-10. [defining-dimension.md](../apps/web/src/extensions/data-architect/skills/defining-dimension.md) should be rewritten around the **two-relationships** framing — currently it conflates "dimension lives at this column" (sounds like a tag) with "dimension is read from this column" (the binding). The skill should also describe the multi-binding case and when to add a new binding vs declare a new Dimension.
-11. [defining-logger-table.md](../apps/web/src/extensions/data-architect/skills/defining-logger-table.md) should rename `dimension` (the optional column field) to `semantic_equivalence` and explain that it is a *tag*, not a query source.
-12. [defining-lattik-table.md](../apps/web/src/extensions/data-architect/skills/defining-lattik-table.md) should describe `primary_key` entries as `{column, dimension}` rather than `{column, entity}`, matching the schema gap above.
-13. [defining-metric.md](../apps/web/src/extensions/data-architect/skills/defining-metric.md) should describe the row-level composition flavor in addition to aggregation.
-14. A new `defining-cube.md` skill needs to be authored.
+12. [defining-entity.md](../apps/web/src/extensions/data-architect/skills/defining-entity.md) should mention the implicit Dimension created from `id_field`.
+13. [defining-entity.md](../apps/web/src/extensions/data-architect/skills/defining-entity.md) should also relax the `id_field` suffix rule from "must end with `_id`" to "by convention ends with `_id`, but any valid identifier is allowed." Real-world cases this unblocks: `uuid`, external-system IDs (`stripe_customer_id`, `auth0_sub`), and shops with their own naming conventions. If [validation/naming.ts](../apps/web/src/extensions/data-architect/validation/naming.ts) ever picks up this rule, it should match.
+14. [defining-dimension.md](../apps/web/src/extensions/data-architect/skills/defining-dimension.md) should be rewritten around the **two-relationships** framing — currently it conflates "dimension lives at this column" (sounds like a tag) with "dimension is read from this column" (the binding). The skill should also describe the multi-binding case and when to add a new binding vs declare a new Dimension.
+15. [defining-logger-table.md](../apps/web/src/extensions/data-architect/skills/defining-logger-table.md) should rename `dimension` (the optional column field) to `semantic_equivalence` and explain that it is a *tag*, not a query source.
+16. [defining-lattik-table.md](../apps/web/src/extensions/data-architect/skills/defining-lattik-table.md) needs three updates: (a) describe `primary_key` entries as `{column, dimension}` rather than `{column, entity}`, (b) explicitly state that PKs are entity-grain only — no `ds`/`hour`, no time-bucketed Lattik Tables — and explain that time-travel happens at query time via as-of, (c) document the new `load_cadence` field on column families.
+17. [defining-metric.md](../apps/web/src/extensions/data-architect/skills/defining-metric.md) should describe the row-level composition flavor in addition to aggregation.
+18. A new `defining-cube.md` skill needs to be authored.
 
 ### App UI updates
 
-15. `LoggerTableForm` "dimension" field label → "Semantic equivalence" (or similar — needs UX wordsmithing). The help text should explicitly say this is a provenance tag, not a query source.
-16. `DimensionForm` "Source Table / Source Column" fields → "Resolution Bindings" with a multi-row editor (since the target model is multi-binding).
-17. `EntityForm` should surface the implicit Dimension somewhere — at minimum a read-only line saying "creates dimension `<id_field>`."
-18. `EntityForm` should not enforce the `_id` suffix on `id_field` (currently may be doing so via help text or inline validation). Show it as a recommendation, not a requirement.
-19. `LattikTableForm` primary-key editor should reference Dimensions instead of Entities (a dropdown of available Dimensions, defaulting to the implicit id Dimensions of declared Entities).
-20. New `CubeForm` for the canvas, scoped to the Cube workflow.
+19. `LoggerTableForm` "dimension" field label → "Semantic equivalence" (or similar — needs UX wordsmithing). The help text should explicitly say this is a provenance tag, not a query source.
+20. `DimensionForm` "Source Table / Source Column" fields → "Resolution Bindings" with a multi-row editor (since the target model is multi-binding).
+21. `EntityForm` should surface the implicit Dimension somewhere — at minimum a read-only line saying "creates dimension `<id_field>`."
+22. `EntityForm` should not enforce the `_id` suffix on `id_field` (currently may be doing so via help text or inline validation). Show it as a recommendation, not a requirement.
+23. `LattikTableForm` primary-key editor should reference Dimensions instead of Entities (a dropdown of available Dimensions, defaulting to the implicit id Dimensions of declared Entities), and should *only* offer entity Dimensions — never time Dimensions, since the latter shouldn't exist.
+24. `LattikTableForm` column-family editor should expose the optional `load_cadence` field with a "(inferred from source)" default, and warn if a user mixes cadences on a single table (deliberate choice — not an error).
+25. New `CubeForm` for the canvas, scoped to the Cube workflow.
 
 ## See also
 

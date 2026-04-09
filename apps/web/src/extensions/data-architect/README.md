@@ -21,7 +21,7 @@ The agent is a `ToolLoopAgent` (Vercel AI SDK v6) with a max of 10 tool steps pe
 |------|-------------|------------|
 | **Entity** | Business concept with a unique ID (e.g. user, game) | `entities` |
 | **Dimension** | Attribute of an entity (e.g. user_home_country) | `dimensions` |
-| **Logger Table** | Raw, append-only event table | `log_tables` |
+| **Logger Table** | Raw, append-only event table (client SDK: `@eloquio/lattik-logger`) | `log_tables` |
 | **Lattik Table** | Derived, pre-aggregated table via Column Families | `tables` |
 | **Metric** | Collection of aggregation expressions | `metrics` |
 
