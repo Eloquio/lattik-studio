@@ -1,5 +1,5 @@
 const SCHEMA_REGISTRY_URL =
-  process.env.SCHEMA_REGISTRY_URL ?? "http://schema-registry.schema-registry:8081";
+  process.env.SCHEMA_REGISTRY_URL ?? "http://sr.schema-registry:8081";
 
 /**
  * Registers a Protobuf schema for a Logger Table's payload in the
