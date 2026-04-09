@@ -71,7 +71,7 @@ A **Logger Table** is a raw, append-only event stream — narrow rows representi
 
 Logger Tables are the **input** layer to the pipeline. They are not normally read directly to answer business queries — orgs typically configure cost or scan-size policies that limit ad-hoc Logger Table aggregation, and Lattik Tables / Cubes exist precisely to make those queries cheap.
 
-Applications send events to Logger Tables via `@eloquio/lattik-logger`. The SDK serializes each event into a Protobuf **Envelope** (`table`, `event_id`, `event_timestamp`, opaque `payload` bytes) and delivers it to the ingestion service, which routes envelopes to per-table Kafka topics. When a Logger Table definition is merged, the Gitea webhook automatically creates the Kafka topic and registers the per-table Protobuf payload schema in the Confluent Schema Registry.
+Applications send events to Logger Tables via `@eloquio/lattik-logger`. The SDK serializes each event into a Protobuf **Envelope** (`table`, `event_id`, `event_timestamp`, opaque `payload` bytes) and POSTs it to the ingestion service ([`apps/ingest/`](../apps/ingest/)), a Go HTTP server that deduplicates by `event_id` (in-memory TTL cache, default 1h window) and produces the envelope to the per-table Kafka topic. When a Logger Table definition is merged, the Gitea webhook automatically creates the Kafka topic and registers the per-table Protobuf payload schema in the Confluent Schema Registry.
 
 ### Lattik Table
 
