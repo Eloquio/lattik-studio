@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package lattik.logger.v1;
+
+option go_package = "github.com/eloquio/lattik-studio/apps/ingest/gen/lattik/logger/v1;loggerv1";
+
+message Envelope {
+  string table = 1;
+  string event_id = 2;
+  string event_timestamp = 3;
+  bytes payload = 4;
+}

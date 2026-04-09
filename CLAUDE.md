@@ -16,6 +16,7 @@ Extensions are specialized AI agents (e.g. a Root Cause Analysis Agent). Extensi
 - **Orchestration (local dev):** Airflow 3.2.0 with KubernetesExecutor in the same kind cluster, sharing the postgres metadata DB ([`docs/local-airflow.md`](docs/local-airflow.md))
 - **Messaging (local dev):** Apache Kafka 3.9.0 in KRaft mode (no ZooKeeper), single-node broker in the kind cluster
 - **Schema Registry (local dev):** Confluent Schema Registry 7.7.0 for Protobuf payload schemas, backed by Kafka
+- **Ingestion (local dev):** `lattik/ingest` — Go HTTP service that accepts Protobuf envelopes and produces to per-table Kafka topics
 - **UI:** shadcn/ui (Base Nova) + Tailwind CSS v4
 - **Dev server:** portless (`https://lattik-studio.dev` via `--tld dev`)
 - **Canvas rendering:** `@json-render/core` + `@json-render/react` ([vercel-labs/json-render](https://github.com/vercel-labs/json-render))
@@ -26,6 +27,7 @@ Extensions are specialized AI agents (e.g. a Root Cause Analysis Agent). Extensi
 ## Project structure
 
 ```
+apps/ingest/           Go ingestion service (Protobuf envelope → Kafka)
 apps/web/              Next.js app
   src/app/             Pages and API routes
   src/auth/            NextAuth config (Google provider, Drizzle adapter)
@@ -51,6 +53,7 @@ k8s/                   Kubernetes manifests
   airflow.yaml         Airflow 3.x in `airflow` ns (RBAC + init Job + 3 Deployments + NodePort)
   kafka.yaml           Kafka 3.9 KRaft broker in `kafka` ns (PVC + Deployment + NodePort)
   schema-registry.yaml Confluent Schema Registry in `schema-registry` ns (stateless, Deployment + NodePort)
+  ingest.yaml          Lattik Ingest service in `workloads` ns (Deployment + NodePort)
   spark/Dockerfile     Custom Spark image (apache/spark:4.0.2 + iceberg jars)
   spark/operator-values.yaml  Helm values for the kubeflow Spark Operator
   spark-rbac.yaml      `spark-driver` SA + Role + RoleBinding in `workloads` ns
@@ -99,7 +102,8 @@ pnpm dev:down
 - `airflow:dags-sync` — copies DAG files from `airflow/dags/` into the kind node. Called automatically by `airflow:start`.
 - `kafka:start` / `kafka:stop` / `kafka:logs` / `kafka:cli` — Kafka broker. `kafka:start` deploys a single-node KRaft broker; `kafka:cli` opens a shell in the pod (Kafka CLI tools live in `/opt/kafka/bin/`).
 - `schema-registry:start` / `schema-registry:stop` / `schema-registry:logs` — Confluent Schema Registry. Requires `kafka:start` first. Stateless — schemas are stored in Kafka.
-- `dev:up` / `dev:down` — convenience aggregations. `dev:up` brings up the cluster + every service in sequence (Spark Operator, Kafka, and Schema Registry excluded); `dev:down` is an alias for `cluster:down`.
+- `ingest:image-build` / `ingest:start` / `ingest:stop` / `ingest:logs` — Go ingestion service. `ingest:image-build` builds and loads the `lattik/ingest` image; `ingest:start` deploys into `workloads` ns. Requires `kafka:start` first.
+- `dev:up` / `dev:down` — convenience aggregations. `dev:up` brings up the cluster + every service in sequence (Spark Operator, Kafka, Schema Registry, and Ingest excluded); `dev:down` is an alias for `cluster:down`.
 
 ### Namespace layout
 
