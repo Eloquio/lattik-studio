@@ -14,6 +14,7 @@ Extensions are specialized AI agents (e.g. a Root Cause Analysis Agent). Extensi
 - **Local data lake:** Trino + Iceberg REST catalog + MinIO, all in kind ([`docs/local-data-lake.md`](docs/local-data-lake.md))
 - **Local compute:** Spark 4.0.2 + Iceberg 1.10.1, run as `SparkApplication`s under kubeflow's Spark Operator. Custom image `lattik/spark-iceberg:4.0.2-1.10.1` built from [`k8s/spark/Dockerfile`](k8s/spark/Dockerfile)
 - **Orchestration (local dev):** Airflow 3.2.0 with KubernetesExecutor in the same kind cluster, sharing the postgres metadata DB ([`docs/local-airflow.md`](docs/local-airflow.md))
+- **Messaging (local dev):** Apache Kafka 3.9.0 in KRaft mode (no ZooKeeper), single-node broker in the kind cluster
 - **UI:** shadcn/ui (Base Nova) + Tailwind CSS v4
 - **Dev server:** portless (`https://lattik-studio.dev` via `--tld dev`)
 - **Canvas rendering:** `@json-render/core` + `@json-render/react` ([vercel-labs/json-render](https://github.com/vercel-labs/json-render))
@@ -40,19 +41,21 @@ apps/web/              Next.js app
   src/proxy.ts         Auth middleware (protects all routes except /sign-in, /api/auth, /api/webhooks)
 docs/                  Architecture docs (agent-handoff, canvas-rendering, progressive-disclosure, data-model, local-data-lake, local-airflow)
 k8s/                   Kubernetes manifests
-  namespaces.yaml      All seven namespaces (postgres, gitea, minio, iceberg, trino, spark-operator, workloads)
+  namespaces.yaml      All namespaces (postgres, gitea, minio, iceberg, trino, spark-operator, kafka, workloads)
   postgres.yaml        Postgres in `postgres` ns
   gitea.yaml           Gitea in `gitea` ns
   minio.yaml           MinIO + bucket-init Job in `minio` ns
   iceberg-rest.yaml    Iceberg REST catalog (sqlite-backed) in `iceberg` ns
   trino.yaml           Trino coordinator+worker in `trino` ns
   airflow.yaml         Airflow 3.x in `airflow` ns (RBAC + init Job + 3 Deployments + NodePort)
+  kafka.yaml           Kafka 3.9 KRaft broker in `kafka` ns (PVC + Deployment + NodePort)
   spark/Dockerfile     Custom Spark image (apache/spark:4.0.2 + iceberg jars)
   spark/operator-values.yaml  Helm values for the kubeflow Spark Operator
   spark-rbac.yaml      `spark-driver` SA + Role + RoleBinding in `workloads` ns
   spark-example.yaml   Example SparkApplication that round-trips through iceberg
 airflow/dags/          Local Airflow DAGs (hostPath-mounted into the airflow pods — edit live, no restart)
 packages/              Shared packages
+  lattik-airflow/      Airflow DAG renderer — reads YAML from S3, builds DAGs (LattikDagRenderer)
   lattik-logger/       Logger Client SDK — Protobuf envelope, typed clients, proto codegen
 ```
 
@@ -60,7 +63,7 @@ packages/              Shared packages
 
 ```bash
 # Bring up the full dev stack: kind cluster + namespaces + postgres + gitea + trino/minio/iceberg-rest + airflow
-# (Spark Operator is opt-in via `pnpm spark:start` since it pulls a separate operator image)
+# (Spark Operator and Kafka are opt-in via `pnpm spark:start` / `pnpm kafka:start`)
 pnpm dev:up
 
 # Or, for a minimum env (cluster + postgres only — much faster, ~6 GB less RAM):
@@ -91,7 +94,8 @@ pnpm dev:down
 - `db:start` / `db:stop`, `gitea:start` / `gitea:stop`, `trino:start` / `trino:stop`, `airflow:start` / `airflow:stop` — per-service. Each `*:start` assumes the cluster is already up. `airflow:start` additionally assumes `db:start` has run, since Airflow's metadata DB is the existing postgres.
 - `spark:image-build` / `spark:start` / `spark:stop` / `spark:logs` / `spark:submit-example` — Spark stack. `spark:image-build` builds and `kind load`s the custom `lattik/spark-iceberg` image; `spark:start` helm-installs the operator; `spark:submit-example` round-trips an Iceberg write+read through the same catalog Trino uses.
 - `airflow:image-build` — builds the custom `lattik/airflow:3.2.0` image (adds `boto3` for S3 access) and loads it into the kind cluster. Must be run before `airflow:start` on a fresh cluster.
-- `dev:up` / `dev:down` — convenience aggregations. `dev:up` brings up the cluster + every service in sequence (Spark Operator excluded); `dev:down` is an alias for `cluster:down`.
+- `kafka:start` / `kafka:stop` / `kafka:logs` / `kafka:cli` — Kafka broker. `kafka:start` deploys a single-node KRaft broker; `kafka:cli` opens a shell in the pod (Kafka CLI tools live in `/opt/kafka/bin/`).
+- `dev:up` / `dev:down` — convenience aggregations. `dev:up` brings up the cluster + every service in sequence (Spark Operator and Kafka excluded); `dev:down` is an alias for `cluster:down`.
 
 ### Namespace layout
 
@@ -105,6 +109,7 @@ Each service lives in its own namespace so PVCs, secrets, and pods stay isolated
 | `iceberg` | iceberg-rest deployment, PVC, service, local copy of MinIO credentials secret |
 | `trino` | Trino coordinator+worker deployment, configmaps, service |
 | `spark-operator` | Spark Operator pod (helm-managed) |
+| `kafka` | Kafka KRaft broker deployment, PVC, service |
 | `workloads` | Spark `SparkApplication`s and the driver/executor pods they spawn, plus the `spark-driver` ServiceAccount |
 | `airflow` | Airflow api-server, scheduler, dag-processor, init Job (see [`docs/local-airflow.md`](docs/local-airflow.md)) |
 
@@ -239,8 +244,35 @@ pnpm airflow:init-logs
 - **Logs:** hostPath `/var/lib/lattik/airflow-logs/` → `/opt/airflow/logs`. Worker logs survive pod deletion, so the UI can show task logs even after `delete_worker_pods=True` removes the executor pod.
 - **Metadata DB:** `airflow` database in the existing postgres. **Wiped on `pnpm dev:down`** along with everything else. To upgrade Airflow versions in place, the schema migration path between majors is non-trivial — for local dev it's faster to `DROP DATABASE airflow` and re-run `pnpm airflow:start`.
 - **Worker → api-server traffic:** Airflow 3 workers no longer connect to postgres directly — they hit the api-server's execution API at `AIRFLOW__CORE__EXECUTION_API_SERVER_URL=http://airflow-api-server:8080/execution/`. JWT auth is configured via `AIRFLOW__API_AUTH__JWT_SECRET`.
-- **Custom image:** `lattik/airflow:3.2.0` (built from [`k8s/airflow/Dockerfile`](k8s/airflow/Dockerfile)). Adds `boto3` and `apache-airflow-providers-cncf-kubernetes` (for `SparkKubernetesOperator`) to the base Airflow image. Build and load with `pnpm airflow:image-build`. All Airflow pods (api-server, scheduler, dag-processor, workers) use this image.
+- **Custom image:** `lattik/airflow:3.2.0` (built from [`k8s/airflow/Dockerfile`](k8s/airflow/Dockerfile)). Installs the [`lattik-airflow`](packages/lattik-airflow/) package (which pulls in `boto3` and `apache-airflow-providers-cncf-kubernetes` as deps). Build and load with `pnpm airflow:image-build`. All Airflow pods (api-server, scheduler, dag-processor, workers) use this image.
 - **DAG rendering from S3:** The file `airflow/dags/lattik_dag_renderer.py` reads YAML DAG specs from `s3://warehouse/airflow-dags/` (MinIO) at import time and dynamically creates Airflow `DAG` objects via `globals()` injection. YAML specs are generated by the web app (`src/lib/dag-generator.ts`) when a Gitea PR merges (triggered by the webhook handler). Two task types: `wait` (custom `DataReadySensor` that pokes the Iceberg REST catalog) and `spark` (`SparkKubernetesOperator` using the Jinja template at `airflow/dags/spark_app_template.yaml`).
+
+## Local messaging (Kafka)
+
+Apache Kafka 3.9.0 runs in KRaft mode (no ZooKeeper) as a single combined controller+broker node. Used for event streaming between services in the cluster.
+
+```bash
+# Start Kafka (assumes the cluster is already up)
+pnpm kafka:start
+
+# Stop just Kafka
+pnpm kafka:stop
+
+# Tail broker logs
+pnpm kafka:logs
+
+# Shell into the pod (Kafka CLI tools in /opt/kafka/bin/)
+pnpm kafka:cli
+```
+
+- **Image:** `apache/kafka:3.9.0` (KRaft-native, no ZooKeeper dependency).
+- **K8s manifest:** [`k8s/kafka.yaml`](k8s/kafka.yaml) — PVC, Deployment (Recreate strategy), NodePort Service.
+- **Listeners:** `PLAINTEXT://:9092` (in-cluster, advertised as `kafka.kafka:9092`) and `EXTERNAL://:9094` (host access, advertised as `localhost:9094` via NodePort 30094).
+- **In-cluster access:** `kafka.kafka:9092` — use this from Spark jobs, Airflow tasks, or any other in-cluster service.
+- **Host access:** `localhost:9094` via NodePort 30094 (mapped in [`k8s/kind-config.yaml`](k8s/kind-config.yaml)). Requires cluster recreate if the kind-config mapping was added after cluster creation; use `kubectl -n kafka port-forward svc/kafka 9094:9094` as a workaround.
+- **Topics:** `auto.create.topics.enable=true` — topics are created on first produce. To manage manually, use `kafka:cli` and run `/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --topic <name>`.
+- **Persistence:** PVC-backed (`kafka-data`, 5 Gi). Survives pod restarts but **not** `pnpm dev:down`. Same story as all other services.
+- **Replication:** all replication factors set to 1 (single-node local dev — no HA).
 
 ## Auth
 

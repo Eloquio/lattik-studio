@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lattik-airflow"
+version = "0.1.0"
+description = "Lattik DAG renderer for Airflow — reads YAML specs from S3 and builds DAGs dynamically."
+requires-python = ">=3.12"
+dependencies = [
+    "boto3",
+    "pyyaml",
+    "apache-airflow>=3.0",
+    "apache-airflow-providers-cncf-kubernetes",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lattik_airflow"]

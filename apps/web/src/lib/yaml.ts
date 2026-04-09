@@ -1,0 +1,95 @@
+/**
+ * Minimal YAML serializer. Avoids adding a YAML library dependency.
+ */
+
+const YAML_NEEDS_QUOTING = /[\n\r\t:#{}"'\[\],&*!|>%@`]|^\s|\s$/;
+const YAML_BARE_RESERVED = new Set(["null", "true", "false", ""]);
+
+export function yamlScalar(s: string): string {
+  if (YAML_NEEDS_QUOTING.test(s) || YAML_BARE_RESERVED.has(s)) {
+    const escaped = s
+      .replace(/\\/g, "\\\\")
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, "\\n")
+      .replace(/\r/g, "\\r")
+      .replace(/\t/g, "\\t");
+    return `"${escaped}"`;
+  }
+  return s;
+}
+
+export function toYaml(obj: unknown, indent = 0): string {
+  const pad = "  ".repeat(indent);
+
+  if (obj === null || obj === undefined) return `${pad}null\n`;
+  if (typeof obj === "string") {
+    if (
+      obj.includes("\n") || obj.includes("\r") || obj.includes("\t") ||
+      obj.includes(":") || obj.includes("#") || obj.includes('"') ||
+      obj.includes("'") || obj.includes("{") || obj.includes("}") ||
+      obj.includes("[") || obj.includes("]") || obj.includes(",") ||
+      obj.includes("&") || obj.includes("*") || obj.includes("!") ||
+      obj.includes("|") || obj.includes(">") || obj.includes("%") ||
+      obj.includes("@") || obj.includes("`") ||
+      obj.startsWith(" ") || obj.endsWith(" ") ||
+      obj === "" || obj === "null" || obj === "true" || obj === "false"
+    ) {
+      const escaped = obj
+        .replace(/\\/g, "\\\\")
+        .replace(/"/g, '\\"')
+        .replace(/\n/g, "\\n")
+        .replace(/\r/g, "\\r")
+        .replace(/\t/g, "\\t");
+      return `${pad}"${escaped}"\n`;
+    }
+    return `${pad}${obj}\n`;
+  }
+  if (typeof obj === "number" || typeof obj === "boolean") return `${pad}${obj}\n`;
+
+  if (Array.isArray(obj)) {
+    if (obj.length === 0) return `${pad}[]\n`;
+    let result = "";
+    for (const item of obj) {
+      if (typeof item === "object" && item !== null && !Array.isArray(item)) {
+        const entries = Object.entries(item);
+        if (entries.length > 0) {
+          const [firstKey, firstVal] = entries[0];
+          const firstValStr =
+            typeof firstVal === "object" && firstVal !== null
+              ? `\n${toYaml(firstVal, indent + 2)}`
+              : ` ${String(firstVal)}\n`;
+          result += `${pad}- ${firstKey}:${firstValStr}`;
+          for (let i = 1; i < entries.length; i++) {
+            const [k, v] = entries[i];
+            const valStr =
+              typeof v === "object" && v !== null
+                ? `\n${toYaml(v, indent + 2)}`
+                : ` ${String(v)}\n`;
+            result += `${pad}  ${k}:${valStr}`;
+          }
+        }
+      } else {
+        result += `${pad}- ${String(item)}\n`;
+      }
+    }
+    return result;
+  }
+
+  if (typeof obj === "object") {
+    let result = "";
+    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+      if (value === undefined) continue;
+      if (typeof value === "object" && value !== null) {
+        result += `${pad}${key}:\n${toYaml(value, indent + 1)}`;
+      } else {
+        const valStr = typeof value === "string"
+          ? yamlScalar(value)
+          : String(value);
+        result += `${pad}${key}: ${valStr}\n`;
+      }
+    }
+    return result;
+  }
+
+  return `${pad}${String(obj)}\n`;
+}

@@ -40,6 +40,36 @@ roleRef:
   name: airflow
   apiGroup: rbac.authorization.k8s.io
 ---
+# RBAC for Airflow workers to submit SparkApplication CRDs in the workloads namespace.
+# Workers run with the `airflow` SA in the `default` namespace; this cross-namespace
+# RoleBinding grants them access to create, monitor, and clean up Spark jobs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: airflow-spark-manager
+  namespace: workloads
+rules:
+  - apiGroups: ["sparkoperator.k8s.io"]
+    resources: ["sparkapplications"]
+    verbs: ["create", "get", "list", "watch", "delete", "patch", "update"]
+  - apiGroups: ["sparkoperator.k8s.io"]
+    resources: ["sparkapplications/status"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: airflow-spark-manager
+  namespace: workloads
+subjects:
+  - kind: ServiceAccount
+    name: airflow
+    namespace: default
+roleRef:
+  kind: Role
+  name: airflow-spark-manager
+  apiGroup: rbac.authorization.k8s.io
+---
 apiVersion: v1
 kind: Secret
 metadata:
@@ -51,7 +81,7 @@ stringData:
   fernet-key: "YlCImzjge_TeZc7jPJ7Jz3TUZjnpHaKtpHpEPxjlyU0="
   api-secret-key: "lattik-local-airflow-api-secret-not-for-prod"
   jwt-secret: "lattik-local-airflow-jwt-secret-not-for-prod-32b"
-  sql-alchemy-conn: "postgresql+psycopg2://lattik:lattik-local@postgres:5432/airflow"
+  sql-alchemy-conn: "postgresql+psycopg2://lattik:lattik-local@postgres.postgres:5432/airflow"
 ---
 # Shared env applied to every Airflow component (api-server, scheduler, dag-processor, triggerer, init job, workers)
 apiVersion: v1
@@ -68,10 +98,18 @@ data:
   AIRFLOW__LOGGING__BASE_LOG_FOLDER: "/opt/airflow/logs"
   AIRFLOW__KUBERNETES_EXECUTOR__NAMESPACE: "default"
   AIRFLOW__KUBERNETES_EXECUTOR__POD_TEMPLATE_FILE: "/opt/airflow/pod_templates/pod_template.yaml"
-  AIRFLOW__KUBERNETES_EXECUTOR__WORKER_CONTAINER_REPOSITORY: "apache/airflow"
+  AIRFLOW__KUBERNETES_EXECUTOR__WORKER_CONTAINER_REPOSITORY: "lattik/airflow"
   AIRFLOW__KUBERNETES_EXECUTOR__WORKER_CONTAINER_TAG: "3.2.0"
   AIRFLOW__KUBERNETES_EXECUTOR__DELETE_WORKER_PODS: "True"
   AIRFLOW__KUBERNETES_EXECUTOR__DELETE_WORKER_PODS_ON_FAILURE: "False"
+  # Lattik DAG renderer — S3 / MinIO config for reading DAG YAML specs
+  LATTIK_S3_ENDPOINT: "http://minio.minio.svc.cluster.local:9000"
+  LATTIK_S3_ACCESS_KEY: "lattik"
+  LATTIK_S3_SECRET_KEY: "lattik-local"
+  LATTIK_S3_BUCKET: "warehouse"
+  LATTIK_S3_DAG_PREFIX: "airflow-dags/"
+  LATTIK_S3_REGION: "us-east-1"
+  LATTIK_ICEBERG_REST_URL: "http://iceberg-rest.iceberg.svc.cluster.local:8181"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -90,7 +128,7 @@ data:
       restartPolicy: Never
       containers:
         - name: base
-          image: apache/airflow:3.2.0
+          image: lattik/airflow:3.2.0
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
@@ -152,15 +190,15 @@ spec:
             - |
               set -e
               echo "Waiting for postgres..."
-              until pg_isready -h postgres -U lattik; do sleep 2; done
+              until pg_isready -h postgres.postgres -U lattik; do sleep 2; done
               echo "Ensuring 'airflow' database exists..."
-              psql -h postgres -U lattik -d lattik_studio -tc \
+              psql -h postgres.postgres -U lattik -d lattik_studio -tc \
                 "SELECT 1 FROM pg_database WHERE datname='airflow'" | grep -q 1 \
-                || psql -h postgres -U lattik -d lattik_studio -c "CREATE DATABASE airflow"
+                || psql -h postgres.postgres -U lattik -d lattik_studio -c "CREATE DATABASE airflow"
               echo "Done."
       containers:
         - name: airflow-init
-          image: apache/airflow:3.2.0
+          image: lattik/airflow:3.2.0
           envFrom:
             - configMapRef:
                 name: airflow-env
@@ -204,7 +242,7 @@ spec:
       serviceAccountName: airflow
       containers:
         - name: scheduler
-          image: apache/airflow:3.2.0
+          image: lattik/airflow:3.2.0
           args: ["scheduler"]
           envFrom:
             - configMapRef:
@@ -279,7 +317,7 @@ spec:
       serviceAccountName: airflow
       containers:
         - name: dag-processor
-          image: apache/airflow:3.2.0
+          image: lattik/airflow:3.2.0
           args: ["dag-processor"]
           envFrom:
             - configMapRef:
@@ -348,7 +386,7 @@ spec:
       serviceAccountName: airflow
       containers:
         - name: api-server
-          image: apache/airflow:3.2.0
+          image: lattik/airflow:3.2.0
           args: ["api-server"]
           ports:
             - name: http
