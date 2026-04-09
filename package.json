@@ -33,6 +33,9 @@
     "kafka:stop": "kubectl delete -f k8s/kafka.yaml --ignore-not-found",
     "kafka:logs": "kubectl -n kafka logs -l app=kafka -f",
     "kafka:cli": "kubectl -n kafka exec -it deploy/kafka -- bash",
+    "schema-registry:start": "kubectl apply -f k8s/schema-registry.yaml && until kubectl -n schema-registry get pod -l app=schema-registry 2>/dev/null | grep -q schema-registry; do sleep 2; done && kubectl -n schema-registry wait --for=condition=ready pod -l app=schema-registry --timeout=120s && echo 'Schema Registry ready — in-cluster: schema-registry.schema-registry:8081, host: localhost:8081'",
+    "schema-registry:stop": "kubectl delete -f k8s/schema-registry.yaml --ignore-not-found",
+    "schema-registry:logs": "kubectl -n schema-registry logs -l app=schema-registry -f",
     "dev:up": "pnpm cluster:up && pnpm db:start && pnpm gitea:start && pnpm trino:start && pnpm airflow:image-build && pnpm airflow:start",
     "dev:down": "pnpm cluster:down",
     "test:e2e": "cd apps/web && pnpm test:e2e"

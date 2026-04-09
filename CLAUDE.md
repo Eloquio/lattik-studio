@@ -15,6 +15,7 @@ Extensions are specialized AI agents (e.g. a Root Cause Analysis Agent). Extensi
 - **Local compute:** Spark 4.0.2 + Iceberg 1.10.1, run as `SparkApplication`s under kubeflow's Spark Operator. Custom image `lattik/spark-iceberg:4.0.2-1.10.1` built from [`k8s/spark/Dockerfile`](k8s/spark/Dockerfile)
 - **Orchestration (local dev):** Airflow 3.2.0 with KubernetesExecutor in the same kind cluster, sharing the postgres metadata DB ([`docs/local-airflow.md`](docs/local-airflow.md))
 - **Messaging (local dev):** Apache Kafka 3.9.0 in KRaft mode (no ZooKeeper), single-node broker in the kind cluster
+- **Schema Registry (local dev):** Confluent Schema Registry 7.7.0 for Protobuf payload schemas, backed by Kafka
 - **UI:** shadcn/ui (Base Nova) + Tailwind CSS v4
 - **Dev server:** portless (`https://lattik-studio.dev` via `--tld dev`)
 - **Canvas rendering:** `@json-render/core` + `@json-render/react` ([vercel-labs/json-render](https://github.com/vercel-labs/json-render))
@@ -41,7 +42,7 @@ apps/web/              Next.js app
   src/proxy.ts         Auth middleware (protects all routes except /sign-in, /api/auth, /api/webhooks)
 docs/                  Architecture docs (agent-handoff, canvas-rendering, progressive-disclosure, data-model, local-data-lake, local-airflow)
 k8s/                   Kubernetes manifests
-  namespaces.yaml      All namespaces (postgres, gitea, minio, iceberg, trino, spark-operator, kafka, workloads)
+  namespaces.yaml      All namespaces (postgres, gitea, minio, iceberg, trino, spark-operator, kafka, schema-registry, workloads)
   postgres.yaml        Postgres in `postgres` ns
   gitea.yaml           Gitea in `gitea` ns
   minio.yaml           MinIO + bucket-init Job in `minio` ns
@@ -49,6 +50,7 @@ k8s/                   Kubernetes manifests
   trino.yaml           Trino coordinator+worker in `trino` ns
   airflow.yaml         Airflow 3.x in `airflow` ns (RBAC + init Job + 3 Deployments + NodePort)
   kafka.yaml           Kafka 3.9 KRaft broker in `kafka` ns (PVC + Deployment + NodePort)
+  schema-registry.yaml Confluent Schema Registry in `schema-registry` ns (stateless, Deployment + NodePort)
   spark/Dockerfile     Custom Spark image (apache/spark:4.0.2 + iceberg jars)
   spark/operator-values.yaml  Helm values for the kubeflow Spark Operator
   spark-rbac.yaml      `spark-driver` SA + Role + RoleBinding in `workloads` ns
@@ -95,7 +97,8 @@ pnpm dev:down
 - `spark:image-build` / `spark:start` / `spark:stop` / `spark:logs` / `spark:submit-example` — Spark stack. `spark:image-build` builds and `kind load`s the custom `lattik/spark-iceberg` image; `spark:start` helm-installs the operator; `spark:submit-example` round-trips an Iceberg write+read through the same catalog Trino uses.
 - `airflow:image-build` — builds the custom `lattik/airflow:3.2.0` image (adds `boto3` for S3 access) and loads it into the kind cluster. Must be run before `airflow:start` on a fresh cluster.
 - `kafka:start` / `kafka:stop` / `kafka:logs` / `kafka:cli` — Kafka broker. `kafka:start` deploys a single-node KRaft broker; `kafka:cli` opens a shell in the pod (Kafka CLI tools live in `/opt/kafka/bin/`).
-- `dev:up` / `dev:down` — convenience aggregations. `dev:up` brings up the cluster + every service in sequence (Spark Operator and Kafka excluded); `dev:down` is an alias for `cluster:down`.
+- `schema-registry:start` / `schema-registry:stop` / `schema-registry:logs` — Confluent Schema Registry. Requires `kafka:start` first. Stateless — schemas are stored in Kafka.
+- `dev:up` / `dev:down` — convenience aggregations. `dev:up` brings up the cluster + every service in sequence (Spark Operator, Kafka, and Schema Registry excluded); `dev:down` is an alias for `cluster:down`.
 
 ### Namespace layout
 
@@ -110,6 +113,7 @@ Each service lives in its own namespace so PVCs, secrets, and pods stay isolated
 | `trino` | Trino coordinator+worker deployment, configmaps, service |
 | `spark-operator` | Spark Operator pod (helm-managed) |
 | `kafka` | Kafka KRaft broker deployment, PVC, service |
+| `schema-registry` | Confluent Schema Registry deployment, service (stateless — data in Kafka) |
 | `workloads` | Spark `SparkApplication`s and the driver/executor pods they spawn, plus the `spark-driver` ServiceAccount |
 | `airflow` | Airflow api-server, scheduler, dag-processor, init Job (see [`docs/local-airflow.md`](docs/local-airflow.md)) |
 

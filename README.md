@@ -33,6 +33,7 @@ Extensions are specialized AI agents (e.g. a Data Architect, a Root Cause Analys
 - **Dev server:** [portless](https://github.com/vercel-labs/portless) (`https://lattik-studio.dev` via `--tld dev`)
 - **Canvas rendering:** [`@json-render/core`](https://github.com/vercel-labs/json-render) + `@json-render/react`
 - **Expression engine:** `@eloquio/lattik-expression` (parse, type-check, emit SQL)
+- **Messaging:** Apache Kafka 3.9.0 (KRaft, no ZooKeeper) + Confluent Schema Registry 7.7.0 for Protobuf payload schemas
 - **Logger SDK:** `@eloquio/lattik-logger` (Protobuf envelope + typed clients for Logger Tables, auto-generated `.proto` per table via `buf`)
 - **Git (local dev):** Gitea in kind cluster for the PR review workflow
 

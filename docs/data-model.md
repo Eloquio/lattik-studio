@@ -71,7 +71,7 @@ A **Logger Table** is a raw, append-only event stream — narrow rows representi
 
 Logger Tables are the **input** layer to the pipeline. They are not normally read directly to answer business queries — orgs typically configure cost or scan-size policies that limit ad-hoc Logger Table aggregation, and Lattik Tables / Cubes exist precisely to make those queries cheap.
 
-Applications send events to Logger Tables via `@eloquio/lattik-logger`. The SDK serializes each event into a Protobuf **Envelope** (`table`, `event_id`, `event_timestamp`, opaque `payload` bytes) and delivers it to the ingestion service, which routes envelopes to per-table Kafka topics. A per-table `.proto` is auto-generated from the Logger Table's column definitions at build time via `buf`.
+Applications send events to Logger Tables via `@eloquio/lattik-logger`. The SDK serializes each event into a Protobuf **Envelope** (`table`, `event_id`, `event_timestamp`, opaque `payload` bytes) and delivers it to the ingestion service, which routes envelopes to per-table Kafka topics. When a Logger Table definition is merged, the Gitea webhook automatically creates the Kafka topic and registers the per-table Protobuf payload schema in the Confluent Schema Registry.
 
 ### Lattik Table
 
@@ -81,13 +81,13 @@ A **Lattik Table** is a super-wide, denormalized table at a fixed granularity le
 
 A Lattik Table with `primary_key: [{column: user_id, dimension: user_id}]` is a per-user wide table. Multi-entity grains like `[{column: user_id, dimension: user_id}, {column: product_id, dimension: product_id}]` are also valid (one row per (user, product)). **Time is never a PK component.** A Lattik Table is the *current state* at a chosen point in time; the time axis enters queries via Iceberg-style **as-of semantics** (see [Time semantics](#time-semantics)), not via per-day or per-hour PK columns.
 
-Lattik Tables are built from `column_families`, each of which declares a `source` (Logger or Lattik table), a `key_mapping` from this table's PK columns to the source's columns, an optional `load_cadence` (`daily` or `hourly`, inferred from the source if omitted), and a list of aggregated or computed columns. Whether a column carries **snapshot** or **cumulative** semantics is determined by its `agg` + `merge` definition, independently of cadence and PK shape:
+Lattik Tables are built from `column_families`, each of which declares a `source` (Logger or Lattik table), a `key_mapping` from this table's PK columns to the source's columns, an optional `load_cadence` (`daily` or `hourly`, inferred from the source if omitted), and a list of columns. Each column declares a **strategy** that defines how source events are aggregated and how the result is stored:
 
-- `agg: sum(amount), merge: sum` — cumulative lifetime sum (each load adds to the prior value)
-- `agg: sum(amount), merge: replace` — current-period snapshot (each load replaces the prior value)
-- `expr: last(country)` — most recent observed value
+- `strategy: lifetime_window, agg: sum(amount)` — scalar aggregation over all source events (cumulative lifetime sum)
+- `strategy: prepend_list, expr: country, max_length: 1` — bounded ordered list of recent values (most recent country = `list[0]`)
+- `strategy: bitmap_activity, granularity: day, window: 365` — bitfield tracking entity activity per time slot (DAU/streaks/churn)
 
-Cadence, snapshot/cumulative, and PK are three independent dials. None of them put time in the data model.
+Cadence, strategy, and PK are three independent dials. None of them put time in the data model.
 
 Lattik Tables are the **canonical denormalized layer**: the place where "everything we know about a user" (or any other entity grain) lives. They serve two roles:
 
@@ -343,7 +343,9 @@ Defining `user` implicitly creates a Dimension `user_id` whose entity is `user`.
       key_mapping: { user_id: user_id }
       columns:
         - name: home_country
-          expr: last(country)
+          strategy: prepend_list
+          expr: country
+          max_length: 1              # most recent country = list[0]
 
 - name: lattik.user_revenue         # entity-grain: one row per user
   primary_key:
@@ -356,11 +358,11 @@ Defining `user` implicitly creates a Dimension `user_id` whose entity is `user`.
       key_mapping: { user_id: actor_id }
       columns:
         - name: lifetime_revenue
-          agg: sum(amount)
-          merge: sum                 # cumulative — each load adds to the prior value
+          strategy: lifetime_window
+          agg: sum(amount)           # cumulative — each load adds to the prior value
 ```
 
-Note that `lattik.user_revenue` has PK `[user_id]`, *not* `[user_id, ds]`. There's one row per user. The `lifetime_revenue` column is cumulative (`merge: sum`), so at any as-of timestamp it gives you "total revenue accumulated up to that point." The hourly load cadence determines how frequently the value refreshes; the table itself remains entity-grain.
+Note that `lattik.user_revenue` has PK `[user_id]`, *not* `[user_id, ds]`. There's one row per user. The `lifetime_revenue` column uses the `lifetime_window` strategy with `sum(amount)`, so at any as-of timestamp it gives you "total revenue accumulated up to that point." The hourly load cadence determines how frequently the value refreshes; the table itself remains entity-grain.
 
 **The query** *"as of `2026-04-01`, give me `revenue × user_home_country` filtered to `user_home_country = 'US'`"* is answered as follows:
 
