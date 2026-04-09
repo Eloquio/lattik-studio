@@ -1,0 +1,432 @@
+# Airflow 3.2.0 with KubernetesExecutor
+# - Reuses the existing `postgres` Service for the metadata DB (creates an `airflow` database)
+# - DAGs and logs come from hostPath mounts (see k8s/kind-config.yaml)
+# - SimpleAuthManager with all-admins mode: no password required (local dev only)
+# - Worker pods are spawned by the scheduler using the pod template ConfigMap below;
+#   they reach the api-server via AIRFLOW__CORE__EXECUTION_API_SERVER_URL
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: airflow
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: airflow
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "list", "get", "watch", "delete", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: airflow
+subjects:
+  - kind: ServiceAccount
+    name: airflow
+roleRef:
+  kind: Role
+  name: airflow
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: airflow-secret
+type: Opaque
+stringData:
+  # Local-dev only. Generate prod keys with:
+  #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+  fernet-key: "YlCImzjge_TeZc7jPJ7Jz3TUZjnpHaKtpHpEPxjlyU0="
+  api-secret-key: "lattik-local-airflow-api-secret-not-for-prod"
+  jwt-secret: "lattik-local-airflow-jwt-secret-not-for-prod-32b"
+  sql-alchemy-conn: "postgresql+psycopg2://lattik:lattik-local@postgres:5432/airflow"
+---
+# Shared env applied to every Airflow component (api-server, scheduler, dag-processor, triggerer, init job, workers)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: airflow-env
+data:
+  AIRFLOW__CORE__EXECUTOR: "KubernetesExecutor"
+  AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+  AIRFLOW__CORE__AUTH_MANAGER: "airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager"
+  AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "True"
+  AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
+  AIRFLOW__API__BASE_URL: "http://airflow-api-server:8080"
+  AIRFLOW__LOGGING__BASE_LOG_FOLDER: "/opt/airflow/logs"
+  AIRFLOW__KUBERNETES_EXECUTOR__NAMESPACE: "default"
+  AIRFLOW__KUBERNETES_EXECUTOR__POD_TEMPLATE_FILE: "/opt/airflow/pod_templates/pod_template.yaml"
+  AIRFLOW__KUBERNETES_EXECUTOR__WORKER_CONTAINER_REPOSITORY: "apache/airflow"
+  AIRFLOW__KUBERNETES_EXECUTOR__WORKER_CONTAINER_TAG: "3.2.0"
+  AIRFLOW__KUBERNETES_EXECUTOR__DELETE_WORKER_PODS: "True"
+  AIRFLOW__KUBERNETES_EXECUTOR__DELETE_WORKER_PODS_ON_FAILURE: "False"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: airflow-pod-template
+data:
+  pod_template.yaml: |
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      name: airflow-worker-placeholder
+      labels:
+        app: airflow-worker
+    spec:
+      serviceAccountName: airflow
+      restartPolicy: Never
+      containers:
+        - name: base
+          image: apache/airflow:3.2.0
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: airflow-env
+          env:
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-secret
+                  key: sql-alchemy-conn
+            - name: AIRFLOW__CORE__FERNET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-secret
+                  key: fernet-key
+            - name: AIRFLOW__API_AUTH__JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-secret
+                  key: jwt-secret
+          volumeMounts:
+            - name: dags
+              mountPath: /opt/airflow/dags
+            - name: logs
+              mountPath: /opt/airflow/logs
+      volumes:
+        - name: dags
+          hostPath:
+            path: /var/local/airflow-dags
+            type: DirectoryOrCreate
+        - name: logs
+          hostPath:
+            path: /var/local/airflow-logs
+            type: DirectoryOrCreate
+---
+# One-shot job: create the `airflow` database in the existing postgres,
+# then run `airflow db migrate`. SimpleAuthManager + all-admins mode means
+# no `airflow users create` step is needed.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: airflow-init
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      serviceAccountName: airflow
+      restartPolicy: OnFailure
+      initContainers:
+        - name: create-db
+          image: postgres:16-alpine
+          env:
+            - name: PGPASSWORD
+              value: lattik-local
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              echo "Waiting for postgres..."
+              until pg_isready -h postgres -U lattik; do sleep 2; done
+              echo "Ensuring 'airflow' database exists..."
+              psql -h postgres -U lattik -d lattik_studio -tc \
+                "SELECT 1 FROM pg_database WHERE datname='airflow'" | grep -q 1 \
+                || psql -h postgres -U lattik -d lattik_studio -c "CREATE DATABASE airflow"
+              echo "Done."
+      containers:
+        - name: airflow-init
+          image: apache/airflow:3.2.0
+          envFrom:
+            - configMapRef:
+                name: airflow-env
+          env:
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-secret
+                  key: sql-alchemy-conn
+            - name: AIRFLOW__CORE__FERNET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-secret
+                  key: fernet-key
+            - name: AIRFLOW__API_AUTH__JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-secret
+                  key: jwt-secret
+          command:
+            - bash
+            - -c
+            - |
+              set -e
+              airflow db migrate
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-scheduler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow-scheduler
+  template:
+    metadata:
+      labels:
+        app: airflow-scheduler
+    spec:
+      serviceAccountName: airflow
+      containers:
+        - name: scheduler
+          image: apache/airflow:3.2.0
+          args: ["scheduler"]
+          envFrom:
+            - configMapRef:
+                name: airflow-env
+          env:
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-secret
+                  key: sql-alchemy-conn
+            - name: AIRFLOW__CORE__FERNET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-secret
+                  key: fernet-key
+            - name: AIRFLOW__API_AUTH__JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-secret
+                  key: jwt-secret
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "200m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          livenessProbe:
+            exec:
+              command:
+                - bash
+                - -c
+                - airflow jobs check --job-type SchedulerJob --hostname $(hostname)
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 5
+          volumeMounts:
+            - name: dags
+              mountPath: /opt/airflow/dags
+            - name: logs
+              mountPath: /opt/airflow/logs
+            - name: pod-template
+              mountPath: /opt/airflow/pod_templates
+      volumes:
+        - name: dags
+          hostPath:
+            path: /var/local/airflow-dags
+            type: DirectoryOrCreate
+        - name: logs
+          hostPath:
+            path: /var/local/airflow-logs
+            type: DirectoryOrCreate
+        - name: pod-template
+          configMap:
+            name: airflow-pod-template
+---
+# Airflow 3 requires a standalone DAG processor — it is no longer embedded in the scheduler.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-dag-processor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow-dag-processor
+  template:
+    metadata:
+      labels:
+        app: airflow-dag-processor
+    spec:
+      serviceAccountName: airflow
+      containers:
+        - name: dag-processor
+          image: apache/airflow:3.2.0
+          args: ["dag-processor"]
+          envFrom:
+            - configMapRef:
+                name: airflow-env
+          env:
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-secret
+                  key: sql-alchemy-conn
+            - name: AIRFLOW__CORE__FERNET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-secret
+                  key: fernet-key
+            - name: AIRFLOW__API_AUTH__JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-secret
+                  key: jwt-secret
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "768Mi"
+              cpu: "500m"
+          livenessProbe:
+            exec:
+              command:
+                - bash
+                - -c
+                - airflow jobs check --job-type DagProcessorJob --hostname $(hostname)
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 5
+          volumeMounts:
+            - name: dags
+              mountPath: /opt/airflow/dags
+            - name: logs
+              mountPath: /opt/airflow/logs
+      volumes:
+        - name: dags
+          hostPath:
+            path: /var/local/airflow-dags
+            type: DirectoryOrCreate
+        - name: logs
+          hostPath:
+            path: /var/local/airflow-logs
+            type: DirectoryOrCreate
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-api-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow-api-server
+  template:
+    metadata:
+      labels:
+        app: airflow-api-server
+    spec:
+      serviceAccountName: airflow
+      containers:
+        - name: api-server
+          image: apache/airflow:3.2.0
+          args: ["api-server"]
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: airflow-env
+          env:
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-secret
+                  key: sql-alchemy-conn
+            - name: AIRFLOW__CORE__FERNET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-secret
+                  key: fernet-key
+            - name: AIRFLOW__API__SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-secret
+                  key: api-secret-key
+            - name: AIRFLOW__API_AUTH__JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-secret
+                  key: jwt-secret
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "200m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          readinessProbe:
+            httpGet:
+              path: /api/v2/monitor/health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /api/v2/monitor/health
+              port: 8080
+            initialDelaySeconds: 90
+            periodSeconds: 30
+          volumeMounts:
+            - name: dags
+              mountPath: /opt/airflow/dags
+            - name: logs
+              mountPath: /opt/airflow/logs
+            - name: pod-template
+              mountPath: /opt/airflow/pod_templates
+      volumes:
+        - name: dags
+          hostPath:
+            path: /var/local/airflow-dags
+            type: DirectoryOrCreate
+        - name: logs
+          hostPath:
+            path: /var/local/airflow-logs
+            type: DirectoryOrCreate
+        - name: pod-template
+          configMap:
+            name: airflow-pod-template
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-api-server
+spec:
+  type: NodePort
+  selector:
+    app: airflow-api-server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: 30888

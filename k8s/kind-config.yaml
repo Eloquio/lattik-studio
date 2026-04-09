@@ -21,3 +21,11 @@ nodes:
       - containerPort: 30901
         hostPort: 9001
         protocol: TCP
+      - containerPort: 30888
+        hostPort: 8088
+        protocol: TCP
+    extraMounts:
+      - hostPath: /var/lib/lattik/airflow-dags
+        containerPath: /var/local/airflow-dags
+      - hostPath: /var/lib/lattik/airflow-logs
+        containerPath: /var/local/airflow-logs
