@@ -12,6 +12,7 @@ Extensions are specialized AI agents (e.g. a Root Cause Analysis Agent). Extensi
 - **Auth:** NextAuth v5 (Auth.js beta) with Google OAuth
 - **Database:** PostgreSQL (local via kind) + Drizzle ORM
 - **Local data lake:** Trino + Iceberg REST catalog + MinIO, all in kind ([`docs/local-data-lake.md`](docs/local-data-lake.md))
+- **Orchestration (local dev):** Airflow 3.2.0 with KubernetesExecutor in the same kind cluster, sharing the postgres metadata DB ([`docs/local-airflow.md`](docs/local-airflow.md))
 - **UI:** shadcn/ui (Base Nova) + Tailwind CSS v4
 - **Dev server:** portless (`https://lattik-studio.dev` via `--tld dev`)
 - **Canvas rendering:** `@json-render/core` + `@json-render/react` ([vercel-labs/json-render](https://github.com/vercel-labs/json-render))
@@ -35,15 +36,16 @@ apps/web/              Next.js app
   src/hooks/           React hooks
   src/lib/             Server actions and utilities
   src/proxy.ts         Auth middleware (protects all routes except /sign-in, /api/auth, /api/webhooks)
-docs/                  Architecture docs (agent-handoff, canvas-rendering, progressive-disclosure, data-model, local-data-lake)
-k8s/                   Kubernetes manifests (kind cluster, PostgreSQL, Gitea, Trino + iceberg-rest + MinIO)
+docs/                  Architecture docs (agent-handoff, canvas-rendering, progressive-disclosure, data-model, local-data-lake, local-airflow)
+k8s/                   Kubernetes manifests (kind cluster, PostgreSQL, Gitea, Trino + iceberg-rest + MinIO, Airflow)
+airflow/dags/          Local Airflow DAGs (hostPath-mounted into the airflow pods — edit live, no restart)
 packages/              Shared packages (future)
 ```
 
 ## Development
 
 ```bash
-# Bring up the full dev stack: kind cluster + postgres + gitea + trino/minio/iceberg-rest
+# Bring up the full dev stack: kind cluster + postgres + gitea + trino/minio/iceberg-rest + airflow
 pnpm dev:up
 
 # Or, for a minimum env (cluster + postgres only — much faster, ~6 GB less RAM):
@@ -71,7 +73,7 @@ pnpm dev:down
 ### Script naming
 
 - `cluster:up` / `cluster:down` — kind cluster lifecycle only. `cluster:down` deletes the cluster, which kills every service inside it.
-- `db:start` / `db:stop`, `gitea:start` / `gitea:stop`, `trino:start` / `trino:stop` — per-service. Each `*:start` assumes the cluster is already up.
+- `db:start` / `db:stop`, `gitea:start` / `gitea:stop`, `trino:start` / `trino:stop`, `airflow:start` / `airflow:stop` — per-service. Each `*:start` assumes the cluster is already up. `airflow:start` additionally assumes `db:start` has run, since Airflow's metadata DB is the existing postgres.
 - `dev:up` / `dev:down` — convenience aggregations. `dev:up` brings up the cluster + every service in sequence; `dev:down` is an alias for `cluster:down`.
 
 ## Environment variables
@@ -142,6 +144,34 @@ pnpm trino:stop
 - **Ports:** Trino UI / API at `localhost:8080`, MinIO S3 API at `localhost:9000`, MinIO console at `localhost:9001`
 - **Catalogs registered with Trino:** `iceberg` (the local data lake), `tpch` (built-in synthetic data, no storage required — handy for smoke tests)
 - **Persistence:** all PVC-backed via kind's default StorageClass; survives pod restarts but **not** `pnpm dev:down`. Snapshot via `mc cp` or `pg_dump` if you need cross-recreate persistence.
+
+## Local orchestration (Airflow)
+
+Apache Airflow 3.2.0 runs in the same kind cluster, with `KubernetesExecutor` so each task spawns its own pod. The metadata DB is the existing `postgres` Service (a separate `airflow` database, created idempotently by an init Job). DAGs come from a hostPath mount — drop a `.py` file in `/var/lib/lattik/airflow-dags/` (or symlink the repo's `airflow/dags/` into it) and the DAG processor picks it up on its next scan, no restart needed. See [`docs/local-airflow.md`](docs/local-airflow.md) for the full architecture, DAG authoring workflow, providers / custom-image pattern, upgrade procedure, and troubleshooting.
+
+```bash
+# Start Airflow (assumes cluster + postgres are already up)
+pnpm airflow:start
+
+# Stop just Airflow
+pnpm airflow:stop
+
+# Tail scheduler logs
+pnpm airflow:logs
+
+# Tail the init Job's logs (db migrate output)
+pnpm airflow:init-logs
+```
+
+- **Components:** `api-server` (Airflow 3 replaces `webserver`), `scheduler`, `dag-processor` (now mandatory in Airflow 3 — used to live inside the scheduler in 2.x), one-shot `airflow-init` Job for DB create + migrate. Worker pods are spawned by the scheduler on demand and torn down on completion.
+- **K8s manifest:** [`k8s/airflow.yaml`](k8s/airflow.yaml) — single file with RBAC, Secret, shared env ConfigMap, pod-template ConfigMap, init Job, the three Deployments, and the api-server NodePort Service.
+- **Auth:** `SimpleAuthManager` in all-admins mode (`AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS=True`) — no credentials, click Sign In. **Local dev only.** Same approach as `projects/testenv`.
+- **UI:** <http://localhost:8088> via NodePort 30888 (mapped in [`k8s/kind-config.yaml`](k8s/kind-config.yaml)).
+- **DAG source:** hostPath `/var/lib/lattik/airflow-dags/` → `/opt/airflow/dags` inside every airflow pod (api-server, scheduler, dag-processor, workers). The repo ships a sample DAG at `airflow/dags/example_dag.py` — copy or symlink it into the host dir.
+- **Logs:** hostPath `/var/lib/lattik/airflow-logs/` → `/opt/airflow/logs`. Worker logs survive pod deletion, so the UI can show task logs even after `delete_worker_pods=True` removes the executor pod.
+- **Metadata DB:** `airflow` database in the existing postgres. **Wiped on `pnpm dev:down`** along with everything else. To upgrade Airflow versions in place, the schema migration path between majors is non-trivial — for local dev it's faster to `DROP DATABASE airflow` and re-run `pnpm airflow:start`.
+- **Worker → api-server traffic:** Airflow 3 workers no longer connect to postgres directly — they hit the api-server's execution API at `AIRFLOW__CORE__EXECUTION_API_SERVER_URL=http://airflow-api-server:8080/execution/`. JWT auth is configured via `AIRFLOW__API_AUTH__JWT_SECRET`.
+- **Providers:** none preinstalled (bare `apache/airflow:3.2.0`). To talk to Trino, MinIO, or anything else, build a custom image with the relevant `apache-airflow-providers-*` packages baked in. Avoid `_PIP_ADDITIONAL_REQUIREMENTS` — it pip-installs on every pod start, which is slow and flaky.
 
 ## Auth
 

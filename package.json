@@ -19,7 +19,11 @@
     "trino:stop": "kubectl delete -f k8s/trino.yaml --ignore-not-found && kubectl delete -f k8s/iceberg-rest.yaml --ignore-not-found && kubectl delete -f k8s/minio.yaml --ignore-not-found",
     "trino:logs": "kubectl logs -l app=trino -f",
     "trino:cli": "kubectl exec -it deploy/trino -- trino",
-    "dev:up": "pnpm cluster:up && pnpm db:start && pnpm gitea:start && pnpm trino:start",
+    "airflow:start": "kubectl apply -f k8s/airflow.yaml && kubectl wait --for=condition=complete job/airflow-init --timeout=300s && kubectl wait --for=condition=ready pod -l app=airflow-api-server --timeout=300s && echo 'Airflow ready at http://localhost:8088 (no credentials — click Sign In)'",
+    "airflow:stop": "kubectl delete -f k8s/airflow.yaml --ignore-not-found",
+    "airflow:logs": "kubectl logs -l app=airflow-scheduler -f",
+    "airflow:init-logs": "kubectl logs job/airflow-init -f",
+    "dev:up": "pnpm cluster:up && pnpm db:start && pnpm gitea:start && pnpm trino:start && pnpm airflow:start",
     "dev:down": "pnpm cluster:down",
     "test:e2e": "cd apps/web && pnpm test:e2e"
   },
