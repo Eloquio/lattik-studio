@@ -2,6 +2,7 @@ packages:
   - "apps/*"
   - "packages/*"
 allowBuilds:
+  '@bufbuild/buf': false
   esbuild: true
   msw: true
   sharp: true
