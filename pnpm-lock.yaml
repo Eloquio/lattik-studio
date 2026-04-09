@@ -35,6 +35,9 @@ importers:
       '@eloquio/lattik-expression':
         specifier: ^0.3.0
         version: 0.3.0
+      '@eloquio/lattik-logger':
+        specifier: workspace:*
+        version: link:../../packages/lattik-logger
       '@json-render/core':
         specifier: ^0.16.0
         version: 0.16.0(zod@4.3.6)

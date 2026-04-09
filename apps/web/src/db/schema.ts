@@ -158,6 +158,7 @@ export const rateLimits = pgTable(
 export type WebhookActionType =
   | "definition_merged"
   | "kafka_topic_created"
+  | "schema_registered"
   | "dag_generated";
 
 export type WebhookActionStatus = "success" | "failure";

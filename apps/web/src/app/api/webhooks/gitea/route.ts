@@ -3,7 +3,12 @@ import { eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
 import { generateDags } from "@/lib/dag-generator";
-import { createLoggerTopic } from "@/lib/kafka-admin";
+import { createLoggerTopic, topicName } from "@/lib/kafka-admin";
+import { registerPayloadSchema } from "@/lib/schema-registry";
+import {
+  generatePayloadProto,
+  type LoggerColumn,
+} from "@eloquio/lattik-logger";
 
 /** Max webhook payload: 1MB */
 const MAX_PAYLOAD_SIZE = 1_048_576;
@@ -129,10 +134,13 @@ export async function POST(req: Request) {
     }))
   );
 
-  // Create Kafka topics for any merged Logger Tables.
+  // Create Kafka topics and register payload schemas for merged Logger Tables.
   for (const def of definitions) {
     if (def.kind === "logger_table") {
-      const spec = def.spec as { retention?: string };
+      const spec = def.spec as { retention?: string; columns?: LoggerColumn[] };
+      const topic = topicName(def.name);
+
+      // 1. Create Kafka topic
       try {
         await createLoggerTopic(def.name, spec.retention ?? "30d");
         await db.insert(schema.webhookAuditLog).values({
@@ -140,7 +148,7 @@ export async function POST(req: Request) {
           definitionId: def.id,
           action: "kafka_topic_created",
           status: "success",
-          detail: `Topic created for "${def.name}" (retention: ${spec.retention ?? "30d"})`,
+          detail: `Topic "${topic}" created (retention: ${spec.retention ?? "30d"})`,
           receivedAt,
         });
       } catch (err) {
@@ -150,6 +158,34 @@ export async function POST(req: Request) {
           prUrl,
           definitionId: def.id,
           action: "kafka_topic_created",
+          status: "failure",
+          detail: message,
+          receivedAt,
+        });
+      }
+
+      // 2. Register payload Protobuf schema
+      try {
+        const protoContent = generatePayloadProto({
+          table: def.name,
+          columns: spec.columns ?? [],
+        });
+        const { id } = await registerPayloadSchema(topic, protoContent);
+        await db.insert(schema.webhookAuditLog).values({
+          prUrl,
+          definitionId: def.id,
+          action: "schema_registered",
+          status: "success",
+          detail: `Schema registered for "${topic}" (schema id: ${id})`,
+          receivedAt,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`Schema registration failed for ${def.name}:`, message);
+        await db.insert(schema.webhookAuditLog).values({
+          prUrl,
+          definitionId: def.id,
+          action: "schema_registered",
           status: "failure",
           detail: message,
           receivedAt,

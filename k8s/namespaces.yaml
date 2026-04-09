@@ -43,4 +43,14 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
+  name: kafka
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: schema-registry
+---
+apiVersion: v1
+kind: Namespace
+metadata:
   name: workloads

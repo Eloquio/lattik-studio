@@ -26,6 +26,8 @@ Each service lives in its own namespace so PVCs, secrets, and pods stay isolated
 | `iceberg` | iceberg-rest deployment + PVC + service + local copy of MinIO credentials |
 | `trino` | Trino coordinator+worker deployment + configmaps + service |
 | `spark-operator` | Spark Operator pod (helm-managed) |
+| `kafka` | Kafka KRaft broker + PVC + service |
+| `schema-registry` | Confluent Schema Registry deployment + service (stateless — data in Kafka) |
 | `workloads` | `SparkApplication`s + driver/executor pods + `spark-driver` ServiceAccount + local copy of MinIO credentials |
 | `airflow` | Airflow control plane + worker pods (see [`local-airflow.md`](local-airflow.md)) |
 
@@ -204,6 +206,7 @@ All four services store their data on `PersistentVolumeClaim`s backed by kind's 
 | `iceberg-data` | 1 Gi | The REST catalog's SQLite db (which tables exist, where they live) |
 | `postgres-data` | 5 Gi | App database (NextAuth, conversations, definitions, etc.) |
 | `gitea-data` | 5 Gi | Gitea repos and config |
+| `kafka-data` | 5 Gi | Kafka commit log and topic data |
 
 **What survives:**
 
@@ -299,9 +302,11 @@ The driver pod is using the default ServiceAccount in `workloads` (which has no 
 
 ## See also
 
-- [`k8s/namespaces.yaml`](../k8s/namespaces.yaml) — all seven namespaces
+- [`k8s/namespaces.yaml`](../k8s/namespaces.yaml) — all namespaces
 - [`k8s/trino.yaml`](../k8s/trino.yaml), [`k8s/iceberg-rest.yaml`](../k8s/iceberg-rest.yaml), [`k8s/minio.yaml`](../k8s/minio.yaml) — the storage and SQL stack
 - [`k8s/spark/Dockerfile`](../k8s/spark/Dockerfile), [`k8s/spark/operator-values.yaml`](../k8s/spark/operator-values.yaml), [`k8s/spark-rbac.yaml`](../k8s/spark-rbac.yaml), [`k8s/spark-example.yaml`](../k8s/spark-example.yaml) — the Spark stack
+- [`k8s/kafka.yaml`](../k8s/kafka.yaml) — Kafka KRaft broker
+- [`k8s/schema-registry.yaml`](../k8s/schema-registry.yaml) — Confluent Schema Registry
 - [`k8s/kind-config.yaml`](../k8s/kind-config.yaml) — port mappings
 - [Trino docs](https://trino.io/docs/current/) — query language and connector reference
 - [Iceberg REST spec](https://github.com/apache/iceberg/blob/main/open-api/rest-catalog-open-api.yaml) — what `iceberg-rest` actually implements
