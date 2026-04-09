@@ -1,0 +1,20 @@
+# Helm values for the kubeflow Spark Operator chart.
+#
+# Installed by `pnpm spark:start`. Mirrors the configuration in
+# projects/testenv/helm/spark-operator-values.yaml so the two repos
+# behave the same.
+#
+# Why these settings:
+#   spark.jobNamespaces: [workloads]
+#     Tells the operator to watch the `workloads` namespace for
+#     SparkApplication CRDs (rather than every namespace). The operator
+#     itself runs in `spark-operator` regardless.
+#   webhook.enable: true
+#     Enables the validating/mutating webhook for SparkApplication
+#     resources — gives clearer errors at submit time.
+spark:
+  jobNamespaces:
+    - workloads
+
+webhook:
+  enable: true

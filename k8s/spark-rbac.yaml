@@ -1,0 +1,65 @@
+# RBAC for Spark drivers running in the workloads namespace.
+#
+# Spark in cluster mode runs the application driver as a pod, which then
+# creates and manages its own executor pods. The driver pod needs API
+# permissions to do that — without this RBAC the driver fails with
+# "User \"system:serviceaccount:workloads:default\" cannot create resource
+# \"pods\" in API group \"\" in the namespace \"workloads\"".
+#
+# This is the standard "spark-driver" SA pattern. The Spark Operator
+# helm chart already wires up its own SA in the spark-operator namespace
+# for the operator pod itself; this is for the *driver* pods only.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spark-driver
+  namespace: workloads
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spark-driver
+  namespace: workloads
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "delete", "deletecollection"]
+  - apiGroups: [""]
+    resources: ["pods/log", "pods/exec", "pods/portforward"]
+    verbs: ["get", "list", "watch", "create"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "delete", "deletecollection"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "deletecollection"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "delete", "deletecollection"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spark-driver
+  namespace: workloads
+subjects:
+  - kind: ServiceAccount
+    name: spark-driver
+    namespace: workloads
+roleRef:
+  kind: Role
+  name: spark-driver
+  apiGroup: rbac.authorization.k8s.io
+---
+# Local copy of MinIO credentials for Spark drivers/executors.
+# Same reason iceberg-rest needed its own copy: secrets are
+# namespace-scoped. Keep in lockstep with k8s/minio.yaml.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-credentials
+  namespace: workloads
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID: lattik
+  AWS_SECRET_ACCESS_KEY: lattik-local

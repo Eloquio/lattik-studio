@@ -1,7 +1,21 @@
+# Local copy of the minio-secret credentials. K8s secrets are namespace-
+# scoped, so iceberg-rest can't reference the one in the minio namespace
+# directly. Keep these in lockstep with k8s/minio.yaml.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-credentials
+  namespace: iceberg
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID: lattik
+  AWS_SECRET_ACCESS_KEY: lattik-local
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: iceberg-data
+  namespace: iceberg
 spec:
   accessModes:
     - ReadWriteOnce
@@ -13,6 +27,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: iceberg-rest
+  namespace: iceberg
 spec:
   replicas: 1
   selector:
@@ -43,20 +58,22 @@ spec:
             - name: CATALOG_IO__IMPL
               value: org.apache.iceberg.aws.s3.S3FileIO
             - name: CATALOG_S3_ENDPOINT
-              value: http://minio:9000
+              value: http://minio.minio:9000
             - name: CATALOG_S3_PATH__STYLE__ACCESS
               value: "true"
-            # MinIO credentials (must match minio-secret).
+            # MinIO credentials. Local copy lives in this namespace's
+            # `minio-credentials` Secret because k8s secrets are namespace-
+            # scoped. Must match k8s/minio.yaml's minio-secret values.
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
-                  name: minio-secret
-                  key: MINIO_ROOT_USER
+                  name: minio-credentials
+                  key: AWS_ACCESS_KEY_ID
             - name: AWS_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
-                  name: minio-secret
-                  key: MINIO_ROOT_PASSWORD
+                  name: minio-credentials
+                  key: AWS_SECRET_ACCESS_KEY
             - name: AWS_REGION
               value: us-east-1
           resources:
@@ -84,6 +101,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: iceberg-rest
+  namespace: iceberg
 spec:
   type: ClusterIP
   selector:
