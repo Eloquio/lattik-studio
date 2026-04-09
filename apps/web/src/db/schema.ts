@@ -155,6 +155,46 @@ export const rateLimits = pgTable(
   (t) => [index("idx_rate_limits_resetAt").on(t.resetAt)]
 );
 
+export type WebhookActionType =
+  | "definition_merged"
+  | "kafka_topic_created"
+  | "dag_generated";
+
+export type WebhookActionStatus = "success" | "failure";
+
+/**
+ * Audit log for webhook-triggered side effects (topic creation, DAG
+ * generation, etc.). Each row records one action taken in response to
+ * a webhook event, with enough context to trace what happened and why.
+ */
+export const webhookAuditLog = pgTable(
+  "webhook_audit_log",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    /** The Gitea PR URL that triggered this action. */
+    prUrl: text("prUrl").notNull(),
+    /** The definition this action relates to (null for non-definition actions). */
+    definitionId: text("definitionId").references(() => definitions.id),
+    /** What kind of action was performed. */
+    action: text("action").$type<WebhookActionType>().notNull(),
+    /** Whether the action succeeded or failed. */
+    status: text("status").$type<WebhookActionStatus>().notNull(),
+    /** Error message on failure, or additional context on success. */
+    detail: text("detail"),
+    /** When the webhook was received. */
+    receivedAt: timestamp("receivedAt", { mode: "date" }).notNull(),
+    /** When the action completed (success or failure). */
+    completedAt: timestamp("completedAt", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("idx_webhook_audit_prUrl").on(t.prUrl),
+    index("idx_webhook_audit_definitionId").on(t.definitionId),
+    index("idx_webhook_audit_action").on(t.action),
+  ]
+);
+
 export const verificationTokens = pgTable(
   "verificationToken",
   {

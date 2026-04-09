@@ -33,8 +33,8 @@ importers:
         specifier: ^6.1.3
         version: 6.1.3
       '@eloquio/lattik-expression':
-        specifier: ^0.2.0
-        version: 0.2.0
+        specifier: ^0.3.0
+        version: 0.3.0
       '@json-render/core':
         specifier: ^0.16.0
         version: 0.16.0(zod@4.3.6)
@@ -59,6 +59,9 @@ importers:
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.20.0)(postgres@3.4.8)
+      kafkajs:
+        specifier: ^2.2.4
+        version: 2.2.4
       lucide-react:
         specifier: ^1.7.0
         version: 1.7.0(react@19.2.4)
@@ -621,8 +624,8 @@ packages:
     peerDependencies:
       '@noble/ciphers': ^1.0.0
 
-  '@eloquio/lattik-expression@0.2.0':
-    resolution: {integrity: sha512-Bqb/0GlhSDFEX3C96k/ARdyqIe7Z+9tC0rhTtP8dx7uB5XL9hthJcKEhjSPkHTJ2qbwa2ErI/8i35J6XtdE0sg==, tarball: https://npm.pkg.github.com/download/@eloquio/lattik-expression/0.2.0/43e10aac75d05545ae75584d6cf3be690c17d714}
+  '@eloquio/lattik-expression@0.3.0':
+    resolution: {integrity: sha512-+gF6p0qnSnQbNIRWRO5J2VcmjmphOXOUDNtLHi+o1js6zJv0F2lpWOVxI/xFoAjXlVcTd9c/bpnlNNfRjBbvcg==, tarball: https://npm.pkg.github.com/download/@eloquio/lattik-expression/0.3.0/d3f2bd1fcb7bcc78de08202c26bc9f5fd3618d57}
 
   '@emnapi/core@1.9.1':
     resolution: {integrity: sha512-mukuNALVsoix/w1BJwFzwXBN/dHeejQtuVzcDsfOEsdpCumXb/E9j8w11h5S54tT1xhifGfbbSm/ICrObRb3KA==}
@@ -3632,6 +3635,10 @@ packages:
     resolution: {integrity: sha512-ZZow9HBI5O6EPgSJLUb8n2NKgmVWTwCvHGwFuJlMjvLFqlGG6pjirPhtdsseaLZjSibD8eegzmYpUZwoIlj2cQ==}
     engines: {node: '>=4.0'}
 
+  kafkajs@2.2.4:
+    resolution: {integrity: sha512-j/YeapB1vfPT2iOIUn/vxdyKEuhuY2PxMBvf5JWux6iSaukAccrMtXEY/Lb7OvavDhOWME589bpLrEdnVHjfjA==}
+    engines: {node: '>=14.0.0'}
+
   keyv@4.5.4:
     resolution: {integrity: sha512-oxVHkHR/EJf2CNXnWxRLW6mg7JyCCUcG0DtEGmL2ctUo1PNTin1PUil+r/+4r5MpVgC/fn1kjsx7mjSujKqIpw==}
 
@@ -5834,7 +5841,7 @@ snapshots:
     dependencies:
       '@noble/ciphers': 1.3.0
 
-  '@eloquio/lattik-expression@0.2.0': {}
+  '@eloquio/lattik-expression@0.3.0': {}
 
   '@emnapi/core@1.9.1':
     dependencies:
@@ -8749,6 +8756,8 @@ snapshots:
       array.prototype.flat: 1.3.3
       object.assign: 4.1.7
       object.values: 1.2.1
+
+  kafkajs@2.2.4: {}
 
   keyv@4.5.4:
     dependencies:
