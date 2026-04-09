@@ -2,6 +2,8 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
+import { generateDags } from "@/lib/dag-generator";
+import { createLoggerTopic } from "@/lib/kafka-admin";
 
 /** Max webhook payload: 1MB */
 const MAX_PAYLOAD_SIZE = 1_048_576;
@@ -87,10 +89,16 @@ export async function POST(req: Request) {
   }
 
   const db = getDb();
+  const receivedAt = new Date();
 
   // Find definitions with this PR URL
   const definitions = await db
-    .select({ id: schema.definitions.id })
+    .select({
+      id: schema.definitions.id,
+      kind: schema.definitions.kind,
+      name: schema.definitions.name,
+      spec: schema.definitions.spec,
+    })
     .from(schema.definitions)
     .where(eq(schema.definitions.prUrl, prUrl));
 
@@ -108,6 +116,70 @@ export async function POST(req: Request) {
       updatedAt: new Date(),
     })
     .where(inArray(schema.definitions.id, ids));
+
+  // Audit: log each definition merge
+  await db.insert(schema.webhookAuditLog).values(
+    definitions.map((d) => ({
+      prUrl,
+      definitionId: d.id,
+      action: "definition_merged" as const,
+      status: "success" as const,
+      detail: `${d.kind} "${d.name}" marked as merged`,
+      receivedAt,
+    }))
+  );
+
+  // Create Kafka topics for any merged Logger Tables.
+  for (const def of definitions) {
+    if (def.kind === "logger_table") {
+      const spec = def.spec as { retention?: string };
+      try {
+        await createLoggerTopic(def.name, spec.retention ?? "30d");
+        await db.insert(schema.webhookAuditLog).values({
+          prUrl,
+          definitionId: def.id,
+          action: "kafka_topic_created",
+          status: "success",
+          detail: `Topic created for "${def.name}" (retention: ${spec.retention ?? "30d"})`,
+          receivedAt,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`Kafka topic creation failed for ${def.name}:`, message);
+        await db.insert(schema.webhookAuditLog).values({
+          prUrl,
+          definitionId: def.id,
+          action: "kafka_topic_created",
+          status: "failure",
+          detail: message,
+          receivedAt,
+        });
+      }
+    }
+  }
+
+  // Regenerate Airflow DAG YAML specs from all merged definitions and push
+  // to S3.
+  try {
+    await generateDags();
+    await db.insert(schema.webhookAuditLog).values({
+      prUrl,
+      action: "dag_generated",
+      status: "success",
+      detail: `DAGs regenerated after merging ${definitions.length} definition(s)`,
+      receivedAt,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("DAG generation failed after PR merge:", message);
+    await db.insert(schema.webhookAuditLog).values({
+      prUrl,
+      action: "dag_generated",
+      status: "failure",
+      detail: message,
+      receivedAt,
+    });
+  }
 
   return Response.json({
     status: "ok",
