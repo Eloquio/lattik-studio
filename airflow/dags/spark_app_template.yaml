@@ -1,0 +1,54 @@
+apiVersion: sparkoperator.k8s.io/v1beta2
+kind: SparkApplication
+metadata:
+  name: lattik-{{ params.job_type | replace("_", "-") }}-{{ params.job_name | replace("_", "-") }}-{{ ds }}
+  namespace: workloads
+spec:
+  type: Python
+  pythonVersion: "3"
+  mode: cluster
+  image: lattik/spark-iceberg:4.0.2-1.10.1
+  imagePullPolicy: IfNotPresent
+  mainApplicationFile: "local:///opt/spark/work-dir/driver.py"
+  arguments:
+    - "--job-type={{ params.job_type }}"
+    - "--job-name={{ params.job_name }}"
+    - "--ds={{ ds }}"
+  sparkVersion: "4.0.2"
+  restartPolicy:
+    type: OnFailure
+    onFailureRetries: 1
+    onFailureRetryInterval: 30
+  driver:
+    cores: 1
+    memory: 1024m
+    serviceAccount: spark-driver
+    envFrom:
+      - secretRef:
+          name: minio-credentials
+    env:
+      - name: AWS_REGION
+        value: us-east-1
+  executor:
+    cores: 1
+    instances: 1
+    memory: 1024m
+    envFrom:
+      - secretRef:
+          name: minio-credentials
+    env:
+      - name: AWS_REGION
+        value: us-east-1
+  sparkConf:
+    spark.sql.extensions: "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
+    spark.sql.catalog.iceberg: "org.apache.iceberg.spark.SparkCatalog"
+    spark.sql.catalog.iceberg.catalog-impl: "org.apache.iceberg.rest.RESTCatalog"
+    spark.sql.catalog.iceberg.uri: "http://iceberg-rest.iceberg.svc.cluster.local:8181"
+    spark.sql.catalog.iceberg.warehouse: "s3://warehouse/"
+    spark.sql.catalog.iceberg.io-impl: "org.apache.iceberg.aws.s3.S3FileIO"
+    spark.sql.catalog.iceberg.s3.endpoint: "http://minio.minio.svc.cluster.local:9000"
+    spark.sql.catalog.iceberg.s3.path-style-access: "true"
+    spark.sql.catalog.iceberg.s3.access-key-id: "lattik"
+    spark.sql.catalog.iceberg.s3.secret-access-key: "lattik-local"
+    spark.sql.catalog.iceberg.s3.region: "us-east-1"
+    spark.sql.defaultCatalog: "iceberg"
