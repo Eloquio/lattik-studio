@@ -307,6 +307,7 @@ The driver pod is using the default ServiceAccount in `workloads` (which has no 
 - [`k8s/spark/Dockerfile`](../k8s/spark/Dockerfile), [`k8s/spark/operator-values.yaml`](../k8s/spark/operator-values.yaml), [`k8s/spark-rbac.yaml`](../k8s/spark-rbac.yaml), [`k8s/spark-example.yaml`](../k8s/spark-example.yaml) — the Spark stack
 - [`k8s/kafka.yaml`](../k8s/kafka.yaml) — Kafka KRaft broker
 - [`k8s/schema-registry.yaml`](../k8s/schema-registry.yaml) — Confluent Schema Registry
+- [`k8s/ingest.yaml`](../k8s/ingest.yaml) — Go ingestion service (Protobuf envelope → Kafka)
 - [`k8s/kind-config.yaml`](../k8s/kind-config.yaml) — port mappings
 - [Trino docs](https://trino.io/docs/current/) — query language and connector reference
 - [Iceberg REST spec](https://github.com/apache/iceberg/blob/main/open-api/rest-catalog-open-api.yaml) — what `iceberg-rest` actually implements
