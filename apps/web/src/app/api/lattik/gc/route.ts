@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
-import { requireLattikAuth } from "@/lib/lattik-auth";
+import { requireLattikAuth } from "@/lib/bearer-auth";
 import { log } from "@/lib/log";
 import {
   deleteObjects,

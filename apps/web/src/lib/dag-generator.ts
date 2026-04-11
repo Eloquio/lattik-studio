@@ -114,19 +114,6 @@ function backfillStrategy(family: FamilySpec): "sequential" | "parallel" {
 }
 
 /**
- * Generate a date range from ds_start to ds_end (inclusive), as YYYY-MM-DD strings.
- */
-function dateRange(dsStart: string, dsEnd: string): string[] {
-  const dates: string[] = [];
-  const start = new Date(dsStart);
-  const end = new Date(dsEnd);
-  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-    dates.push(d.toISOString().slice(0, 10));
-  }
-  return dates;
-}
-
-/**
  * Generate a backfill DAG spec for a Lattik Table.
  *
  * The backfill DAG is parameterized by ds_start and ds_end (passed via Airflow

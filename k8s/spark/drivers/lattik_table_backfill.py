@@ -19,49 +19,23 @@ The backfill processes families based on their column strategies:
 
 import argparse
 import json
-import os
-import sys
-import uuid
 from datetime import datetime, timedelta
 
-import requests
-from pyspark.sql import SparkSession, DataFrame
+from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
-from pyspark.sql.types import LongType, DoubleType, StringType
 
-
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
-
-LATTIK_API = os.environ.get("LATTIK_API_URL", "https://lattik-studio.dev/api/lattik")
-LATTIK_API_TOKEN = os.environ.get("LATTIK_API_TOKEN")
-S3_BUCKET = os.environ.get("S3_BUCKET", "warehouse")
-TARGET_BUCKET_SIZE = int(os.environ.get("TARGET_BUCKET_SIZE", str(128 * 1024 * 1024)))
-FORMAT_ID = os.environ.get("FORMAT_ID", "parquet")
-
-
-def _auth_headers() -> dict:
-    """Bearer-token auth header for all Lattik Studio API calls."""
-    if not LATTIK_API_TOKEN:
-        raise RuntimeError(
-            "LATTIK_API_TOKEN is not set — cannot authenticate to Lattik Studio API"
-        )
-    return {"Authorization": f"Bearer {LATTIK_API_TOKEN}"}
+from lattik_driver_utils import (
+    commit_via_api,
+    get_latest_version,
+    merge_cumulative,
+    set_api_url,
+    write_load,
+)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def next_power_of_2(n: int) -> int:
-    if n <= 1:
-        return 1
-    p = 1
-    while p < n:
-        p *= 2
-    return min(p, 4096)
-
 
 def date_range(ds_start: str, ds_end: str) -> list[str]:
     """Generate a list of YYYY-MM-DD strings from ds_start to ds_end (inclusive)."""
@@ -79,117 +53,14 @@ def today_str() -> str:
     return datetime.utcnow().strftime("%Y-%m-%d")
 
 
-# ---------------------------------------------------------------------------
-# Strategy helpers
-# ---------------------------------------------------------------------------
-
 def family_needs_cascade(family: dict) -> bool:
     """Does this family have lifetime_window columns that depend on previous ds?"""
     return any(col["strategy"] == "lifetime_window" for col in family["columns"])
 
 
-def merge_cumulative(cumulative_df: DataFrame | None, delta_df: DataFrame,
-                     columns: list[dict], pk_columns: list[str]) -> DataFrame:
-    """
-    Merge delta with previous cumulative to produce new cumulative per strategy.
-
-    If cumulative_df is None, the delta IS the cumulative (first load / seed).
-    """
-    if cumulative_df is None:
-        # First load — delta becomes the cumulative
-        result = delta_df
-        for col in columns:
-            name = col["name"]
-            delta_name = f"{name}__delta"
-            result = result.withColumn(name, F.col(delta_name))
-        return result
-
-    # Join delta with previous cumulative on PK
-    joined = delta_df.alias("d").join(
-        cumulative_df.alias("c"),
-        on=pk_columns,
-        how="full_outer"
-    )
-
-    for col in columns:
-        name = col["name"]
-        delta_name = f"{name}__delta"
-        strategy = col["strategy"]
-
-        if strategy == "lifetime_window":
-            agg = col.get("agg", "").lower()
-            if "count" in agg or "sum" in agg:
-                # sum/count: prev + delta
-                joined = joined.withColumn(
-                    name,
-                    F.coalesce(F.col(f"c.{name}"), F.lit(0)) +
-                    F.coalesce(F.col(f"d.{delta_name}"), F.lit(0))
-                )
-            elif "max" in agg:
-                joined = joined.withColumn(
-                    name,
-                    F.greatest(
-                        F.coalesce(F.col(f"c.{name}"), F.col(f"d.{delta_name}")),
-                        F.coalesce(F.col(f"d.{delta_name}"), F.col(f"c.{name}"))
-                    )
-                )
-            elif "min" in agg:
-                joined = joined.withColumn(
-                    name,
-                    F.least(
-                        F.coalesce(F.col(f"c.{name}"), F.col(f"d.{delta_name}")),
-                        F.coalesce(F.col(f"d.{delta_name}"), F.col(f"c.{name}"))
-                    )
-                )
-            else:
-                # Default: replace
-                joined = joined.withColumn(
-                    name,
-                    F.coalesce(F.col(f"d.{delta_name}"), F.col(f"c.{name}"))
-                )
-
-        elif strategy == "prepend_list":
-            max_length = col.get("max_length", 10)
-            # Prepend new values to existing list, truncate
-            joined = joined.withColumn(
-                name,
-                F.slice(
-                    F.concat(
-                        F.coalesce(F.col(f"d.{delta_name}"), F.array()),
-                        F.coalesce(F.col(f"c.{name}"), F.array())
-                    ),
-                    1, max_length
-                )
-            )
-
-        elif strategy == "bitmap_activity":
-            # OR bitmaps (simplified: just sum the flags for now)
-            joined = joined.withColumn(
-                name,
-                F.when(
-                    F.col(f"d.{delta_name}").isNotNull() | F.col(f"c.{name}").isNotNull(),
-                    F.lit(1)
-                ).otherwise(F.lit(0))
-            )
-
-    # Select PK columns + cumulative + delta columns
-    select_cols = pk_columns.copy()
-    for col in columns:
-        select_cols.append(col["name"])
-        select_cols.append(f"{col['name']}__delta")
-
-    # Resolve ambiguous PK columns from the full outer join
-    result = joined
-    for pk in pk_columns:
-        result = result.withColumn(
-            pk, F.coalesce(F.col(f"d.{pk}"), F.col(f"c.{pk}"))
-        )
-
-    return result.select(*select_cols)
-
-
-def compute_delta(spark: SparkSession, family: dict, ds: str,
-                  hour: int | None) -> DataFrame:
+def compute_delta(
+    spark: SparkSession, family: dict, ds: str, hour: int | None
+) -> DataFrame:
     """Read source events for one ds and compute the delta per column strategy."""
     source = family["source"]
     key_mapping = family.get("key_mapping", {})
@@ -218,7 +89,9 @@ def compute_delta(spark: SparkSession, family: dict, ds: str,
         if strategy == "lifetime_window":
             agg_exprs.append(F.expr(col["agg"]).alias(delta_name))
         elif strategy == "prepend_list":
-            agg_exprs.append(F.collect_list(F.expr(col["expr"])).alias(delta_name))
+            agg_exprs.append(
+                F.collect_list(F.expr(col["expr"])).alias(delta_name)
+            )
         elif strategy == "bitmap_activity":
             agg_exprs.append(F.lit(1).alias(delta_name))
 
@@ -229,122 +102,19 @@ def compute_delta(spark: SparkSession, family: dict, ds: str,
 
 
 # ---------------------------------------------------------------------------
-# Write + commit (reused from forward driver)
-# ---------------------------------------------------------------------------
-
-def write_load(df: DataFrame, table_path: str, pk_columns: list[str],
-               column_names: list[str], ds: str, hour: int | None,
-               mode: str = "backfill") -> str:
-    """Write a DataFrame as a new immutable load to S3. Returns load_id."""
-    load_id = str(uuid.uuid4())[:8]
-    load_path = f"s3a://{S3_BUCKET}/{table_path}/loads/{load_id}"
-
-    bucket_count = max(1, next_power_of_2(1))  # simple for now
-
-    pk_col = pk_columns[0]
-    df_bucketed = (
-        df
-        .withColumn("_bucket", F.abs(F.xxhash64(F.col(pk_col))) % F.lit(bucket_count))
-        .repartition(bucket_count, "_bucket")
-        .sortWithinPartitions(*pk_columns)
-    )
-
-    # Write load.json
-    load_meta = {
-        "load_id": load_id,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        "ds": ds,
-        "hour": hour,
-        "mode": mode,
-        "format": FORMAT_ID,
-        "bucket_levels": [bucket_count],
-        "bucket_count": bucket_count,
-        "sorted": True,
-        "has_pk_index": False,
-        "columns": column_names,
-    }
-
-    spark = df.sparkSession
-    spark.sparkContext.parallelize([json.dumps(load_meta, indent=2)]).coalesce(1).saveAsTextFile(
-        f"{load_path}/load.json"
-    )
-
-    # Write data
-    all_columns = pk_columns.copy()
-    for name in column_names:
-        all_columns.append(name)
-        all_columns.append(f"{name}__delta")
-
-    df_bucketed.select(*all_columns).coalesce(1).write.mode("overwrite").parquet(
-        f"{load_path}/bucket=0000"
-    )
-
-    print(f"[backfill] Wrote load {load_id} for ds={ds}")
-    return load_id
-
-
-def commit_via_api(table_name: str, base_version: int, load_id: str,
-                   columns: dict[str, str], ds: str, hour: int | None) -> int:
-    """Commit via the Lattik Studio API. Retries on OCC conflict."""
-    while True:
-        resp = requests.post(
-            f"{LATTIK_API}/commit",
-            headers=_auth_headers(),
-            json={
-                "table_name": table_name,
-                "base_version": base_version,
-                "load_id": load_id,
-                "columns": columns,
-                "ds": ds,
-                "hour": hour,
-            },
-        )
-        result = resp.json()
-
-        if result["status"] == "committed":
-            print(f"[backfill] Committed version {result['version']} for ds={ds}")
-            return result["version"]
-
-        if result["status"] == "conflict":
-            print(f"[backfill] OCC conflict, rebasing from v{result['base_version']}")
-            base_version = result["base_version"]
-            continue
-
-        raise RuntimeError(f"Commit failed: {result}")
-
-
-def get_latest_version(table_name: str) -> int:
-    """Get the latest manifest version from the API."""
-    resp = requests.get(
-        f"{LATTIK_API}/commit",
-        headers=_auth_headers(),
-        params={"table": table_name, "mode": "latest"},
-    )
-    if resp.status_code == 404:
-        return 0
-    return resp.json().get("manifest_version", 0)
-
-
-def get_load_for_ds(table_name: str, column_name: str, ds: str) -> str | None:
-    """Get the load_id for a specific column at a specific ds."""
-    resp = requests.get(
-        f"{LATTIK_API}/commit",
-        headers=_auth_headers(),
-        params={"table": table_name, "mode": "ds", "ds": ds, "columns": column_name},
-    )
-    if resp.status_code != 200:
-        return None
-    result = resp.json()
-    return result.get("columns", {}).get(column_name)
-
-
-# ---------------------------------------------------------------------------
 # Backfill logic
 # ---------------------------------------------------------------------------
 
-def backfill_family(spark: SparkSession, table_name: str, table_path: str,
-                    family: dict, pk_columns: list[str], ds_list: list[str],
-                    hour: int | None, cascade_to_today: bool = True):
+def backfill_family(
+    spark: SparkSession,
+    table_name: str,
+    table_path: str,
+    family: dict,
+    pk_columns: list[str],
+    ds_list: list[str],
+    hour: int | None,
+    cascade_to_today: bool = True,
+):
     """
     Backfill one family for a range of ds values.
 
@@ -362,54 +132,65 @@ def backfill_family(spark: SparkSession, table_name: str, table_path: str,
     column_names = [col["name"] for col in columns]
     needs_cascade = family_needs_cascade(family)
 
-    print(f"[backfill] Family '{family_name}': {len(ds_list)} ds values, "
-          f"cascade={'yes' if needs_cascade else 'no'}")
+    print(
+        f"[backfill] Family '{family_name}': {len(ds_list)} ds values, "
+        f"cascade={'yes' if needs_cascade else 'no'}"
+    )
 
     prev_cumulative: DataFrame | None = None
     base_version = get_latest_version(table_name)
 
-    # Phase 1: Process each ds in the backfill range
+    # Phase 1: process each ds in the backfill range
     for ds in ds_list:
         print(f"[backfill] Processing ds={ds} for family '{family_name}'...")
 
-        # Compute delta from source events
         delta_df = compute_delta(spark, family, ds, hour)
-
         if delta_df.isEmpty():
             print(f"[backfill] No source data for ds={ds}, skipping")
             continue
 
-        # Merge delta with previous cumulative
         merged_df = merge_cumulative(prev_cumulative, delta_df, columns, pk_columns)
 
-        # Write load
-        load_id = write_load(merged_df, table_path, pk_columns, column_names, ds, hour, "backfill")
+        load_id, _, _ = write_load(
+            merged_df,
+            table_path,
+            pk_columns,
+            column_names,
+            ds,
+            hour,
+            mode="backfill",
+        )
 
-        # Commit
         column_overrides = {name: load_id for name in column_names}
-        base_version = commit_via_api(table_name, base_version, load_id,
-                                      column_overrides, ds, hour)
+        base_version = commit_via_api(
+            table_name,
+            base_version,
+            load_id,
+            column_overrides,
+            ds,
+            hour,
+            log_prefix="backfill",
+        )
 
-        # Update prev_cumulative for the next ds
         if needs_cascade:
             prev_cumulative = merged_df
 
-    # Phase 2: Cascade (recompute downstream ds values using existing deltas)
+    # Phase 2: cascade (recompute downstream ds values using existing deltas)
     if needs_cascade and cascade_to_today:
         last_backfill_ds = ds_list[-1]
-        cascade_start = (datetime.strptime(last_backfill_ds, "%Y-%m-%d") +
-                        timedelta(days=1)).strftime("%Y-%m-%d")
+        cascade_start = (
+            datetime.strptime(last_backfill_ds, "%Y-%m-%d") + timedelta(days=1)
+        ).strftime("%Y-%m-%d")
         cascade_end = today_str()
 
         if cascade_start <= cascade_end:
             cascade_dates = date_range(cascade_start, cascade_end)
-            print(f"[backfill] Cascading {len(cascade_dates)} ds values "
-                  f"from {cascade_start} to {cascade_end}")
+            print(
+                f"[backfill] Cascading {len(cascade_dates)} ds values "
+                f"from {cascade_start} to {cascade_end}"
+            )
 
             for ds in cascade_dates:
-                # Read existing delta for this ds (already stored from previous loads)
-                # For now, we recompute from source since we don't have a way to read
-                # the stored delta from S3 in PySpark easily.
                 # TODO: Read existing delta from the load's Parquet file
                 delta_df = compute_delta(spark, family, ds, hour)
 
@@ -417,14 +198,30 @@ def backfill_family(spark: SparkSession, table_name: str, table_path: str,
                     print(f"[backfill] No data for cascade ds={ds}, skipping")
                     continue
 
-                merged_df = merge_cumulative(prev_cumulative, delta_df, columns, pk_columns)
+                merged_df = merge_cumulative(
+                    prev_cumulative, delta_df, columns, pk_columns
+                )
 
-                load_id = write_load(merged_df, table_path, pk_columns, column_names,
-                                    ds, hour, "backfill")
+                load_id, _, _ = write_load(
+                    merged_df,
+                    table_path,
+                    pk_columns,
+                    column_names,
+                    ds,
+                    hour,
+                    mode="backfill",
+                )
 
                 column_overrides = {name: load_id for name in column_names}
-                base_version = commit_via_api(table_name, base_version, load_id,
-                                              column_overrides, ds, hour)
+                base_version = commit_via_api(
+                    table_name,
+                    base_version,
+                    load_id,
+                    column_overrides,
+                    ds,
+                    hour,
+                    log_prefix="backfill",
+                )
 
                 prev_cumulative = merged_df
 
@@ -443,25 +240,30 @@ def main():
     parser.add_argument("--hour", type=int, default=None)
     parser.add_argument("--api-url", default=None)
     parser.add_argument("--spec-json", required=True, help="Table spec as JSON")
-    parser.add_argument("--no-cascade", action="store_true",
-                       help="Skip cascading to today")
+    parser.add_argument(
+        "--no-cascade", action="store_true", help="Skip cascading to today"
+    )
     args = parser.parse_args()
 
     if args.api_url:
-        global LATTIK_API
-        LATTIK_API = args.api_url
+        set_api_url(args.api_url)
 
     table_name = args.job_name
     spec = json.loads(args.spec_json)
     ds_list = date_range(args.ds_start, args.ds_end)
 
     print(f"[backfill] Table: {table_name}")
-    print(f"[backfill] Date range: {args.ds_start} to {args.ds_end} ({len(ds_list)} days)")
+    print(
+        f"[backfill] Date range: {args.ds_start} to {args.ds_end} "
+        f"({len(ds_list)} days)"
+    )
     print(f"[backfill] Cascade: {'no' if args.no_cascade else 'yes'}")
 
     spark = (
         SparkSession.builder
-        .appName(f"lattik_backfill__{table_name}__{args.ds_start}_{args.ds_end}")
+        .appName(
+            f"lattik_backfill__{table_name}__{args.ds_start}_{args.ds_end}"
+        )
         .getOrCreate()
     )
 
@@ -471,8 +273,13 @@ def main():
 
         for family in spec["column_families"]:
             backfill_family(
-                spark, table_name, table_path, family, pk_columns,
-                ds_list, args.hour,
+                spark,
+                table_name,
+                table_path,
+                family,
+                pk_columns,
+                ds_list,
+                args.hour,
                 cascade_to_today=not args.no_cascade,
             )
 

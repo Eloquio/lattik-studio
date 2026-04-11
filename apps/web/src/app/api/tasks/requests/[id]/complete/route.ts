@@ -1,4 +1,4 @@
-import { requireTaskAuth } from "@/lib/task-auth";
+import { requireTaskAuth } from "@/lib/bearer-auth";
 import { completeRequest } from "@/lib/task-queue";
 
 export async function POST(

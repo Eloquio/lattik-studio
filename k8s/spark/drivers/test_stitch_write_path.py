@@ -22,24 +22,20 @@ from pyspark.sql.types import (
     StructType, StructField, LongType, StringType, DoubleType, IntegerType
 )
 
+from lattik_driver_utils import auth_headers, commit_via_api, next_power_of_2
+
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
 LATTIK_API = os.environ.get("LATTIK_API_URL", "http://lattik-studio.default.svc.cluster.local:3000/api/lattik")
+# Set LATTIK_API_OPTIONAL=1 to allow the test to pass when the Studio API is
+# unreachable. In CI leave it unset so a missing/broken API fails the test.
+LATTIK_API_OPTIONAL = os.environ.get("LATTIK_API_OPTIONAL") == "1"
 S3_BUCKET = "warehouse"
 TABLE_NAME = "test_user_stats"
 DS = "2026-04-09"
-
-
-def next_power_of_2(n: int) -> int:
-    if n <= 1:
-        return 1
-    p = 1
-    while p < n:
-        p *= 2
-    return min(p, 4096)
 
 
 # ---------------------------------------------------------------------------
@@ -226,23 +222,17 @@ def commit_loads(signups_load_id: str, purchases_load_id: str):
         "purchase_count": purchases_load_id,
     }
 
-    resp = requests.post(f"{LATTIK_API}/commit", json={
-        "table_name": TABLE_NAME,
-        "base_version": 0,
-        "load_id": signups_load_id,  # use signups load as the manifest identifier
-        "columns": column_overrides,
-        "ds": DS,
-        "hour": None,
-    })
-
-    result = resp.json()
-    print(f"[test] Commit result: {json.dumps(result, indent=2)}")
-
-    if result.get("status") != "committed":
-        print(f"[test] FAILED: expected 'committed', got '{result.get('status')}'", file=sys.stderr)
-        sys.exit(1)
-
-    return result["version"]
+    # Use the shared commit helper so the test exercises the real code path
+    # (bearer auth, OCC retry, idempotent replay).
+    return commit_via_api(
+        table_name=TABLE_NAME,
+        base_version=0,
+        load_id=signups_load_id,
+        columns=column_overrides,
+        ds=DS,
+        hour=None,
+        log_prefix="test",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -267,13 +257,14 @@ def verify(spark: SparkSession, signups_load_id: str, purchases_load_id: str, ve
     print(f"[test] Purchases load: {purchases_files.count()} rows")
     purchases_files.show()
 
-    # Check manifest on S3
+    # Check manifest via the API (which also validates bearer auth + db state)
     print("[test] Verifying manifest on S3...")
-    # The manifest was written by the API, not by us — verify via the API
-    resp = requests.get(f"{LATTIK_API}/commit", params={
-        "table": TABLE_NAME,
-        "mode": "latest",
-    })
+    resp = requests.get(
+        f"{LATTIK_API}/commit",
+        headers=auth_headers(),
+        params={"table": TABLE_NAME, "mode": "latest"},
+        timeout=30,
+    )
     result = resp.json()
     print(f"[test] Latest commit: {json.dumps(result, indent=2)}")
 
@@ -282,11 +273,12 @@ def verify(spark: SparkSession, signups_load_id: str, purchases_load_id: str, ve
 
     # Check ETL time travel
     print("[test] Verifying ETL time travel...")
-    resp = requests.get(f"{LATTIK_API}/commit", params={
-        "table": TABLE_NAME,
-        "mode": "ds",
-        "ds": DS,
-    })
+    resp = requests.get(
+        f"{LATTIK_API}/commit",
+        headers=auth_headers(),
+        params={"table": TABLE_NAME, "mode": "ds", "ds": DS},
+        timeout=30,
+    )
     result = resp.json()
     print(f"[test] DS={DS} resolution: {json.dumps(result, indent=2)}")
 
@@ -318,9 +310,16 @@ def main():
             version = commit_loads(signups_load_id, purchases_load_id)
             verify(spark, signups_load_id, purchases_load_id, version)
         except requests.exceptions.ConnectionError as e:
+            if not LATTIK_API_OPTIONAL:
+                print(
+                    f"[test] FAILED: Lattik API unreachable at {LATTIK_API} ({e})."
+                    " Set LATTIK_API_OPTIONAL=1 to allow a partial run, or point"
+                    " LATTIK_API_URL at a reachable Studio deployment.",
+                    file=sys.stderr,
+                )
+                raise
             print(f"[test] WARNING: API not reachable ({e}). Skipping commit + verify.")
             print("[test] S3 load files were written successfully. Manual verification needed.")
-            # Still verify the S3 files
             table_path = f"lattik/{TABLE_NAME}"
             print("\n[test] Signups load:")
             spark.read.parquet(

@@ -1,11 +1,41 @@
 import { eq, and, desc, sql } from "drizzle-orm";
+import { z } from "zod";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
-import { requireLattikAuth } from "@/lib/lattik-auth";
+import { requireLattikAuth } from "@/lib/bearer-auth";
 import { log } from "@/lib/log";
-import { putObject } from "@/lib/s3-client";
+import { getJsonObject, putObject } from "@/lib/s3-client";
 
 const S3_BUCKET = process.env.S3_DAG_BUCKET ?? "warehouse";
+
+/**
+ * Schema name ( `schema.table` ) and column identifiers. SQL is already
+ * parameterized via Drizzle, but these strings end up in S3 keys, manifest
+ * JSON, and downstream Spark jobs that interpolate them into DAG YAML, so
+ * we enforce a strict allowlist up front to avoid path-traversal, odd
+ * characters in S3 keys, and surprises in Spark/Trino.
+ */
+const identifierRe = /^[a-z_][a-z0-9_]{0,62}$/;
+const tableNameRe = /^[a-z_][a-z0-9_]{0,62}\.[a-z_][a-z0-9_]{0,62}$/;
+const loadIdRe = /^[A-Za-z0-9_-]{4,64}$/;
+const dsRe = /^\d{4}-\d{2}-\d{2}$/;
+
+const commitBodySchema = z.object({
+  table_name: z.string().regex(tableNameRe, {
+    message: "table_name must be in 'schema.table' format (lowercase letters, digits, underscore)",
+  }),
+  base_version: z.number().int().nonnegative(),
+  load_id: z.string().regex(loadIdRe, {
+    message: "load_id must be 4-64 chars of [A-Za-z0-9_-]",
+  }),
+  columns: z
+    .record(z.string().regex(identifierRe), z.string().regex(loadIdRe))
+    .refine((c) => Object.keys(c).length > 0, {
+      message: "columns must be non-empty",
+    }),
+  ds: z.string().regex(dsRe, { message: "ds must be YYYY-MM-DD" }),
+  hour: z.number().int().min(0).max(23).nullable(),
+});
 
 /**
  * POST /api/lattik/commit
@@ -31,38 +61,36 @@ export async function POST(request: Request) {
   }
 
   const startedAt = Date.now();
-  const body = await request.json();
-
-  const {
-    table_name,
-    base_version,
-    load_id,
-    columns,
-    ds,
-    hour,
-  } = body as {
-    table_name: string;
-    base_version: number;
-    load_id: string;
-    /** Column overrides: { column_name: load_id } */
-    columns: Record<string, string>;
-    ds: string;
-    hour: number | null;
-  };
-
-  if (!table_name || base_version === undefined || !load_id || !columns || !ds) {
-    log.warn("lattik.commit.invalid_request", {
-      table_name,
-      has_base_version: base_version !== undefined,
-      has_load_id: !!load_id,
-      has_columns: !!columns,
-      has_ds: !!ds,
-    });
+  let rawBody: unknown;
+  try {
+    rawBody = await request.json();
+  } catch {
+    log.warn("lattik.commit.invalid_json", {});
     return Response.json(
-      { status: "error", message: "Missing required fields" },
+      { status: "error", message: "Request body is not valid JSON" },
       { status: 400 },
     );
   }
+
+  const parsed = commitBodySchema.safeParse(rawBody);
+  if (!parsed.success) {
+    log.warn("lattik.commit.invalid_request", {
+      issues: parsed.error.issues.map((i) => ({
+        path: i.path.join("."),
+        message: i.message,
+      })),
+    });
+    return Response.json(
+      {
+        status: "error",
+        message: "Invalid request body",
+        issues: parsed.error.issues,
+      },
+      { status: 400 },
+    );
+  }
+
+  const { table_name, base_version, load_id, columns, ds, hour } = parsed.data;
 
   log.info("lattik.commit.start", {
     table_name,
@@ -74,6 +102,38 @@ export async function POST(request: Request) {
   });
 
   const db = getDb();
+
+  // Idempotency: if we already committed this exact (table_name, load_id),
+  // return the existing result instead of creating a second manifest. The
+  // driver may legitimately retry after a network error between sending the
+  // request and receiving the response; without this check the retry would
+  // either succeed with a bumped version (duplicate data) or fail with a
+  // 23505 conflict against itself.
+  const existing = await db
+    .select()
+    .from(schema.lattikTableCommits)
+    .where(
+      and(
+        eq(schema.lattikTableCommits.tableName, table_name),
+        eq(schema.lattikTableCommits.manifestLoadId, load_id),
+      ),
+    )
+    .limit(1);
+
+  if (existing.length > 0) {
+    log.info("lattik.commit.idempotent_replay", {
+      table_name,
+      load_id,
+      version: existing[0].manifestVersion,
+      duration_ms: Date.now() - startedAt,
+    });
+    return Response.json({
+      status: "committed",
+      version: existing[0].manifestVersion,
+      manifest_load_id: existing[0].manifestLoadId,
+      replayed: true,
+    });
+  }
 
   // Read the current base manifest from S3
   const baseCommit = await db
@@ -90,32 +150,29 @@ export async function POST(request: Request) {
   let baseColumns: Record<string, string> = {};
 
   if (baseCommit.length > 0) {
-    // Fetch the base manifest from S3 to get the current column→load map
+    // Fetch the base manifest from S3 to get the current column→load map.
+    // A missing manifest (v0000 bootstrap) is expected; any other S3 error
+    // is logged and propagated — we can't safely carry columns forward if
+    // we can't read the base manifest.
     const baseLoadId = baseCommit[0].manifestLoadId;
     const manifestKey = `lattik/${table_name}/manifests/v${String(base_version).padStart(4, "0")}_${baseLoadId}.json`;
-
     try {
-      const { GetObjectCommand } = await import("@aws-sdk/client-s3");
-      const { S3Client } = await import("@aws-sdk/client-s3");
-      const s3 = new S3Client({
-        endpoint: process.env.S3_ENDPOINT ?? "http://localhost:9000",
-        region: process.env.S3_REGION ?? "us-east-1",
-        credentials: {
-          accessKeyId: process.env.S3_ACCESS_KEY_ID ?? "lattik",
-          secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? "lattik-local",
-        },
-        forcePathStyle: true,
-      });
-      const result = await s3.send(
-        new GetObjectCommand({ Bucket: S3_BUCKET, Key: manifestKey }),
+      const manifest = await getJsonObject<{ columns?: Record<string, string> }>(
+        S3_BUCKET,
+        manifestKey,
       );
-      const text = await result.Body?.transformToString();
-      if (text) {
-        const manifest = JSON.parse(text);
-        baseColumns = manifest.columns ?? {};
-      }
-    } catch {
-      // If base manifest doesn't exist (e.g., v0000_init), start with empty columns
+      if (manifest) baseColumns = manifest.columns ?? {};
+    } catch (err) {
+      log.error("lattik.commit.base_manifest_unreadable", {
+        table_name,
+        base_version,
+        manifest_key: manifestKey,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return Response.json(
+        { status: "error", message: "Base manifest is unreadable" },
+        { status: 503 },
+      );
     }
   }
 
@@ -243,10 +300,22 @@ export async function GET(request: Request) {
   const tableName = url.searchParams.get("table");
   const mode = url.searchParams.get("mode") ?? "latest";
 
-  if (!tableName) {
-    log.warn("lattik.commit.read.invalid_request", { mode });
+  if (!tableName || !tableNameRe.test(tableName)) {
+    log.warn("lattik.commit.read.invalid_request", { mode, tableName });
     return Response.json(
-      { status: "error", message: "Missing 'table' parameter" },
+      { status: "error", message: "Missing or invalid 'table' parameter" },
+      { status: 400 },
+    );
+  }
+
+  if (mode !== "latest" && mode !== "wall_time" && mode !== "ds") {
+    log.warn("lattik.commit.read.invalid_request", {
+      table_name: tableName,
+      mode,
+      reason: "unknown_mode",
+    });
+    return Response.json(
+      { status: "error", message: `Unknown mode: ${mode}` },
       { status: 400 },
     );
   }
@@ -293,14 +362,15 @@ export async function GET(request: Request) {
 
   if (mode === "wall_time") {
     const ts = url.searchParams.get("ts");
-    if (!ts) {
+    const tsDate = ts ? new Date(ts) : null;
+    if (!ts || !tsDate || Number.isNaN(tsDate.getTime())) {
       log.warn("lattik.commit.read.invalid_request", {
         table_name: tableName,
         mode,
-        reason: "missing_ts",
+        reason: ts ? "invalid_ts" : "missing_ts",
       });
       return Response.json(
-        { status: "error", message: "Missing 'ts' parameter for wall_time mode" },
+        { status: "error", message: "Missing or invalid 'ts' parameter for wall_time mode" },
         { status: 400 },
       );
     }
@@ -311,7 +381,7 @@ export async function GET(request: Request) {
       .where(
         and(
           eq(schema.lattikTableCommits.tableName, tableName),
-          sql`${schema.lattikTableCommits.committedAt} <= ${new Date(ts)}`,
+          sql`${schema.lattikTableCommits.committedAt} <= ${tsDate}`,
         ),
       )
       .orderBy(desc(schema.lattikTableCommits.committedAt))
@@ -349,32 +419,49 @@ export async function GET(request: Request) {
     const hourParam = url.searchParams.get("hour");
     const columnParam = url.searchParams.get("columns"); // comma-separated
 
-    if (!dsParam) {
+    if (!dsParam || !dsRe.test(dsParam)) {
       log.warn("lattik.commit.read.invalid_request", {
         table_name: tableName,
         mode,
-        reason: "missing_ds",
+        reason: dsParam ? "invalid_ds" : "missing_ds",
+        ds: dsParam,
       });
       return Response.json(
-        { status: "error", message: "Missing 'ds' parameter" },
+        { status: "error", message: "Missing or invalid 'ds' parameter (YYYY-MM-DD)" },
         { status: 400 },
       );
     }
 
-    let query = db
+    let hourInt: number | null = null;
+    if (hourParam !== null) {
+      const parsedHour = Number.parseInt(hourParam, 10);
+      if (Number.isNaN(parsedHour) || parsedHour < 0 || parsedHour > 23) {
+        log.warn("lattik.commit.read.invalid_request", {
+          table_name: tableName,
+          mode,
+          reason: "invalid_hour",
+          hour: hourParam,
+        });
+        return Response.json(
+          { status: "error", message: "'hour' must be an integer in [0, 23]" },
+          { status: 400 },
+        );
+      }
+      hourInt = parsedHour;
+    }
+
+    const rows = await db
       .select()
       .from(schema.lattikColumnLoads)
       .where(
         and(
           eq(schema.lattikColumnLoads.tableName, tableName),
           eq(schema.lattikColumnLoads.ds, dsParam),
-          hourParam
-            ? eq(schema.lattikColumnLoads.hour, parseInt(hourParam))
+          hourInt !== null
+            ? eq(schema.lattikColumnLoads.hour, hourInt)
             : sql`true`,
         ),
       );
-
-    const rows = await query;
 
     // If hour not specified, pick the latest hour per column
     const columnLoads: Record<string, { load_id: string; hour: number | null }> = {};

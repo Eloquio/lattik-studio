@@ -1,16 +1,13 @@
-import { requireTaskAuth } from "@/lib/task-auth";
+import { requireTaskAuth } from "@/lib/bearer-auth";
 import { claimRequest } from "@/lib/task-queue";
 
 export async function POST(req: Request) {
   const authError = requireTaskAuth(req);
   if (authError) return authError;
 
-  const body = await req.json() as { claimedBy: string };
-  if (!body.claimedBy) {
-    return Response.json({ error: "claimedBy is required" }, { status: 400 });
-  }
-
-  const row = await claimRequest(body.claimedBy);
+  // Body is currently ignored — claimRequest() doesn't track the claimer.
+  // The route is POST (not GET) because claiming is a state-changing action.
+  const row = await claimRequest();
   if (!row) {
     return new Response(null, { status: 204 });
   }

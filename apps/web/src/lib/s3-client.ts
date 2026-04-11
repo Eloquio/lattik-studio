@@ -47,6 +47,26 @@ export async function getObject(
   return body;
 }
 
+/**
+ * Read an S3 object and parse it as JSON. Returns `null` if the object does
+ * not exist (NoSuchKey). Other errors propagate so callers can distinguish
+ * "missing" from "S3 is down".
+ */
+export async function getJsonObject<T = unknown>(
+  bucket: string,
+  key: string,
+): Promise<T | null> {
+  try {
+    const text = await getObject(bucket, key);
+    return JSON.parse(text) as T;
+  } catch (err) {
+    const name = (err as { name?: string; Code?: string })?.name;
+    const code = (err as { name?: string; Code?: string })?.Code;
+    if (name === "NoSuchKey" || code === "NoSuchKey") return null;
+    throw err;
+  }
+}
+
 export async function deleteObject(
   bucket: string,
   key: string,

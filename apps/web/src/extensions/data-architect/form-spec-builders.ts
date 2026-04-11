@@ -140,6 +140,19 @@ const derivedColumnInitialStateSchema = z.object({
   expr: z.string(),
 });
 
+const backfillPlanInitialStateSchema = z.object({
+  lookback: z
+    .string()
+    .optional()
+    .describe("Backfill lookback window, e.g. '30d'. Defaults to '30d' if omitted."),
+  parallelism: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("How many ds values the backfill driver may process in parallel. Defaults to 1."),
+});
+
 export const lattikTableFormInitialStateSchema = z.object({
   name: z.string().optional(),
   description: z.string().optional(),
@@ -147,6 +160,7 @@ export const lattikTableFormInitialStateSchema = z.object({
   primary_key: z.array(primaryKeyInitialStateSchema).max(20).optional(),
   column_families: z.array(columnFamilyInitialStateSchema).max(20).optional(),
   derived_columns: z.array(derivedColumnInitialStateSchema).max(20).optional(),
+  backfill: backfillPlanInitialStateSchema.optional(),
 });
 
 const calculationInitialStateSchema = z.object({
@@ -260,6 +274,10 @@ export function buildLattikTableFormSpec(
       primary_key: withKeys("pk", s.primary_key),
       column_families: columnFamilies,
       derived_columns: withKeys("dc", s.derived_columns),
+      backfill: {
+        lookback: s.backfill?.lookback ?? "30d",
+        parallelism: s.backfill?.parallelism ?? 1,
+      },
     },
   };
 }
