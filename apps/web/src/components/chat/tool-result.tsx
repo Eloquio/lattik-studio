@@ -22,6 +22,11 @@ type ValidationFailure = {
   errors: Array<{ field: string; message: string }>;
 };
 
+type ToolErrorResult = {
+  status: "error";
+  message: string;
+};
+
 function isValidationFailure(o: unknown): o is ValidationFailure {
   if (typeof o !== "object" || o === null) return false;
   const obj = o as { passed?: unknown; errors?: unknown };
@@ -36,6 +41,12 @@ function isValidationFailure(o: unknown): o is ValidationFailure {
         typeof (e as { message?: unknown }).message === "string"
     )
   );
+}
+
+function isToolErrorResult(o: unknown): o is ToolErrorResult {
+  if (typeof o !== "object" || o === null) return false;
+  const obj = o as { status?: unknown; message?: unknown };
+  return obj.status === "error" && typeof obj.message === "string";
 }
 
 /**
@@ -87,7 +98,8 @@ export function ToolResult({ toolName, state, input, output, errorText }: ToolRe
   const isThrownError = state === "output-error";
   const isDone = state === "output-available";
   const isFailedValidation = isDone && isValidationFailure(output);
-  const isFailure = isThrownError || isFailedValidation;
+  const isToolError = isDone && isToolErrorResult(output);
+  const isFailure = isThrownError || isFailedValidation || isToolError;
 
   // Pre-parse Zod issues out of errorText so we can render them as a list
   // when the AI SDK rejected the tool input via schema validation.
@@ -168,7 +180,17 @@ export function ToolResult({ toolName, state, input, output, errorText }: ToolRe
               </ul>
             </div>
           )}
-          {isDone && !isFailedValidation && output != null && (
+          {isToolError && (
+            <div>
+              <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-white/30">
+                Error
+              </div>
+              <pre className="overflow-x-auto whitespace-pre-wrap text-red-300/70">
+                {(output as ToolErrorResult).message}
+              </pre>
+            </div>
+          )}
+          {isDone && !isFailedValidation && !isToolError && output != null && (
             <div>
               <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-white/30">
                 Output
