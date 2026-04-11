@@ -1,5 +1,6 @@
 import {
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -193,6 +194,53 @@ export const webhookAuditLog = pgTable(
     index("idx_webhook_audit_prUrl").on(t.prUrl),
     index("idx_webhook_audit_definitionId").on(t.definitionId),
     index("idx_webhook_audit_action").on(t.action),
+  ]
+);
+
+// ---------------------------------------------------------------------------
+// Lattik Table stitch — commit log + per-column ETL time tracking
+// ---------------------------------------------------------------------------
+
+/**
+ * Append-only commit log for Lattik Table manifests.
+ * Each row records one committed manifest version. The latest row per table
+ * is the current state. Time travel by wall clock uses `committed_at`.
+ * Rollback = insert a new row pointing to an old manifest.
+ */
+export const lattikTableCommits = pgTable(
+  "lattik_table_commit",
+  {
+    tableName: text("table_name").notNull(),
+    manifestVersion: integer("manifest_version").notNull(),
+    manifestLoadId: text("manifest_load_id").notNull(),
+    committedAt: timestamp("committed_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tableName, t.manifestVersion] }),
+    index("idx_lattik_commits_wall_time").on(t.tableName, t.committedAt),
+  ]
+);
+
+/**
+ * Per-column ETL time tracking for Lattik Tables.
+ * Each row says "column X for ds=Y (hour=Z) was produced by load W."
+ * Used for ETL time travel (AS OF DS) and backfill idempotency.
+ * Backfills use ON CONFLICT DO UPDATE to overwrite the previous entry.
+ */
+export const lattikColumnLoads = pgTable(
+  "lattik_column_load",
+  {
+    tableName: text("table_name").notNull(),
+    columnName: text("column_name").notNull(),
+    ds: date("ds", { mode: "string" }).notNull(),
+    hour: integer("hour"),
+    loadId: text("load_id").notNull(),
+    manifestVersion: integer("manifest_version").notNull(),
+    committedAt: timestamp("committed_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tableName, t.columnName, t.ds, t.hour] }),
+    index("idx_lattik_column_loads_ds").on(t.tableName, t.ds, t.hour),
   ]
 );
 
