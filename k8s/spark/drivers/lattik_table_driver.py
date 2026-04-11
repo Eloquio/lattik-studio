@@ -133,13 +133,68 @@ def aggregate_family(spark: SparkSession, family: dict, ds: str,
     # Group by PK, compute deltas
     delta_df = source_df.groupBy(*pk_columns).agg(*agg_exprs)
 
-    # TODO: Read previous ds's cumulative, merge with delta to produce cumulative columns.
-    # For v1, the delta IS the cumulative (works for first load / full rebuild).
-    # This will be expanded when incremental merging is implemented.
+    # Merge delta with previous ds's cumulative to produce new cumulative columns.
+    # If prev_load_path is None, delta IS the cumulative (first load).
+    if prev_load_path is not None:
+        try:
+            prev_df = spark.read.parquet(prev_load_path)
+            # FULL OUTER JOIN on PK
+            joined = delta_df.alias("d").join(prev_df.alias("c"), on=pk_columns, how="full_outer")
+            for col in columns:
+                col_name = col["name"]
+                delta_name = f"{col_name}__delta"
+                strategy = col["strategy"]
+
+                if strategy == "lifetime_window":
+                    agg = col.get("agg", "").lower()
+                    if "count" in agg or "sum" in agg:
+                        joined = joined.withColumn(
+                            col_name,
+                            F.coalesce(F.col(f"c.{col_name}"), F.lit(0)) +
+                            F.coalesce(F.col(f"d.{delta_name}"), F.lit(0))
+                        )
+                    elif "max" in agg:
+                        joined = joined.withColumn(
+                            col_name,
+                            F.greatest(F.coalesce(F.col(f"c.{col_name}"), F.col(f"d.{delta_name}")),
+                                       F.coalesce(F.col(f"d.{delta_name}"), F.col(f"c.{col_name}")))
+                        )
+                    else:
+                        joined = joined.withColumn(
+                            col_name,
+                            F.coalesce(F.col(f"d.{delta_name}"), F.col(f"c.{col_name}"))
+                        )
+                elif strategy == "prepend_list":
+                    max_length = col.get("max_length", 10)
+                    joined = joined.withColumn(
+                        col_name,
+                        F.slice(F.concat(
+                            F.coalesce(F.col(f"d.{delta_name}"), F.array()),
+                            F.coalesce(F.col(f"c.{col_name}"), F.array())
+                        ), 1, max_length)
+                    )
+                elif strategy == "bitmap_activity":
+                    joined = joined.withColumn(
+                        col_name,
+                        F.when(F.col(f"d.{delta_name}").isNotNull() |
+                               F.col(f"c.{col_name}").isNotNull(), F.lit(1)).otherwise(F.lit(0))
+                    )
+
+            # Resolve ambiguous PK columns
+            for pk in pk_columns:
+                joined = joined.withColumn(pk, F.coalesce(F.col(f"d.{pk}"), F.col(f"c.{pk}")))
+
+            select_cols = pk_columns + [col["name"] for col in columns] + [f"{col['name']}__delta" for col in columns]
+            return joined.select(*select_cols)
+
+        except Exception as e:
+            print(f"[lattik] Warning: could not read previous load at {prev_load_path}: {e}")
+            print("[lattik] Falling back to delta-only (first load behavior)")
+
+    # No previous cumulative — delta IS the cumulative
     for col in columns:
         col_name = col["name"]
         delta_name = f"{col_name}__delta"
-        # For now: cumulative = delta
         delta_df = delta_df.withColumn(col_name, F.col(delta_name))
 
     return delta_df
