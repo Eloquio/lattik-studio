@@ -22,11 +22,19 @@ ARG SPARK_BINARY_VERSION=4.0
 ARG SCALA_BINARY_VERSION=2.13
 
 USER root
+
+# Hadoop version bundled in Spark 4.0.2
+ARG HADOOP_VERSION=3.4.1
+ARG AWS_SDK_VERSION=1.12.604
+
 RUN set -eux; \
     cd /opt/spark/jars; \
     curl -fsSLO "https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-${SPARK_BINARY_VERSION}_${SCALA_BINARY_VERSION}/${ICEBERG_VERSION}/iceberg-spark-runtime-${SPARK_BINARY_VERSION}_${SCALA_BINARY_VERSION}-${ICEBERG_VERSION}.jar"; \
     curl -fsSLO "https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws-bundle/${ICEBERG_VERSION}/iceberg-aws-bundle-${ICEBERG_VERSION}.jar"; \
-    chown spark:spark "iceberg-spark-runtime-${SPARK_BINARY_VERSION}_${SCALA_BINARY_VERSION}-${ICEBERG_VERSION}.jar" "iceberg-aws-bundle-${ICEBERG_VERSION}.jar"
+    # hadoop-aws + AWS SDK for s3a:// filesystem (needed for writing raw Parquet to S3)
+    curl -fsSLO "https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/${HADOOP_VERSION}/hadoop-aws-${HADOOP_VERSION}.jar"; \
+    curl -fsSLO "https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/${AWS_SDK_VERSION}/aws-java-sdk-bundle-${AWS_SDK_VERSION}.jar"; \
+    chown spark:spark *.jar
 
 # Install Python dependencies for the lattik_table driver
 RUN pip install --no-cache-dir requests
