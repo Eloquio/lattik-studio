@@ -197,11 +197,27 @@ function lattikTableFromCanvas(s: Record<string, unknown>): unknown {
       }
     }
 
+    const columns = asObjectArray(cf.columns).map((col) => {
+      const base = omit(col, ["_key"]);
+      // Strip fields that don't belong to the column's strategy
+      const strategy = base.strategy as string | undefined;
+      if (strategy === "lifetime_window") {
+        return { name: base.name, strategy, agg: base.agg, ...(base.type ? { type: base.type } : {}), ...(base.description ? { description: base.description } : {}) };
+      }
+      if (strategy === "prepend_list") {
+        return { name: base.name, strategy, expr: base.expr, max_length: base.max_length, ...(base.type ? { type: base.type } : {}), ...(base.description ? { description: base.description } : {}) };
+      }
+      if (strategy === "bitmap_activity") {
+        return { name: base.name, strategy, granularity: base.granularity, window: base.window, ...(base.description ? { description: base.description } : {}) };
+      }
+      return base;
+    });
+
     return {
       name: cf.name,
       source: cf.source,
       key_mapping,
-      columns: asObjectArray(cf.columns).map((col) => omit(col, ["_key"])),
+      columns,
     };
   });
 

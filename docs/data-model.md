@@ -168,7 +168,7 @@ A semantic-equivalence tag is a **declaration about what a column means**. It do
 ```
 
 - `payment_country` is a per-transaction attribute. It resolves on a payment-grain Lattik Table where each row is one payment.
-- `user_billing_country` is a user-level attribute. It resolves on a user-grain Lattik Table where the column is materialized as `last(country)` — the most recent billing country across all of a user's payments.
+- `user_billing_country` is a user-level attribute. It resolves on a user-grain Lattik Table where the column is materialized as `max_by(country, event_timestamp)` — the most recent billing country across all of a user's payments.
 
 Both tags are correct for every row at write time: the country a payment came from *is*, by definition for that row, the user's most recent billing country. The fact that a user's billing country can drift over time doesn't break the example — that drift is handled at the Lattik Table layer via the `last(...)` aggregation, not at the tag layer. The tag is purely the declaration *"this column is a valid upstream source for that Dimension."*
 

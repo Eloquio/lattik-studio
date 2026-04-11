@@ -40,14 +40,40 @@ export const loggerTableSchema = z.object({
   columns: z.array(loggerColumnSchema),
 });
 
-export const familyColumnSchema = z.object({
+// ---------- Column strategies ----------
+// Each family column declares a strategy that defines how source events are
+// aggregated and how the result is stored + merged during incremental loads.
+
+export const lifetimeWindowColumnSchema = z.object({
   name: z.string(),
+  strategy: z.literal("lifetime_window"),
+  agg: z.string(), // lattik-expression aggregation (e.g., "sum(amount)", "count()", "max(score)")
   type: columnTypeSchema.optional(),
-  agg: z.string().optional(),
-  merge: z.enum(["sum", "max", "min", "replace"]).optional(),
-  expr: z.string().optional(),
   description: z.string().optional(),
 });
+
+export const prependListColumnSchema = z.object({
+  name: z.string(),
+  strategy: z.literal("prepend_list"),
+  expr: z.string(), // lattik-expression for the value to collect (e.g., "country", "product_id")
+  max_length: z.number().int().positive(),
+  type: columnTypeSchema.optional(),
+  description: z.string().optional(),
+});
+
+export const bitmapActivityColumnSchema = z.object({
+  name: z.string(),
+  strategy: z.literal("bitmap_activity"),
+  granularity: z.enum(["day", "hour"]),
+  window: z.number().int().positive(), // number of time slots to track
+  description: z.string().optional(),
+});
+
+export const familyColumnSchema = z.discriminatedUnion("strategy", [
+  lifetimeWindowColumnSchema,
+  prependListColumnSchema,
+  bitmapActivityColumnSchema,
+]);
 
 export const columnFamilySchema = z.object({
   name: z.string(),
@@ -102,6 +128,10 @@ export const pipelineDefinitionSchema = z.object({
 export type Entity = z.infer<typeof entitySchema>;
 export type LoggerColumn = z.infer<typeof loggerColumnSchema>;
 export type LoggerTable = z.infer<typeof loggerTableSchema>;
+export type FamilyColumn = z.infer<typeof familyColumnSchema>;
+export type LifetimeWindowColumn = z.infer<typeof lifetimeWindowColumnSchema>;
+export type PrependListColumn = z.infer<typeof prependListColumnSchema>;
+export type BitmapActivityColumn = z.infer<typeof bitmapActivityColumnSchema>;
 export type ColumnFamily = z.infer<typeof columnFamilySchema>;
 export type LattikTable = z.infer<typeof lattikTableSchema>;
 export type Dimension = z.infer<typeof dimensionSchema>;

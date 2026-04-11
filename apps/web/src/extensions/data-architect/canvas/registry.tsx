@@ -7,8 +7,9 @@ import CodeMirror from "@uiw/react-codemirror";
 import { yaml as yamlLanguage } from "@codemirror/lang-yaml";
 import { useCanvasActions } from "@/components/canvas/canvas-actions-context";
 import type { ScalarTypeKind } from "@eloquio/lattik-expression";
-import { fromColumnType } from "@eloquio/lattik-expression";
+import { fromColumnType, parse, KNOWN_AGGREGATES } from "@eloquio/lattik-expression";
 import { listDefinitions, createDefinition } from "@/lib/actions/definitions";
+import { lookupCatalogTable } from "@/lib/actions/iceberg-catalog";
 import { useEntityRegistry } from "./entity-registry-context";
 import { catalog } from "./catalog";
 
@@ -236,6 +237,353 @@ function EntityCombobox({ value, onChange, pkColumn, onSubmit, variant = "pill" 
                 className="rounded-full bg-stone-800 px-2.5 py-0.5 text-[10px] font-medium text-white hover:bg-stone-700 transition-colors disabled:opacity-50">{submitting ? "Creating..." : "Create"}</button>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- Source table combobox ----
+interface SourceTableOption { name: string; kind: string; columns: { name: string; type: string }[] }
+type TableStatus = "idle" | "loading" | "definition" | "catalog" | "not_found";
+
+function SourceTableCombobox({ value, onChange, onColumnsLoaded }: {
+  value: string;
+  onChange: (v: string) => void;
+  onColumnsLoaded: (cols: { name: string; type: string }[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [tables, setTables] = useState<SourceTableOption[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(-1);
+  const [catalogStatus, setCatalogStatus] = useState<TableStatus>("idle");
+  const catalogCacheRef = useRef<Map<string, { exists: boolean; columns: { name: string; type: string }[] }>>(new Map());
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const fetchTables = async () => {
+    if (loaded) return;
+    try {
+      const [loggers, lattiks] = await Promise.all([
+        listDefinitions("logger_table"),
+        listDefinitions("lattik_table"),
+      ]);
+      const all: SourceTableOption[] = [
+        ...loggers.map((d) => {
+          const s = d.spec as { name: string; columns?: { name: string; type: string }[] };
+          return { name: s.name, kind: "logger", columns: (s.columns ?? []).map((c) => ({ name: c.name, type: c.type })) };
+        }),
+        ...lattiks.map((d) => {
+          const s = d.spec as { name: string; column_families?: { columns: { name: string; type?: string }[] }[]; derived_columns?: { name: string }[] };
+          const cols = [
+            ...(s.column_families ?? []).flatMap((f) => f.columns.map((c) => ({ name: c.name, type: c.type ?? "unknown" }))),
+            ...(s.derived_columns ?? []).map((c) => ({ name: c.name, type: "expr" })),
+          ];
+          return { name: s.name, kind: "lattik", columns: cols };
+        }),
+      ];
+      setTables(all);
+      setLoaded(true);
+      const match = all.find((t) => t.name === value);
+      if (match) { onColumnsLoaded(match.columns); setCatalogStatus("definition"); }
+    } catch { setLoaded(true); }
+  };
+
+  // Catalog fallback: debounced lookup when value doesn't match any definition
+  const checkCatalog = (name: string) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!name.trim() || !name.includes(".")) { setCatalogStatus("idle"); return; }
+    // Check cache first
+    const cached = catalogCacheRef.current.get(name);
+    if (cached) {
+      if (cached.exists) { setCatalogStatus("catalog"); onColumnsLoaded(cached.columns); }
+      else setCatalogStatus("not_found");
+      return;
+    }
+    setCatalogStatus("loading");
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const result = await lookupCatalogTable(name);
+        catalogCacheRef.current.set(name, result);
+        if (result.exists) { setCatalogStatus("catalog"); onColumnsLoaded(result.columns); }
+        else setCatalogStatus("not_found");
+      } catch { setCatalogStatus("not_found"); }
+    }, 400);
+  };
+
+  const filtered = tables.filter((t) => !value || t.name.toLowerCase().includes(value.toLowerCase()));
+  const defMatch = tables.find((t) => t.name === value);
+
+  const select = (t: SourceTableOption) => {
+    onChange(t.name);
+    onColumnsLoaded(t.columns);
+    setCatalogStatus("definition");
+    setOpen(false);
+    setActiveIdx(-1);
+  };
+
+  useEffect(() => {
+    if (open && filtered.length > 0) setActiveIdx(0);
+    else setActiveIdx(-1);
+  }, [open, filtered.length, value]);
+
+  // Resolve table status when value changes
+  useEffect(() => {
+    if (!value.trim() || !loaded) { setCatalogStatus("idle"); return; }
+    if (defMatch) { onColumnsLoaded(defMatch.columns); setCatalogStatus("definition"); }
+    else checkCatalog(value);
+  }, [value, loaded]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") { setOpen(false); return; }
+    if (!open || filtered.length === 0) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); setActiveIdx((prev) => (prev + 1) % filtered.length); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActiveIdx((prev) => (prev <= 0 ? filtered.length - 1 : prev - 1)); }
+    else if (e.key === "Enter") {
+      e.preventDefault(); e.stopPropagation();
+      const idx = activeIdx < 0 ? 0 : activeIdx;
+      if (idx < filtered.length) select(filtered[idx]);
+    }
+  };
+
+  const badge = (() => {
+    if (!value.trim() || !loaded) return null;
+    switch (catalogStatus) {
+      case "definition": return <span className="shrink-0 rounded bg-green-50 px-1 py-0.5 text-[9px] font-medium text-green-600 ring-1 ring-green-200/50">definition</span>;
+      case "catalog": return <span className="shrink-0 rounded bg-blue-50 px-1 py-0.5 text-[9px] font-medium text-blue-600 ring-1 ring-blue-200/50">catalog</span>;
+      case "loading": return <span className="shrink-0 rounded bg-stone-50 px-1 py-0.5 text-[9px] font-medium text-stone-400 ring-1 ring-stone-200/50">checking...</span>;
+      case "not_found": return <span className="shrink-0 rounded bg-red-50 px-1 py-0.5 text-[9px] font-medium text-red-500 ring-1 ring-red-200/50">not found</span>;
+      default: return null;
+    }
+  })();
+
+  return (
+    <div ref={containerRef} className="relative">
+      <div className="flex items-center gap-1.5">
+        <input type="text" value={value}
+          onChange={(e) => { onChange(e.target.value); setOpen(true); setActiveIdx(-1); }}
+          onFocus={() => { fetchTables(); setOpen(true); }}
+          onBlur={(e) => { if (!containerRef.current?.contains(e.relatedTarget)) setTimeout(() => setOpen(false), 150); }}
+          onKeyDown={handleKeyDown}
+          placeholder="e.g. ingest.click_events" autoComplete="off" data-1p-ignore data-lpignore="true" data-form-type="other"
+          className="w-full bg-transparent text-xs font-mono text-stone-600 placeholder:text-stone-300 focus:outline-none" />
+        {badge}
+      </div>
+      {open && loaded && filtered.length > 0 && (
+        <div className="absolute left-0 right-0 top-full z-30 mt-1 rounded-md border border-stone-200 bg-white py-1 shadow-lg max-h-36 overflow-y-auto">
+          {filtered.map((t, i) => (
+            <button key={t.name} onMouseDown={(e) => { e.preventDefault(); select(t); }}
+              className={`block w-full px-2.5 py-1 text-left text-xs transition-colors ${i === activeIdx ? "bg-stone-100 text-amber-700 font-medium" : t.name === value ? "text-amber-700 font-medium" : "text-stone-700 hover:bg-stone-50"}`}>
+              <span className="font-mono">{t.name}</span>
+              <span className="ml-1.5 text-[9px] text-stone-400">{t.kind}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Aggregate function names for expression suggestions (from lattik-expression)
+const AGGREGATE_FUNCTIONS: string[] = Array.from(KNOWN_AGGREGATES);
+
+// ---- Expression input with autocomplete + tab-stop snippets ----
+
+// Function parameter templates: NAME (upper-case) → placeholder args
+const FN_PARAMS: Record<string, string[]> = {
+  // Aggregates
+  SUM: ["expr"], COUNT: [], AVG: ["expr"], MIN: ["expr"], MAX: ["expr"],
+  FIRST: ["expr"], LAST: ["expr"], ANY_VALUE: ["expr"],
+  COUNT_DISTINCT: ["expr"], COUNT_IF: ["condition"],
+  SUM_IF: ["expr", "condition"], AVG_IF: ["expr", "condition"],
+  COLLECT_LIST: ["expr"], COLLECT_SET: ["expr"],
+  STDDEV: ["expr"], VARIANCE: ["expr"],
+  PERCENTILE: ["col", "percentile"], PERCENTILE_APPROX: ["col", "accuracy"],
+  APPROX_COUNT_DISTINCT: ["expr"],
+  // Common scalar functions
+  UPPER: ["str"], LOWER: ["str"], TRIM: ["str"], LENGTH: ["str"],
+  COALESCE: ["expr1", "expr2"], ABS: ["num"], ROUND: ["num", "decimals"],
+  SUBSTR: ["str", "start", "length"], CONCAT: ["str1", "str2"],
+  CAST: ["expr"], IF: ["condition", "then", "else"],
+};
+
+const SCALAR_FUNCTIONS = ["UPPER", "LOWER", "TRIM", "COALESCE", "ABS", "ROUND", "SUBSTR", "CONCAT", "LENGTH", "CAST", "IF"];
+
+// Tab stop: [start, end] character ranges in the input value
+type TabStop = [number, number];
+
+// Extract the identifier token at a given cursor position within a string.
+// Returns { token, start, end } where start/end are character offsets.
+function tokenAtCursor(text: string, cursor: number): { token: string; start: number; end: number } {
+  const before = text.slice(0, cursor);
+  const match = before.match(/([a-z_][a-z0-9_]*)$/i);
+  if (!match) return { token: "", start: cursor, end: cursor };
+  const start = cursor - match[1].length;
+  return { token: match[1].toLowerCase(), start, end: cursor };
+}
+
+function ExpressionInput({ value, onChange, label, placeholder, sourceCols }: {
+  value: string;
+  onChange: (v: string) => void;
+  label: string;
+  placeholder: string;
+  sourceCols: { name: string; type: string }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(-1);
+  const [tabStops, setTabStops] = useState<TabStop[]>([]);
+  const [tabIdx, setTabIdx] = useState(-1);
+  const [cursor, setCursor] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Extract the token at cursor position
+  const { token: cursorToken, start: tokenStart, end: tokenEnd } = tokenAtCursor(value, cursor);
+
+  // Build suggestions: functions first, then columns (match case-insensitively)
+  const allFunctions = [...AGGREGATE_FUNCTIONS, ...SCALAR_FUNCTIONS];
+  const tokenUpper = cursorToken.toUpperCase();
+  const suggestions: { label: string; detail: string; fnName?: string; kind: "fn" | "col" }[] = [];
+  if (cursorToken) {
+    for (const fn of allFunctions) {
+      if (fn.startsWith(tokenUpper)) {
+        const params = FN_PARAMS[fn];
+        const display = params ? `${fn}(${params.join(", ")})` : `${fn}()`;
+        const detail = AGGREGATE_FUNCTIONS.includes(fn) ? "aggregate" : "function";
+        suggestions.push({ label: display, detail, fnName: fn, kind: "fn" });
+      }
+    }
+    for (const col of sourceCols) {
+      if (col.name.toLowerCase().startsWith(cursorToken) && col.name.toLowerCase() !== cursorToken) {
+        suggestions.push({ label: col.name, detail: col.type, kind: "col" });
+      }
+    }
+  }
+
+  const showDropdown = open && suggestions.length > 0;
+
+  const applySuggestion = (s: typeof suggestions[number]) => {
+    const before = value.slice(0, tokenStart);
+    const after = value.slice(tokenEnd);
+    if (s.kind === "fn" && s.fnName) {
+      const params = FN_PARAMS[s.fnName] ?? [];
+      if (params.length === 0) {
+        const inserted = s.fnName + "()";
+        const text = before + inserted + after;
+        onChange(text);
+        setTabStops([]);
+        setTabIdx(-1);
+        const cursorPos = before.length + inserted.length - 1; // inside parens
+        setTimeout(() => inputRef.current?.setSelectionRange(cursorPos, cursorPos), 0);
+      } else {
+        const argsStr = params.join(", ");
+        const inserted = s.fnName + "(" + argsStr + ")";
+        const text = before + inserted + after;
+        onChange(text);
+
+        // Compute tab stop ranges relative to insertion point
+        const stops: TabStop[] = [];
+        let offset = before.length + s.fnName.length + 1; // after "("
+        for (let i = 0; i < params.length; i++) {
+          stops.push([offset, offset + params[i].length]);
+          offset += params[i].length + 2; // ", "
+        }
+        setTabStops(stops);
+        setTabIdx(0);
+        setTimeout(() => inputRef.current?.setSelectionRange(stops[0][0], stops[0][1]), 0);
+      }
+    } else {
+      const text = before + s.label + after;
+      onChange(text);
+      setTabStops([]);
+      setTabIdx(-1);
+      const cursorPos = before.length + s.label.length;
+      setTimeout(() => inputRef.current?.setSelectionRange(cursorPos, cursorPos), 0);
+    }
+    setOpen(false);
+    setActiveIdx(-1);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Tab-stop navigation — only intercept when there's a next stop to jump to
+    if (e.key === "Tab" && tabStops.length > 0 && tabIdx >= 0) {
+      const nextIdx = tabIdx + 1;
+      if (nextIdx < tabStops.length) {
+        e.preventDefault();
+        e.stopPropagation();
+        setTabIdx(nextIdx);
+        setTimeout(() => inputRef.current?.setSelectionRange(tabStops[nextIdx][0], tabStops[nextIdx][1]), 0);
+        return;
+      }
+      // Last tab stop — clear state and let Tab fall through to next form field
+      setTabStops([]);
+      setTabIdx(-1);
+      return;
+    }
+
+    // Dropdown navigation — only arrow keys, Enter, and Escape; never Tab
+    if (showDropdown) {
+      if (e.key === "ArrowDown") { e.preventDefault(); setActiveIdx((prev) => (prev + 1) % suggestions.length); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); setActiveIdx((prev) => (prev <= 0 ? suggestions.length - 1 : prev - 1)); }
+      else if (e.key === "Enter") {
+        const idx = activeIdx >= 0 ? activeIdx : 0;
+        if (idx < suggestions.length) {
+          e.preventDefault(); e.stopPropagation();
+          applySuggestion(suggestions[idx]);
+        }
+      } else if (e.key === "Escape") { setOpen(false); }
+    }
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newVal = e.target.value;
+    const newCursor = e.target.selectionStart ?? newVal.length;
+    onChange(newVal);
+    setCursor(newCursor);
+    setOpen(true);
+    setActiveIdx(0);
+    // Recalculate tab stops after user edits a placeholder
+    if (tabStops.length > 0 && tabIdx >= 0) {
+      const oldStop = tabStops[tabIdx];
+      const oldLen = oldStop[1] - oldStop[0];
+      const newLen = newCursor - oldStop[0];
+      const delta = newLen - oldLen;
+      setTabStops((prev) => prev.map((s, i) => {
+        if (i < tabIdx) return s;
+        if (i === tabIdx) return [s[0], s[0] + newLen];
+        return [s[0] + delta, s[1] + delta];
+      }));
+    }
+  };
+
+  // Parse validation
+  const parseResult = value.trim() ? parse(value.trim()) : null;
+  const hasError = parseResult !== null && parseResult.errors.length > 0;
+  const isValid = parseResult !== null && parseResult.errors.length === 0;
+
+  return (
+    <div ref={containerRef} className="relative flex flex-col gap-1">
+      <label className="text-[10px] font-medium uppercase tracking-wider text-stone-400">{label}</label>
+      <div className="flex items-center gap-1.5">
+        <input ref={inputRef} type="text" value={value}
+          onChange={handleChange}
+          onFocus={() => setOpen(true)}
+          onBlur={(e) => { if (!containerRef.current?.contains(e.relatedTarget)) setTimeout(() => setOpen(false), 150); }}
+          onKeyDown={handleKeyDown}
+          placeholder={placeholder}
+          className="w-full bg-transparent text-xs font-mono text-stone-600 placeholder:text-stone-300 focus:outline-none" />
+        {isValid && <span className="shrink-0 rounded bg-green-50 px-1 py-0.5 text-[9px] font-medium text-green-600 ring-1 ring-green-200/50">valid</span>}
+      </div>
+      {hasError && <p className="text-[10px] text-red-500">{parseResult.errors[0].message}</p>}
+      {showDropdown && (
+        <div className="absolute left-0 right-0 top-full z-30 mt-1 rounded-md border border-stone-200 bg-white py-1 shadow-lg max-h-36 overflow-y-auto">
+          {suggestions.map((s, i) => (
+            <button key={s.label} onMouseDown={(e) => { e.preventDefault(); applySuggestion(s); }}
+              className={`flex w-full items-center justify-between px-2.5 py-1 text-left text-xs transition-colors ${i === activeIdx ? "bg-stone-100" : "hover:bg-stone-50"}`}>
+              <span className={`font-mono ${s.kind === "fn" ? "text-amber-700" : "text-blue-700"}`}>{s.label}</span>
+              <span className="text-[9px] text-stone-400">{s.detail}</span>
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -1217,7 +1565,7 @@ export const { registry, handlers } = defineRegistry(catalog, {
       const retention = (store.get("/retention") as string) ?? "30d";
 
       interface PK { _key: string; column: string; entity: string }
-      interface FCol { _key: string; name: string; type?: string; agg?: string; merge?: string; expr?: string; description?: string }
+      interface FCol { _key: string; name: string; strategy: string; type?: string; agg?: string; expr?: string; max_length?: number; granularity?: string; window?: number; description?: string }
       interface KM { _key: string; pk_column: string; source_column: string }
       interface CF { _key: string; name: string; source: string; key_mapping?: KM[]; columns: FCol[] }
       interface DC { _key: string; name: string; expr: string; description?: string }
@@ -1236,37 +1584,136 @@ export const { registry, handlers } = defineRegistry(catalog, {
 
       // Add Column popup state
       const DERIVED_KEY = "__derived__";
-      type MergeStrategy = "" | "sum" | "max" | "min" | "replace";
+      type ColumnStrategy = "lifetime_window" | "prepend_list" | "bitmap_activity";
       const [showAddCol, setShowAddCol] = useState(false);
       const [newColName, setNewColName] = useState("");
-      const [newColExpr, setNewColExpr] = useState("");
-      const [newColMerge, setNewColMerge] = useState<MergeStrategy>("");
-      const [newColFamilyKey, setNewColFamilyKey] = useState<string>(DERIVED_KEY);
+      const [newColStrategy, setNewColStrategy] = useState<ColumnStrategy>("lifetime_window");
+      const [newColExpr, setNewColExpr] = useState(""); // agg for lifetime_window, expr for prepend_list
+      const [newColMaxLength, setNewColMaxLength] = useState(10);
+      const [newColGranularity, setNewColGranularity] = useState<"day" | "hour">("day");
+      const [newColWindow, setNewColWindow] = useState(365);
+      const [newColSource, setNewColSource] = useState("");
       const [newColDesc, setNewColDesc] = useState("");
+      const [newColDerived, setNewColDerived] = useState(false);
+      const [sourceCols, setSourceCols] = useState<{ name: string; type: string }[]>([]);
 
       const closeAddCol = () => {
         setShowAddCol(false);
-        setNewColName(""); setNewColExpr(""); setNewColMerge(""); setNewColFamilyKey(DERIVED_KEY); setNewColDesc("");
+        setNewColName(""); setNewColStrategy("lifetime_window"); setNewColExpr(""); setNewColMaxLength(10); setNewColGranularity("day"); setNewColWindow(365); setNewColSource(""); setNewColDesc(""); setNewColDerived(false); setSourceCols([]);
+      };
+
+      // Edit column state
+      const [editFamilyKey, setEditFamilyKey] = useState<string | null>(null);
+      const [editColIdx, setEditColIdx] = useState<number | null>(null);
+      const isEditing = editFamilyKey !== null && editColIdx !== null;
+
+      const startEditCol = (familyKey: string, colIdx: number) => {
+        const isD = familyKey === DERIVED_KEY;
+        const col = isD ? derived[colIdx] : families.find((f) => f._key === familyKey)?.columns[colIdx];
+        if (!col) return;
+        setEditFamilyKey(familyKey);
+        setEditColIdx(colIdx);
+        setNewColName(col.name);
+        setNewColDerived(isD);
+        if (isD) {
+          setNewColExpr((col as DC).expr ?? "");
+        } else {
+          const fc = col as FCol;
+          const strategy = (fc.strategy || "lifetime_window") as ColumnStrategy;
+          setNewColStrategy(strategy);
+          setNewColExpr(fc.agg || fc.expr || "");
+          setNewColMaxLength(fc.max_length ?? 10);
+          setNewColGranularity((fc.granularity ?? "day") as "day" | "hour");
+          setNewColWindow(fc.window ?? 365);
+          setNewColSource(families.find((f) => f._key === familyKey)?.source ?? "");
+        }
+        setNewColDesc(col.description || "");
+        setShowAddCol(true);
+      };
+
+      const closePopup = () => {
+        closeAddCol();
+        setEditFamilyKey(null);
+        setEditColIdx(null);
+      };
+
+      const buildFamilyCol = (existing: FCol): FCol => {
+        const colName = newColName.trim();
+        const desc = newColDesc.trim() || undefined;
+        switch (newColStrategy) {
+          case "lifetime_window":
+            return { ...existing, name: colName, strategy: "lifetime_window", agg: newColExpr.trim(), expr: undefined, max_length: undefined, granularity: undefined, window: undefined, description: desc };
+          case "prepend_list":
+            return { ...existing, name: colName, strategy: "prepend_list", expr: newColExpr.trim(), max_length: newColMaxLength, agg: undefined, granularity: undefined, window: undefined, description: desc };
+          case "bitmap_activity":
+            return { ...existing, name: colName, strategy: "bitmap_activity", granularity: newColGranularity, window: newColWindow, agg: undefined, expr: undefined, max_length: undefined, description: desc };
+        }
+      };
+
+      const saveCol = () => {
+        if (!isEditing) { addCol(); return; }
+        const colName = newColName.trim();
+        if (!colName) return;
+        // For lifetime_window and prepend_list, expression is required
+        if (newColStrategy !== "bitmap_activity" && !newColExpr.trim()) return;
+        const desc = newColDesc.trim() || undefined;
+        if (editFamilyKey === DERIVED_KEY) {
+          store.set("/derived_columns", derived.map((dc, i) =>
+            i === editColIdx! ? { ...dc, name: colName, expr: newColExpr.trim(), description: desc } : dc
+          ));
+        } else {
+          store.set("/column_families", families.map((f) => f._key === editFamilyKey
+            ? { ...f, columns: f.columns.map((c, i) => i !== editColIdx! ? c : buildFamilyCol(c)) }
+            : f
+          ));
+        }
+        closePopup();
+      };
+
+      const removeCol = (familyKey: string, colIdx: number) => {
+        if (familyKey === DERIVED_KEY) {
+          store.set("/derived_columns", derived.filter((_, i) => i !== colIdx));
+        } else {
+          store.set("/column_families", families.map((f) => f._key === familyKey
+            ? { ...f, columns: f.columns.filter((_, i) => i !== colIdx) }
+            : f
+          ));
+        }
       };
 
       const addCol = () => {
         const colName = newColName.trim();
-        const colExpr = newColExpr.trim();
-        if (!colName || !colExpr) return;
+        if (!colName) return;
+        if (newColStrategy !== "bitmap_activity" && !newColExpr.trim()) return;
         const desc = newColDesc.trim() || undefined;
-        if (newColFamilyKey === DERIVED_KEY) {
+        const source = newColSource.trim();
+        if (newColDerived) {
           store.set("/derived_columns", [
             ...derived,
-            { _key: genKey("dc"), name: colName, expr: colExpr, ...(desc ? { description: desc } : {}) },
+            { _key: genKey("dc"), name: colName, expr: newColExpr.trim(), ...(desc ? { description: desc } : {}) },
           ]);
-        } else {
-          const newCol: FCol = newColMerge
-            ? { _key: genKey("fc"), name: colName, agg: colExpr, merge: newColMerge, ...(desc ? { description: desc } : {}) }
-            : { _key: genKey("fc"), name: colName, expr: colExpr, ...(desc ? { description: desc } : {}) };
-          store.set(
-            "/column_families",
-            families.map((f) => (f._key === newColFamilyKey ? { ...f, columns: [...f.columns, newCol] } : f)),
-          );
+        } else if (source) {
+          const base = { _key: genKey("fc"), name: colName, ...(desc ? { description: desc } : {}) };
+          let newCol: FCol;
+          switch (newColStrategy) {
+            case "lifetime_window":
+              newCol = { ...base, strategy: "lifetime_window", agg: newColExpr.trim() } as FCol;
+              break;
+            case "prepend_list":
+              newCol = { ...base, strategy: "prepend_list", expr: newColExpr.trim(), max_length: newColMaxLength } as FCol;
+              break;
+            case "bitmap_activity":
+              newCol = { ...base, strategy: "bitmap_activity", granularity: newColGranularity, window: newColWindow } as FCol;
+              break;
+          }
+          const existing = families.find((f) => f.source === source);
+          if (existing) {
+            store.set("/column_families", families.map((f) => f._key === existing._key ? { ...f, columns: [...f.columns, newCol] } : f));
+          } else {
+            const familyName = source.split(".").pop() ?? source;
+            const keyMapping = pks.filter((pk) => pk.column).map((pk) => ({ _key: genKey("km"), pk_column: pk.column, source_column: pk.column }));
+            store.set("/column_families", [...families, { _key: genKey("cf"), name: familyName, source, key_mapping: keyMapping, columns: [newCol] }]);
+          }
         }
         closeAddCol();
       };
@@ -1275,7 +1722,7 @@ export const { registry, handlers } = defineRegistry(catalog, {
       const { entities: entityRegistry } = useEntityRegistry();
       const previewCols: { name: string; type: string; source?: string }[] = [
         ...pks.filter((pk) => pk.column).map((pk) => ({ name: pk.column, type: entityRegistry.get(pk.entity)?.id_type ?? "string", source: "pk" })),
-        ...families.flatMap((cf) => cf.columns.filter((c) => c.name).map((c) => ({ name: c.name, type: c.agg ? "agg" : "expr", source: cf.name || "family" }))),
+        ...families.flatMap((cf) => cf.columns.filter((c) => c.name).map((c) => ({ name: c.name, type: c.strategy || "expr", source: cf.name || "family" }))),
         ...derived.filter((dc) => dc.name).map((dc) => ({ name: dc.name, type: "expr", source: "derived" })),
       ];
 
@@ -1364,7 +1811,7 @@ export const { registry, handlers } = defineRegistry(catalog, {
                         <tr key={i} className="border-b border-stone-100 last:border-b-0">
                           {previewCols.map((c) => (
                             <td key={c.name} className={`px-2.5 py-1 font-mono text-[10px] whitespace-nowrap transition-colors ${hoveredCol === c.name ? "bg-amber-50 text-amber-700" : "text-stone-500"}`}>
-                              {c.source === "pk" ? mockValue(c.type, i, c.name) : c.type === "agg" ? String(1000 + i * 7) : `val_${i + 1}`}
+                              {c.source === "pk" ? mockValue(c.type, i, c.name) : c.type === "lifetime_window" ? String(1000 + i * 7) : c.type === "bitmap_activity" ? "0b1010..." : `val_${i + 1}`}
                             </td>
                           ))}
                         </tr>
@@ -1376,88 +1823,95 @@ export const { registry, handlers } = defineRegistry(catalog, {
             </div>
           )}
 
-          {/* Columns — shown once primary keys are provided */}
-          {pks.some((pk) => !!pk.column) && (
-            <div className="flex flex-col gap-2">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-stone-500">Columns</span>
-              <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-stone-200 bg-stone-50">
-                      <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Column</th>
-                      <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Type</th>
-                      <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Source</th>
+          {/* Columns */}
+          <div className="flex flex-col gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-stone-500">Columns</span>
+            <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-stone-200 bg-stone-50">
+                    <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Column</th>
+                    <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Type</th>
+                    <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Description</th>
+                    <th className="px-2.5 py-1.5 w-8" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {/* Primary key columns (locked — they define the grain) */}
+                  {pks.filter((pk) => pk.column).map((pk) => (
+                    <tr key={pk._key}
+                      className={`border-b border-stone-100 transition-colors ${hoveredCol === pk.column ? "bg-amber-50" : ""}`}
+                      onMouseEnter={() => setHoveredCol(pk.column)} onMouseLeave={() => setHoveredCol(null)}>
+                      <td className="px-2.5 py-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <Lock className="h-2.5 w-2.5 text-stone-400" />
+                          <span className="font-mono text-xs text-stone-800">{pk.column}</span>
+                        </div>
+                      </td>
+                      <td className="px-2.5 py-1.5 text-xs text-stone-600 uppercase">{entityRegistry.get(pk.entity)?.id_type ?? "string"}</td>
+                      <td className="px-2.5 py-1.5" />
+                      <td className="px-1 py-0.5 w-8" />
                     </tr>
-                  </thead>
-                  <tbody>
-                    {/* Primary key columns (locked — they define the grain) */}
-                    {pks.filter((pk) => pk.column).map((pk) => (
-                      <tr key={pk._key}
-                        className={`border-b border-stone-100 transition-colors ${hoveredCol === pk.column ? "bg-amber-50" : ""}`}
-                        onMouseEnter={() => setHoveredCol(pk.column)} onMouseLeave={() => setHoveredCol(null)}>
+                  ))}
+
+                  {/* Family columns */}
+                  {families.flatMap((cf) =>
+                    cf.columns.filter((c) => c.name).map((c, cIdx) => (
+                      <tr key={c._key}
+                        className={`border-b border-stone-100 group transition-colors cursor-pointer ${hoveredCol === c.name ? "bg-amber-50" : ""}`}
+                        onMouseEnter={() => setHoveredCol(c.name)} onMouseLeave={() => setHoveredCol(null)}
+                        onClick={() => startEditCol(cf._key, cIdx)}>
                         <td className="px-2.5 py-1.5">
                           <div className="flex items-center gap-1.5">
-                            <Lock className="h-2.5 w-2.5 text-stone-400" />
-                            <span className="font-mono text-xs text-stone-800">{pk.column}</span>
-                            <span className="rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700">PK</span>
+                            <span className="font-mono text-xs text-stone-800">{c.name}</span>
+                            {c.strategy && <span className="rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700">{c.strategy === "lifetime_window" ? "lifetime" : c.strategy === "prepend_list" ? "list" : "bitmap"}</span>}
                           </div>
                         </td>
-                        <td className="px-2.5 py-1.5 text-xs text-stone-600 uppercase">
-                          {entityRegistry.get(pk.entity)?.id_type ?? "string"}
-                        </td>
-                        <td className="px-2.5 py-1.5 text-[10px] text-blue-600">
-                          {pk.entity || <span className="text-stone-400 italic">unbound</span>}
-                        </td>
-                      </tr>
-                    ))}
-
-                    {/* Column-family columns, grouped by family */}
-                    {families.map((cf) => cf.columns.filter((c) => c.name).map((c) => (
-                      <tr key={`${cf._key}:${c._key}`}
-                        className={`border-b border-stone-100 group transition-colors ${hoveredCol === c.name ? "bg-amber-50" : ""}`}
-                        onMouseEnter={() => setHoveredCol(c.name)} onMouseLeave={() => setHoveredCol(null)}>
-                        <td className="px-2.5 py-1.5">
-                          <span className="font-mono text-xs text-stone-800">{c.name}</span>
-                        </td>
-                        <td className="px-2.5 py-1.5 text-[10px] font-mono text-stone-600">
-                          {c.agg ?? c.expr ?? c.type ?? <span className="text-stone-400 italic">—</span>}
-                        </td>
-                        <td className="px-2.5 py-1.5 text-[10px] text-stone-500">
-                          <span className="rounded bg-stone-100 px-1 py-0.5 text-[9px] font-medium text-stone-600">{cf.name || "family"}</span>
-                          {cf.source && <span className="ml-1 font-mono text-stone-400">← {cf.source}</span>}
+                        <td className="px-2.5 py-1.5 text-xs text-stone-600 uppercase">{c.type || ""}</td>
+                        <td className="px-2.5 py-1.5 text-[10px] text-stone-400">{c.description || ""}</td>
+                        <td className="px-1 py-0.5 w-8">
+                          <button onClick={(e) => { e.stopPropagation(); removeCol(cf._key, cIdx); }}
+                            className="flex h-5 w-5 items-center justify-center rounded text-stone-400 opacity-0 group-hover:opacity-100 hover:text-red-500 transition-all">
+                            <Trash2 className="h-3 w-3" />
+                          </button>
                         </td>
                       </tr>
-                    )))}
+                    ))
+                  )}
 
-                    {/* Derived columns */}
-                    {derived.filter((dc) => dc.name).map((dc) => (
-                      <tr key={dc._key}
-                        className={`border-b border-stone-100 transition-colors ${hoveredCol === dc.name ? "bg-amber-50" : ""}`}
-                        onMouseEnter={() => setHoveredCol(dc.name)} onMouseLeave={() => setHoveredCol(null)}>
-                        <td className="px-2.5 py-1.5">
-                          <span className="font-mono text-xs text-stone-800">{dc.name}</span>
-                        </td>
-                        <td className="px-2.5 py-1.5 text-[10px] font-mono text-stone-600">{dc.expr || <span className="text-stone-400 italic">—</span>}</td>
-                        <td className="px-2.5 py-1.5 text-[10px] text-stone-500">
-                          <span className="rounded bg-stone-100 px-1 py-0.5 text-[9px] font-medium text-stone-600">derived</span>
-                        </td>
-                      </tr>
-                    ))}
-
-                    {/* Add column button */}
-                    <tr>
-                      <td colSpan={3} className="px-2.5 py-1.5">
-                        <button onClick={() => setShowAddCol(true)}
-                          className="flex items-center gap-1.5 rounded-md border border-dashed border-stone-300 px-2.5 py-1.5 text-[11px] text-stone-500 hover:border-amber-500 hover:text-amber-700 hover:bg-amber-50/50 transition-colors w-full justify-center">
-                          <Plus className="h-3 w-3" /> Add column
+                  {/* Derived columns */}
+                  {derived.filter((dc) => dc.name).map((dc, dcIdx) => (
+                    <tr key={dc._key}
+                      className={`border-b border-stone-100 group transition-colors cursor-pointer ${hoveredCol === dc.name ? "bg-amber-50" : ""}`}
+                      onMouseEnter={() => setHoveredCol(dc.name)} onMouseLeave={() => setHoveredCol(null)}
+                      onClick={() => startEditCol(DERIVED_KEY, dcIdx)}>
+                      <td className="px-2.5 py-1.5">
+                        <span className="font-mono text-xs text-stone-800">{dc.name}</span>
+                      </td>
+                      <td className="px-2.5 py-1.5" />
+                      <td className="px-2.5 py-1.5 text-[10px] text-stone-400">{dc.description || ""}</td>
+                      <td className="px-1 py-0.5 w-8">
+                        <button onClick={(e) => { e.stopPropagation(); removeCol(DERIVED_KEY, dcIdx); }}
+                          className="flex h-5 w-5 items-center justify-center rounded text-stone-400 opacity-0 group-hover:opacity-100 hover:text-red-500 transition-all">
+                          <Trash2 className="h-3 w-3" />
                         </button>
                       </td>
                     </tr>
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+
+                  {/* Add column button */}
+                  <tr>
+                    <td colSpan={4} className="px-2.5 py-1.5">
+                      <button onClick={() => setShowAddCol(true)}
+                        className="flex items-center gap-1.5 rounded-md border border-dashed border-stone-300 px-2.5 py-1.5 text-[11px] text-stone-500 hover:border-amber-500 hover:text-amber-700 hover:bg-amber-50/50 transition-colors w-full justify-center">
+                        <Plus className="h-3 w-3" /> Add column
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
-          )}
+          </div>
 
           {/* Review table button */}
           {previewCols.length > 0 && (
@@ -1470,75 +1924,134 @@ export const { registry, handlers } = defineRegistry(catalog, {
             </button>
           )}
 
-          {/* Add column popup */}
+          {/* Column popup (add / edit) */}
           {showAddCol && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/10 backdrop-blur-[1px] rounded-lg" onClick={closeAddCol}>
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/10 backdrop-blur-[1px] rounded-lg" onClick={closePopup}>
               <div className="w-[22rem] rounded-xl border border-stone-200 bg-white shadow-xl" onClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => { if (e.key === "Escape") closeAddCol(); if (e.key === "Enter") { e.preventDefault(); addCol(); } }}>
+                onKeyDown={(e) => { if (e.key === "Escape") closePopup(); if (e.key === "Enter") { e.preventDefault(); saveCol(); } }}>
                 {/* Header */}
-                <div className="flex items-center justify-between px-4 py-2 bg-amber-50 border-b border-amber-100 rounded-t-xl">
-                  <span className="text-[11px] font-medium text-amber-700">Add Column</span>
-                  <button onClick={closeAddCol} className="flex h-5 w-5 items-center justify-center rounded text-amber-400 hover:text-amber-700 transition-colors">
+                <div className="flex items-center justify-between px-4 py-2.5 bg-amber-50 border-b border-amber-100 rounded-t-xl">
+                  <span className="text-[11px] font-medium text-amber-700">{isEditing ? "Edit Column" : "Add Column"}</span>
+                  <button onClick={closePopup} className="flex h-5 w-5 items-center justify-center rounded text-amber-400 hover:text-amber-700 transition-colors">
                     <X className="h-3 w-3" />
                   </button>
                 </div>
 
                 {/* Body */}
-                <div className="flex flex-col gap-3 px-4 py-4">
+                <div className="flex flex-col gap-4 px-4 py-4">
                   {/* Name */}
-                  <input type="text" value={newColName} onChange={(e) => setNewColName(e.target.value)}
-                    placeholder="new_column_name" autoFocus maxLength={60}
-                    className="w-full bg-transparent text-sm font-semibold font-mono text-stone-800 placeholder:text-stone-300 placeholder:font-sans placeholder:font-normal focus:outline-none" />
-
-                  {/* Expression */}
-                  <input type="text" value={newColExpr} onChange={(e) => setNewColExpr(e.target.value)}
-                    placeholder={newColFamilyKey !== DERIVED_KEY && newColMerge ? "e.g. sum(amount)" : "e.g. last(status)"}
-                    className="w-full bg-transparent text-xs font-mono text-stone-600 placeholder:text-stone-300 placeholder:font-sans focus:outline-none" />
-
-                  {/* Source family */}
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] uppercase tracking-wider text-stone-400">Source</span>
-                    <select value={newColFamilyKey} onChange={(e) => { setNewColFamilyKey(e.target.value); if (e.target.value === DERIVED_KEY) setNewColMerge(""); }}
-                      className="flex-1 bg-transparent text-xs text-stone-700 focus:outline-none">
-                      <option value={DERIVED_KEY}>derived (no source table)</option>
-                      {families.map((cf) => (
-                        <option key={cf._key} value={cf._key}>
-                          {cf.name || "family"}{cf.source ? ` ← ${cf.source}` : ""}
-                        </option>
-                      ))}
-                    </select>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] font-medium uppercase tracking-wider text-stone-400">Column name</label>
+                    <input type="text" value={newColName} onChange={(e) => setNewColName(e.target.value)}
+                      placeholder="e.g. click_count" autoFocus maxLength={60}
+                      className="w-full bg-transparent text-sm font-semibold font-mono text-stone-800 placeholder:text-stone-300 placeholder:font-normal focus:outline-none" />
                   </div>
 
-                  {/* Merge (only when source is a family) */}
-                  {newColFamilyKey !== DERIVED_KEY && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] uppercase tracking-wider text-stone-400">Merge</span>
-                      <select value={newColMerge} onChange={(e) => setNewColMerge(e.target.value as MergeStrategy)}
-                        className="flex-1 bg-transparent text-xs text-stone-700 focus:outline-none">
-                        <option value="">none (expression)</option>
-                        <option value="sum">sum</option>
-                        <option value="max">max</option>
-                        <option value="min">min</option>
-                        <option value="replace">replace</option>
+                  {/* Mode toggle (hidden when editing) */}
+                  {!isEditing && (
+                    <div className="flex rounded-lg bg-stone-100 p-0.5">
+                      <button type="button" tabIndex={-1} onClick={() => setNewColDerived(false)}
+                        className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${!newColDerived ? "bg-white text-stone-800 shadow-sm" : "text-stone-500 hover:text-stone-700"}`}>
+                        From source
+                      </button>
+                      <button type="button" tabIndex={-1} onClick={() => { setNewColDerived(true); setNewColSource(""); }}
+                        className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${newColDerived ? "bg-white text-stone-800 shadow-sm" : "text-stone-500 hover:text-stone-700"}`}>
+                        Derived
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Source mode fields */}
+                  {!newColDerived && (
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] font-medium uppercase tracking-wider text-stone-400">Source table</label>
+                      <SourceTableCombobox value={newColSource} onChange={setNewColSource} onColumnsLoaded={setSourceCols} />
+                    </div>
+                  )}
+
+                  {/* Strategy selector (source mode only) */}
+                  {!newColDerived && (
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] font-medium uppercase tracking-wider text-stone-400">Strategy</label>
+                      <select value={newColStrategy} onChange={(e) => setNewColStrategy(e.target.value as ColumnStrategy)}
+                        className="bg-transparent text-xs text-stone-700 focus:outline-none">
+                        <option value="lifetime_window">Lifetime Window</option>
+                        <option value="prepend_list">Prepend List</option>
+                        <option value="bitmap_activity">Bitmap Activity</option>
                       </select>
                     </div>
                   )}
 
+                  {/* Strategy-specific fields */}
+                  {newColDerived ? (
+                    <ExpressionInput
+                      value={newColExpr}
+                      onChange={setNewColExpr}
+                      label="Expression"
+                      placeholder="e.g. revenue / session_count"
+                      sourceCols={[]}
+                    />
+                  ) : newColStrategy === "lifetime_window" ? (
+                    <ExpressionInput
+                      value={newColExpr}
+                      onChange={setNewColExpr}
+                      label="Aggregation"
+                      placeholder="e.g. sum(amount), count()"
+                      sourceCols={sourceCols}
+                    />
+                  ) : newColStrategy === "prepend_list" ? (
+                    <>
+                      <ExpressionInput
+                        value={newColExpr}
+                        onChange={setNewColExpr}
+                        label="Value expression"
+                        placeholder="e.g. country, product_id"
+                        sourceCols={sourceCols}
+                      />
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-medium uppercase tracking-wider text-stone-400">Max list length</label>
+                        <input type="number" value={newColMaxLength} onChange={(e) => setNewColMaxLength(Number(e.target.value))}
+                          min={1} max={1000}
+                          className="w-20 bg-transparent text-xs text-stone-700 focus:outline-none" />
+                      </div>
+                    </>
+                  ) : newColStrategy === "bitmap_activity" ? (
+                    <div className="flex gap-3">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-medium uppercase tracking-wider text-stone-400">Granularity</label>
+                        <select value={newColGranularity} onChange={(e) => setNewColGranularity(e.target.value as "day" | "hour")}
+                          className="bg-transparent text-xs text-stone-700 focus:outline-none">
+                          <option value="day">day</option>
+                          <option value="hour">hour</option>
+                        </select>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-medium uppercase tracking-wider text-stone-400">Window (slots)</label>
+                        <input type="number" value={newColWindow} onChange={(e) => setNewColWindow(Number(e.target.value))}
+                          min={1} max={8760}
+                          className="w-20 bg-transparent text-xs text-stone-700 focus:outline-none" />
+                      </div>
+                    </div>
+                  ) : null}
+
                   {/* Description */}
-                  <input type="text" value={newColDesc} onChange={(e) => setNewColDesc(e.target.value)}
-                    placeholder="Describe the column"
-                    className="w-full bg-transparent text-xs text-stone-500 placeholder:text-stone-300 focus:outline-none" />
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] font-medium uppercase tracking-wider text-stone-400">Description</label>
+                    <input type="text" value={newColDesc} onChange={(e) => setNewColDesc(e.target.value)}
+                      placeholder="Optional"
+                      className="w-full bg-transparent text-xs text-stone-500 placeholder:text-stone-300 focus:outline-none" />
+                  </div>
 
                   {/* Actions */}
                   <div className="flex items-center justify-end gap-2 pt-2 border-t border-stone-100">
-                    <button onClick={closeAddCol}
+                    <button onClick={closePopup}
                       className="text-[11px] text-stone-400 hover:text-stone-600 transition-colors">
                       Cancel
                     </button>
-                    <button onClick={addCol}
-                      disabled={!newColName.trim() || !newColExpr.trim()}
+                    <button onClick={saveCol}
+                      disabled={!newColName.trim() || (newColStrategy !== "bitmap_activity" && !newColExpr.trim()) || (!newColDerived && !newColSource.trim())}
                       className="rounded-full bg-stone-800 px-3 py-1 text-[11px] font-medium text-white hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors">
-                      Add
+                      {isEditing ? "Save" : "Add"}
                     </button>
                   </div>
                 </div>
