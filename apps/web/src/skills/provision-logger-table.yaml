@@ -1,0 +1,27 @@
+name: provision-logger-table
+description: Provision infrastructure for a new logger table after PR merge
+auto_approve: true
+args:
+  table_name:
+    type: string
+    description: Logger table name
+  retention:
+    type: string
+    default: "30d"
+    description: Kafka topic retention period
+  columns:
+    type: array
+    description: Logger table column definitions
+
+tasks:
+  - agent: kafka
+    description: "Create Kafka topic 'logger.{{table_name}}' with {{retention}} retention"
+    done_criteria: "Topic 'logger.{{table_name}}' exists with correct retention config"
+
+  - agent: schema-registry
+    description: "Register Protobuf payload schema for logger table '{{table_name}}'"
+    done_criteria: "Schema registered for topic 'logger.{{table_name}}'"
+
+  - agent: dag
+    description: "Regenerate Airflow DAG YAMLs and push to S3"
+    done_criteria: "DAG YAML files uploaded to S3 at the configured prefix"

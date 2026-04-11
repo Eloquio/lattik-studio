@@ -1,0 +1,20 @@
+{
+  "name": "agent-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "ai": "^6.0.141",
+    "@ai-sdk/gateway": "^3.0.83",
+    "kafkajs": "^2.2.4",
+    "zod": "^3.25.67"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.4",
+    "typescript": "^5"
+  }
+}
