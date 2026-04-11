@@ -88,12 +88,18 @@ export const derivedColumnSchema = z.object({
   description: z.string().optional(),
 });
 
+export const backfillPlanSchema = z.object({
+  lookback: z.string().optional().default("30d"), // e.g., "90d", "7d"
+  parallelism: z.number().int().positive().optional().default(1),
+});
+
 export const lattikTableSchema = z.object({
   name: z.string(),
   description: z.string(),
   primary_key: z.array(primaryKeySchema),
   column_families: z.array(columnFamilySchema),
   derived_columns: z.array(derivedColumnSchema).optional(),
+  backfill: backfillPlanSchema.optional(),
 });
 
 export const dimensionSchema = z.object({
@@ -133,6 +139,7 @@ export type LifetimeWindowColumn = z.infer<typeof lifetimeWindowColumnSchema>;
 export type PrependListColumn = z.infer<typeof prependListColumnSchema>;
 export type BitmapActivityColumn = z.infer<typeof bitmapActivityColumnSchema>;
 export type ColumnFamily = z.infer<typeof columnFamilySchema>;
+export type BackfillPlan = z.infer<typeof backfillPlanSchema>;
 export type LattikTable = z.infer<typeof lattikTableSchema>;
 export type Dimension = z.infer<typeof dimensionSchema>;
 export type MetricCalculation = z.infer<typeof metricCalculationSchema>;
