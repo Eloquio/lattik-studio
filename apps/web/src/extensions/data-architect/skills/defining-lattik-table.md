@@ -14,12 +14,12 @@ All fields are required unless marked optional.
   - **name** (string) — family name
   - **source** (string) — source table name (Logger or Lattik table)
   - **key_mapping** (object) — maps this table's PK columns to source columns, e.g. `{ "user_id": "actor_id" }`
-  - **columns** (array) — each with:
+  - **columns** (array) — each declares a **strategy** that defines how source events are aggregated and stored:
     - **name** (string) — column name
-    - **type** (enum, optional) — output type
-    - **agg** (string, optional) — aggregation expression in lattik-expression syntax, e.g. `count()`, `sum(amount)`
-    - **merge** (enum, optional) — merge strategy: `sum`, `max`, `min`, `replace`. Required when `agg` is set.
-    - **expr** (string, optional) — expression in lattik-expression syntax, e.g. `last(status)`
+    - **strategy** (enum) — one of:
+      - `lifetime_window` — scalar aggregation over all source events. Requires **agg** (string): aggregation expression, e.g. `sum(amount)`, `count()`, `max(score)`. Optional **type** (enum): output type.
+      - `prepend_list` — bounded ordered list of recent values. Requires **expr** (string): value expression, e.g. `country`, `product_id`. Requires **max_length** (int): max list entries. Optional **type** (enum): element type.
+      - `bitmap_activity` — bitfield tracking entity activity per time slot. Requires **granularity** (enum): `day` or `hour`. Requires **window** (int): number of time slots to track.
     - **description** (string, optional)
 - **derived_columns** (array, optional) — computed columns on the table itself:
   - **name** (string)
@@ -36,7 +36,7 @@ Initial state fields (all optional — pass what you know, leave the rest for th
 - `description` — what this table represents (10-500 chars)
 - `retention` — defaults to `"30d"` if omitted
 - `primary_key` — array of `{column, entity}` pairs defining the grain
-- `column_families` — array of `{name, source, key_mapping?: [{pk_column, source_column}], columns: [{name, agg?, merge?}]}`
+- `column_families` — array of `{name, source, key_mapping?: [{pk_column, source_column}], columns: [{name, strategy, agg?, expr?, max_length?, granularity?, window?}]}`
 - `derived_columns` — array of `{name, expr}`
 
 **Do NOT emit any `spec` code fence.** `renderLattikTableForm` is the only canvas-rendering mechanism for lattik tables. After calling it, acknowledge briefly in prose and wait for the user to edit the form or ask to review it.
@@ -81,6 +81,7 @@ Use `listDefinitions` to find existing tables and `getDefinition` to load one. T
 - Primary key: at least one, all entities must exist
 - Source tables: must exist
 - Key mappings: columns must exist in both this table and the source
-- Aggregation/expression fields: valid lattik-expression syntax
-- Columns with `agg`: must specify a `merge` strategy
+- `lifetime_window` columns: `agg` must be a valid lattik-expression
+- `prepend_list` columns: `expr` must be a valid lattik-expression, `max_length` must be >= 1
+- `bitmap_activity` columns: `window` must be >= 1
 - Column names: unique across all families and derived columns, snake_case

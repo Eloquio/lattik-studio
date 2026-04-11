@@ -97,14 +97,31 @@ const primaryKeyInitialStateSchema = z.object({
   entity: z.string().describe("Entity this column references"),
 });
 
-const familyColumnInitialStateSchema = z.object({
+const lifetimeWindowColumnInitialStateSchema = z.object({
   name: z.string(),
-  agg: z.string().optional().describe("Aggregation expression"),
-  merge: z
-    .enum(["sum", "max", "min", "replace"])
-    .optional()
-    .describe("Merge strategy when agg is set"),
+  strategy: z.literal("lifetime_window"),
+  agg: z.string().describe("Aggregation expression, e.g. 'sum(amount)', 'count()'"),
 });
+
+const prependListColumnInitialStateSchema = z.object({
+  name: z.string(),
+  strategy: z.literal("prepend_list"),
+  expr: z.string().describe("Expression for the value to collect, e.g. 'country'"),
+  max_length: z.number().int().positive().describe("Max list length"),
+});
+
+const bitmapActivityColumnInitialStateSchema = z.object({
+  name: z.string(),
+  strategy: z.literal("bitmap_activity"),
+  granularity: z.enum(["day", "hour"]).describe("One bit per time slot"),
+  window: z.number().int().positive().describe("Number of time slots to track"),
+});
+
+const familyColumnInitialStateSchema = z.discriminatedUnion("strategy", [
+  lifetimeWindowColumnInitialStateSchema,
+  prependListColumnInitialStateSchema,
+  bitmapActivityColumnInitialStateSchema,
+]);
 
 const keyMappingInitialStateSchema = z.object({
   pk_column: z.string(),
@@ -112,7 +129,7 @@ const keyMappingInitialStateSchema = z.object({
 });
 
 const columnFamilyInitialStateSchema = z.object({
-  name: z.string(),
+  name: z.string().optional().describe("Family name. Auto-derived from source if omitted."),
   source: z.string().describe("Source table name"),
   key_mapping: z.array(keyMappingInitialStateSchema).optional(),
   columns: z.array(familyColumnInitialStateSchema).max(50),
@@ -222,9 +239,10 @@ export function buildLattikTableFormSpec(
   s: z.infer<typeof lattikTableFormInitialStateSchema>
 ): Spec {
   // Tag column families and their nested arrays with stable React keys.
+  // Derive family name from source if not provided (e.g., "ingest.signups" → "signups").
   const columnFamilies = (s.column_families ?? []).map((cf) => ({
     _key: nextKey("cf"),
-    name: cf.name,
+    name: cf.name || cf.source.split(".").pop() || cf.source,
     source: cf.source,
     key_mapping: withKeys("km", cf.key_mapping),
     columns: withKeys("fcol", cf.columns),

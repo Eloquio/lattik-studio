@@ -181,14 +181,22 @@ async function validateLattikTable(spec: LattikTable): Promise<ValidationError[]
       }
       allColNames.add(col.name);
 
-      if (col.agg) {
-        errors.push(...validateExpression(col.agg, `family.${family.name}.column.${col.name}.agg`));
-        if (!col.merge) {
-          errors.push({ field: `family.${family.name}.column.${col.name}.merge`, message: "Columns with agg must specify a merge strategy" });
-        }
-      }
-      if (col.expr) {
-        errors.push(...validateExpression(col.expr, `family.${family.name}.column.${col.name}.expr`));
+      const prefix = `family.${family.name}.column.${col.name}`;
+      switch (col.strategy) {
+        case "lifetime_window":
+          errors.push(...validateExpression(col.agg, `${prefix}.agg`));
+          break;
+        case "prepend_list":
+          errors.push(...validateExpression(col.expr, `${prefix}.expr`));
+          if (col.max_length < 1) {
+            errors.push({ field: `${prefix}.max_length`, message: "max_length must be at least 1" });
+          }
+          break;
+        case "bitmap_activity":
+          if (col.window < 1) {
+            errors.push({ field: `${prefix}.window`, message: "window must be at least 1" });
+          }
+          break;
       }
     }
   }
