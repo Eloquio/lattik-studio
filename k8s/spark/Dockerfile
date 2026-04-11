@@ -31,9 +31,10 @@ RUN set -eux; \
     cd /opt/spark/jars; \
     curl -fsSLO "https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-${SPARK_BINARY_VERSION}_${SCALA_BINARY_VERSION}/${ICEBERG_VERSION}/iceberg-spark-runtime-${SPARK_BINARY_VERSION}_${SCALA_BINARY_VERSION}-${ICEBERG_VERSION}.jar"; \
     curl -fsSLO "https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws-bundle/${ICEBERG_VERSION}/iceberg-aws-bundle-${ICEBERG_VERSION}.jar"; \
-    # hadoop-aws + AWS SDK for s3a:// filesystem (needed for writing raw Parquet to S3)
+    # hadoop-aws for s3a:// filesystem (needed for writing raw Parquet to S3).
+    # hadoop-aws 3.4.x uses AWS SDK v2 — bundle provides all required classes.
     curl -fsSLO "https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/${HADOOP_VERSION}/hadoop-aws-${HADOOP_VERSION}.jar"; \
-    curl -fsSLO "https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/${AWS_SDK_VERSION}/aws-java-sdk-bundle-${AWS_SDK_VERSION}.jar"; \
+    curl -fsSLO "https://repo1.maven.org/maven2/software/amazon/awssdk/bundle/2.25.11/bundle-2.25.11.jar"; \
     chown spark:spark *.jar
 
 # Install Python dependencies for the lattik_table driver
