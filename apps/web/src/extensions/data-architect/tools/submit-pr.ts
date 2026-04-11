@@ -152,9 +152,11 @@ export function createSubmitPRTool(getCanvasState: () => unknown) {
         };
       } catch (error) {
         console.error("submitPR error:", error);
+        const detail =
+          error instanceof Error ? error.message : String(error);
         return {
           status: "error",
-          message: "Failed to submit PR. Please check Gitea is running and try again.",
+          message: `Failed to submit PR: ${detail}`,
         };
       }
     },
