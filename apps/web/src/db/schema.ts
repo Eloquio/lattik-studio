@@ -251,6 +251,82 @@ export const lattikColumnLoads = pgTable(
   ]
 );
 
+// ---------------------------------------------------------------------------
+// Task queue — request/task model for async agent work
+// ---------------------------------------------------------------------------
+
+export type RequestSource = "webhook" | "human";
+export type RequestStatus =
+  | "pending"
+  | "planning"
+  | "awaiting_approval"
+  | "approved"
+  | "done"
+  | "failed";
+
+/**
+ * Raw work orders from webhooks or humans. The planner agent claims a request,
+ * optionally converses with the human for clarification, then breaks it into
+ * tasks. Human approval is required before agents begin (unless the matched
+ * skill has auto_approve enabled).
+ */
+export const requests = pgTable(
+  "request",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    source: text("source").$type<RequestSource>().notNull(),
+    description: text("description").notNull(),
+    context: jsonb("context").$type<unknown>(),
+    messages: jsonb("messages")
+      .$type<{ role: "planner" | "human"; content: string; timestamp: string }[]>()
+      .notNull()
+      .default([]),
+    skillId: text("skill_id"),
+    status: text("status").$type<RequestStatus>().notNull().default("pending"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [index("idx_requests_status").on(t.status)]
+);
+
+export type TaskStatus = "draft" | "pending" | "claimed" | "done" | "failed";
+
+/**
+ * Units of work broken down by the planner agent. Each task is assigned to a
+ * specific agent and includes verifiable done criteria. Tasks start as "draft"
+ * until the human approves the request's plan.
+ */
+export const tasks = pgTable(
+  "task",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    requestId: text("request_id")
+      .notNull()
+      .references(() => requests.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
+    description: text("description").notNull(),
+    doneCriteria: text("done_criteria").notNull(),
+    status: text("status").$type<TaskStatus>().notNull().default("draft"),
+    claimedBy: text("claimed_by"),
+    result: jsonb("result").$type<unknown>(),
+    error: text("error"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    claimedAt: timestamp("claimed_at", { mode: "date" }),
+    staleAt: timestamp("stale_at", { mode: "date" }),
+    completedAt: timestamp("completed_at", { mode: "date" }),
+  },
+  (t) => [
+    index("idx_tasks_status").on(t.status),
+    index("idx_tasks_agent_status").on(t.agentId, t.status),
+    index("idx_tasks_stale_at").on(t.staleAt),
+    index("idx_tasks_request_id").on(t.requestId),
+  ]
+);
+
 export const verificationTokens = pgTable(
   "verificationToken",
   {
