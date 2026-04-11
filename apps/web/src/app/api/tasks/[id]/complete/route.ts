@@ -1,5 +1,11 @@
-import { requireTaskAuth } from "@/lib/task-auth";
-import { completeTask, getTask, tryCompleteRequest } from "@/lib/task-queue";
+import { z } from "zod";
+import { requireTaskAuth } from "@/lib/bearer-auth";
+import { completeTask, tryCompleteRequest } from "@/lib/task-queue";
+import { parseJsonBody } from "@/lib/api-validation";
+
+const completeBodySchema = z.object({
+  result: z.unknown().optional(),
+});
 
 export async function POST(
   req: Request,
@@ -9,7 +15,8 @@ export async function POST(
   if (authError) return authError;
 
   const { id } = await params;
-  const body = await req.json() as { result?: unknown };
+  const body = await parseJsonBody(req, completeBodySchema);
+  if (body instanceof Response) return body;
 
   const row = await completeTask(id, body.result);
   if (!row) {

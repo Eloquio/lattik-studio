@@ -7,7 +7,7 @@
  * contention between concurrent agents.
  */
 
-import { and, eq, sql, inArray, lte } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
 import type {
@@ -33,11 +33,13 @@ export async function createRequest(
   return row;
 }
 
-export async function claimRequest(claimedBy: string) {
+export async function claimRequest() {
   const db = getDb();
 
   // Atomic claim: pick the oldest pending request and set status to "planning".
   // FOR UPDATE SKIP LOCKED prevents concurrent planners from contending.
+  // There's no claimed_by column on requests today — if we need to audit who
+  // planned which request, add one and record it here.
   const result = await db.execute<{
     id: string;
     source: RequestSource;
@@ -64,6 +66,14 @@ export async function claimRequest(claimedBy: string) {
   return result[0] ?? null;
 }
 
+/**
+ * Hard cap on the number of messages persisted per request. The JSONB array
+ * grows on every append (full-row rewrite in Postgres), so we keep only the
+ * most recent N — enough context for the planner to reason about the
+ * conversation without bloating the row into query-plan territory.
+ */
+const MAX_REQUEST_MESSAGES = 200;
+
 export async function addRequestMessage(
   id: string,
   role: "planner" | "human",
@@ -71,10 +81,22 @@ export async function addRequestMessage(
 ) {
   const db = getDb();
   const message = { role, content, timestamp: new Date().toISOString() };
+  // Append-and-trim in one UPDATE: concatenate the new message, then keep
+  // only the tail slice. jsonb `||` is O(n) so capping avoids unbounded
+  // row growth for long-running requests.
   const [row] = await db
     .update(schema.requests)
     .set({
-      messages: sql`${schema.requests.messages} || ${JSON.stringify([message])}::jsonb`,
+      messages: sql`(
+        SELECT jsonb_agg(m)
+        FROM jsonb_array_elements(
+          ${schema.requests.messages} || ${JSON.stringify([message])}::jsonb
+        ) WITH ORDINALITY AS t(m, ord)
+        WHERE ord > GREATEST(
+          jsonb_array_length(${schema.requests.messages}) + 1 - ${MAX_REQUEST_MESSAGES},
+          0
+        )
+      )`,
       updatedAt: new Date(),
     })
     .where(eq(schema.requests.id, id))
@@ -220,13 +242,34 @@ export async function createTask(
 
 const DEFAULT_STALE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
+/**
+ * Resolve the stale-claim timeout for an agent. Precedence:
+ *   1. Explicit `timeoutMs` argument (caller override)
+ *   2. `agent.staleTimeoutMs` column (per-agent default)
+ *   3. `DEFAULT_STALE_TIMEOUT_MS` (global fallback)
+ */
+async function resolveTimeoutMs(
+  agentId: string | undefined,
+  explicitTimeoutMs: number | undefined,
+): Promise<number> {
+  if (explicitTimeoutMs !== undefined) return explicitTimeoutMs;
+  if (!agentId) return DEFAULT_STALE_TIMEOUT_MS;
+  const db = getDb();
+  const [row] = await db
+    .select({ staleTimeoutMs: schema.agents.staleTimeoutMs })
+    .from(schema.agents)
+    .where(eq(schema.agents.id, agentId))
+    .limit(1);
+  return row?.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS;
+}
+
 export async function claimTask(options: {
   agentId?: string;
   claimedBy: string;
   timeoutMs?: number;
 }) {
   const db = getDb();
-  const timeoutMs = options.timeoutMs ?? DEFAULT_STALE_TIMEOUT_MS;
+  const timeoutMs = await resolveTimeoutMs(options.agentId, options.timeoutMs);
   const staleAt = new Date(Date.now() + timeoutMs).toISOString();
 
   // Build the agent filter clause

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { listAgents, getUserEnabledAgentIds } from "@/lib/actions/agents";
 import { MarketplaceGrid } from "@/components/marketplace/marketplace-grid";
 
@@ -21,12 +22,12 @@ export default async function MarketplacePage() {
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-8" style={{ height: "49px" }}>
           <h1 className="text-sm font-semibold text-white/80">Agent Marketplace</h1>
-          <a
+          <Link
             href="/"
             className="text-xs text-white/40 transition-colors hover:text-white/70"
           >
             Back to Chat
-          </a>
+          </Link>
         </div>
 
         {/* Grid */}

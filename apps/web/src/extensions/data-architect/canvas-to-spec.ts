@@ -230,6 +230,24 @@ function lattikTableFromCanvas(s: Record<string, unknown>): unknown {
     column_families,
   };
   if (derived_columns.length > 0) out.derived_columns = derived_columns;
+
+  // Backfill plan — canvas stores defaults inline so the form can render them,
+  // but the saved spec should only carry fields the user customized. The
+  // schema (`schema.ts`) declares defaults (lookback='30d', parallelism=1) and
+  // applies them on read, so stripping defaults here keeps YAML minimal and
+  // diffs readable.
+  if (s.backfill && typeof s.backfill === "object" && !Array.isArray(s.backfill)) {
+    const bf = s.backfill as Record<string, unknown>;
+    const backfill: Record<string, unknown> = {};
+    if (typeof bf.lookback === "string" && bf.lookback.length > 0 && bf.lookback !== "30d") {
+      backfill.lookback = bf.lookback;
+    }
+    if (typeof bf.parallelism === "number" && bf.parallelism > 0 && bf.parallelism !== 1) {
+      backfill.parallelism = bf.parallelism;
+    }
+    if (Object.keys(backfill).length > 0) out.backfill = backfill;
+  }
+
   return out;
 }
 

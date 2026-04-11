@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "tsx --test src/lib/api-validation.test.ts src/lib/bearer-auth.test.ts src/extensions/data-architect/canvas-to-spec.test.ts",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
   },

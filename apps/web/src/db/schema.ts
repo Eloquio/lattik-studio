@@ -119,6 +119,13 @@ export const agents = pgTable("agent", {
     knowledge?: string[];
     tools?: string[];
   }>(),
+  /**
+   * Per-agent stale-claim timeout in milliseconds. Tasks claimed by an agent
+   * revert to `pending` if not completed within this window. Null/unset means
+   * fall back to DEFAULT_STALE_TIMEOUT_MS (5 minutes). Agents that drive
+   * long-running Spark jobs should set this to several hours.
+   */
+  staleTimeoutMs: integer("stale_timeout_ms"),
   authorId: text("authorId").references(() => users.id),
   published: boolean("published").notNull().default(true),
   createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),

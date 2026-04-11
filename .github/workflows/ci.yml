@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  web:
+    name: apps/web · lint + typecheck + build + test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        working-directory: apps/web
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        working-directory: apps/web
+        run: pnpm test --if-present
+
+      - name: Build
+        working-directory: apps/web
+        env:
+          # Dummy values so `next build` can evaluate env.* references at build
+          # time. These never hit a real service — CI only verifies the build
+          # succeeds, not that runtime wiring is correct.
+          AI_GATEWAY_API_KEY: ci-dummy
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+          AUTH_URL: https://ci.example.com
+          AUTH_SECRET: ci-dummy-secret-ci-dummy-secret-ci
+          AUTH_GOOGLE_ID: ci-dummy
+          AUTH_GOOGLE_SECRET: ci-dummy
+          GITEA_URL: http://localhost:3300
+          GITEA_TOKEN: ci-dummy
+          GITEA_WEBHOOK_SECRET: ci-dummy-webhook-secret
+          LATTIK_API_TOKEN: ci-dummy-lattik-token
+          TASK_AGENT_SECRET: ci-dummy-task-secret
+          S3_ENDPOINT: http://localhost:9000
+          S3_ACCESS_KEY_ID: ci
+          S3_SECRET_ACCESS_KEY: ci-dummy
+        run: pnpm build
+
+  ingest:
+    name: apps/ingest · go build + vet
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          cache-dependency-path: apps/ingest/go.sum
+
+      - name: Go vet
+        working-directory: apps/ingest
+        run: go vet ./...
+
+      - name: Go build
+        working-directory: apps/ingest
+        run: go build ./...
+
+      - name: Go test
+        working-directory: apps/ingest
+        run: go test ./...

@@ -1,9 +1,16 @@
-import { requireTaskAuth } from "@/lib/task-auth";
+import { z } from "zod";
+import { requireTaskAuth } from "@/lib/bearer-auth";
 import { getRequest, addRequestMessage } from "@/lib/task-queue";
+import { parseJsonBody } from "@/lib/api-validation";
+
+const messageBodySchema = z.object({
+  role: z.enum(["planner", "human"]),
+  content: z.string().min(1).max(8000),
+});
 
 export async function GET(
   req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const authError = requireTaskAuth(req);
   if (authError) return authError;
@@ -18,23 +25,14 @@ export async function GET(
 
 export async function POST(
   req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const authError = requireTaskAuth(req);
   if (authError) return authError;
 
   const { id } = await params;
-  const body = await req.json() as {
-    role: "planner" | "human";
-    content: string;
-  };
-
-  if (!body.role || !body.content) {
-    return Response.json(
-      { error: "role and content are required" },
-      { status: 400 }
-    );
-  }
+  const body = await parseJsonBody(req, messageBodySchema);
+  if (body instanceof Response) return body;
 
   const row = await addRequestMessage(id, body.role, body.content);
   if (!row) {

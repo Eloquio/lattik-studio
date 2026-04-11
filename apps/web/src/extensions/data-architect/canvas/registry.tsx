@@ -29,7 +29,6 @@ const inputCls =
 interface UserColumn { _key: string; name: string; type: string; description?: string; dimension?: string; pii?: boolean }
 const SNAKE_CASE_RE = /^[a-z][a-z0-9]*(_[a-z0-9]+)*$/;
 const TYPE_OPTIONS: ScalarTypeKind[] = ["string", "int32", "int64", "float", "double", "boolean", "timestamp", "date", "json"];
-const TYPE_DISPLAY: Record<string, string> = Object.fromEntries(TYPE_OPTIONS.map((t) => [t, t.toUpperCase()]));
 
 function TypeCombobox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
