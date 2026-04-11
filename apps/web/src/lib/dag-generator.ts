@@ -68,6 +68,7 @@ function dagSpecForLattikTable(
     config: {
       job_type: "lattik_table",
       job_name: tableName,
+      spec_json: JSON.stringify(tableSpec),
     },
     dependencies: tasks
       .filter((t) => t.operator === "wait")

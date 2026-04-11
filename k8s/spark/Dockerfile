@@ -28,4 +28,10 @@ RUN set -eux; \
     curl -fsSLO "https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws-bundle/${ICEBERG_VERSION}/iceberg-aws-bundle-${ICEBERG_VERSION}.jar"; \
     chown spark:spark "iceberg-spark-runtime-${SPARK_BINARY_VERSION}_${SCALA_BINARY_VERSION}-${ICEBERG_VERSION}.jar" "iceberg-aws-bundle-${ICEBERG_VERSION}.jar"
 
+# Install Python dependencies for the lattik_table driver
+RUN pip install --no-cache-dir requests
+
+# Copy driver scripts into the work directory
+COPY k8s/spark/drivers/ /opt/spark/work-dir/
+
 USER spark

@@ -9,11 +9,13 @@ spec:
   mode: cluster
   image: lattik/spark-iceberg:4.0.2-1.10.1
   imagePullPolicy: IfNotPresent
-  mainApplicationFile: "local:///opt/spark/work-dir/driver.py"
+  mainApplicationFile: "local:///opt/spark/work-dir/lattik_table_driver.py"
   arguments:
     - "--job-type={{ params.job_type }}"
     - "--job-name={{ params.job_name }}"
     - "--ds={{ ds }}"
+    - "--api-url={{ params.api_url | default('http://lattik-studio.default.svc.cluster.local:3000/api/lattik', true) }}"
+    - "--spec-json={{ params.spec_json | default('{}', true) }}"
   sparkVersion: "4.0.2"
   restartPolicy:
     type: OnFailure
