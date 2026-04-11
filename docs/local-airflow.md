@@ -178,6 +178,51 @@ Airflow worker pods (which execute the `SparkKubernetesOperator`) run with the `
 | [`apps/web/src/lib/dag-generator.ts`](../apps/web/src/lib/dag-generator.ts) | TypeScript — generates DAG YAML from merged definitions |
 | [`apps/web/src/lib/s3-client.ts`](../apps/web/src/lib/s3-client.ts) | TypeScript — MinIO S3 client wrapper |
 
+## Updating the renderer
+
+There are two layers that can change independently — the **DAG files** (the thin entry points in `airflow/dags/`) and the **`lattik-airflow` package** (the actual renderer logic in `packages/lattik-airflow/`). They have different deploy paths:
+
+### Changed DAG files only
+
+If you edited `airflow/dags/lattik_dag_renderer.py`, `spark_app_template.yaml`, or added a new DAG `.py` file — but did **not** change anything in `packages/lattik-airflow/`:
+
+```bash
+pnpm airflow:dags-sync
+```
+
+That's it. The dag-processor picks up the new files on its next scan cycle (a few seconds). No image rebuild, no pod restart.
+
+### Changed the `lattik-airflow` package
+
+If you edited anything under `packages/lattik-airflow/` — the `LattikDagRenderer` class, `DataReadySensor`, a new operator, dependencies in `pyproject.toml` — the package is baked into the Docker image, so you need to rebuild and restart:
+
+```bash
+# 1. Rebuild the image and load it into kind
+pnpm airflow:image-build
+
+# 2. Restart pods so they pick up the new image
+kubectl rollout restart deploy/airflow-dag-processor deploy/airflow-scheduler deploy/airflow-api-server
+
+# 3. (Optional) Sync DAG files too, if you changed both layers
+pnpm airflow:dags-sync
+```
+
+Wait for the rollout to finish (`kubectl rollout status deploy/airflow-dag-processor`) and then check the Airflow UI. If the dag-processor had a "Dag Import Error" from the old image, it should clear once the new pods are running.
+
+### Changed both
+
+If you changed DAG files *and* the package (common when adding a new method to `LattikDagRenderer` and updating the entry point to call it):
+
+```bash
+pnpm airflow:image-build && kubectl rollout restart deploy/airflow-dag-processor deploy/airflow-scheduler deploy/airflow-api-server && pnpm airflow:dags-sync
+```
+
+**Order matters.** The image rebuild must happen before the restart (otherwise pods pull the old image), and `dags-sync` should run after the restart kicks off (so the new pods see the new files, not a stale cache from the old pod).
+
+### Common mistake
+
+Updating a DAG file to call a new method (e.g. `.generate()`) but forgetting to rebuild the image. The DAG file reaches the pod via `dags-sync`, but the package inside the image still has the old API → `AttributeError`. Fix: `pnpm airflow:image-build` + restart.
+
 ## Auth and the UI
 
 [`k8s/airflow.yaml`](../k8s/airflow.yaml) sets `AIRFLOW__CORE__AUTH_MANAGER` to `SimpleAuthManager` and `AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS=True`. The result: the login page accepts any credentials (or none — just click Sign In) and grants admin access. **This is local-dev only.** SimpleAuthManager is documented as not suitable for production; the lattik-studio app talks to Airflow via the v2 REST API with token auth, not by fronting the UI publicly, so this is a deliberate trade-off for fast iteration.
