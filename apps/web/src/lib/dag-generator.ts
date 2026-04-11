@@ -90,6 +90,149 @@ function dagSpecForLattikTable(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Backfill DAG generator
+// ---------------------------------------------------------------------------
+
+type ColumnStrategy = "lifetime_window" | "prepend_list" | "bitmap_activity";
+
+interface FamilySpec {
+  name: string;
+  source: string;
+  columns: Array<{ name: string; strategy: ColumnStrategy }>;
+}
+
+/**
+ * Determine the backfill strategy for a family based on its column strategies.
+ * - "sequential": has lifetime_window columns → must cascade in ds order
+ * - "parallel": only bitmap_activity / prepend_list → deltas are independent per ds
+ */
+function backfillStrategy(family: FamilySpec): "sequential" | "parallel" {
+  return family.columns.some((c) => c.strategy === "lifetime_window")
+    ? "sequential"
+    : "parallel";
+}
+
+/**
+ * Generate a date range from ds_start to ds_end (inclusive), as YYYY-MM-DD strings.
+ */
+function dateRange(dsStart: string, dsEnd: string): string[] {
+  const dates: string[] = [];
+  const start = new Date(dsStart);
+  const end = new Date(dsEnd);
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    dates.push(d.toISOString().slice(0, 10));
+  }
+  return dates;
+}
+
+/**
+ * Generate a backfill DAG spec for a Lattik Table.
+ *
+ * The backfill DAG is parameterized by ds_start and ds_end (passed via Airflow
+ * conf at trigger time). Each family gets its own task chain based on its
+ * backfill strategy:
+ *
+ * - Sequential families: linear chain from ds_start to ds_end, then cascade to today
+ * - Parallel families: fan-out delta tasks, then a sequential cumulative pass
+ *
+ * This function generates a TEMPLATE DAG with Jinja-parameterized task IDs.
+ * At runtime, the DAG renderer expands the template based on the conf params.
+ */
+function backfillDagSpecForLattikTable(
+  tableName: string,
+  tableSpec: Record<string, unknown>,
+): DagSpec {
+  const tasks: TaskSpec[] = [];
+  const columnFamilies = (tableSpec.column_families ?? []) as FamilySpec[];
+  const backfillPlan = (tableSpec.backfill ?? {}) as {
+    lookback?: string;
+    parallelism?: number;
+  };
+  const parallelism = backfillPlan.parallelism ?? 1;
+  const specJson = JSON.stringify(tableSpec);
+
+  for (const family of columnFamilies) {
+    const familyName = family.name || family.source.split(".").pop() || family.source;
+    const strategy = backfillStrategy(family);
+
+    if (strategy === "sequential") {
+      // Sequential cascade: each ds depends on the previous ds.
+      // The DAG renderer generates one task per ds in the range.
+      // We represent this as a single "sequential_backfill" meta-task
+      // that the Python DAG renderer expands into a chain.
+      tasks.push({
+        task_id: `backfill__${familyName}`,
+        operator: "spark",
+        config: {
+          job_type: "lattik_table_backfill",
+          job_name: tableName,
+          family_name: familyName,
+          strategy: "sequential",
+          spec_json: specJson,
+        },
+        dependencies: [],
+      });
+    } else {
+      // Parallel fan-out: delta computation is independent per ds.
+      // The DAG renderer generates parallel tasks up to the parallelism limit,
+      // followed by a sequential cumulative pass.
+      tasks.push({
+        task_id: `backfill_deltas__${familyName}`,
+        operator: "spark",
+        config: {
+          job_type: "lattik_table_backfill_deltas",
+          job_name: tableName,
+          family_name: familyName,
+          strategy: "parallel",
+          parallelism: String(parallelism),
+          spec_json: specJson,
+        },
+        dependencies: [],
+      });
+
+      // Cumulative pass depends on all deltas being computed
+      tasks.push({
+        task_id: `backfill_cumulative__${familyName}`,
+        operator: "spark",
+        config: {
+          job_type: "lattik_table_backfill_cumulative",
+          job_name: tableName,
+          family_name: familyName,
+          spec_json: specJson,
+        },
+        dependencies: [`backfill_deltas__${familyName}`],
+      });
+    }
+  }
+
+  // Final commit task depends on all family backfills
+  const allFamilyTasks = tasks.map((t) => t.task_id);
+  tasks.push({
+    task_id: `backfill_commit__${tableName}`,
+    operator: "spark",
+    config: {
+      job_type: "lattik_table_backfill_commit",
+      job_name: tableName,
+      spec_json: specJson,
+    },
+    dependencies: allFamilyTasks,
+  });
+
+  return {
+    dag_id: `backfill__${tableName}`,
+    description: `Backfill ${tableName} lattik table`,
+    schedule: null, // triggered manually or via Airflow CLI
+    tags: ["lattik", "lattik_table", "backfill"],
+    default_args: {
+      owner: "lattik",
+      retries: 1,
+      retry_delay_minutes: 10,
+    },
+    tasks,
+  };
+}
+
 /**
  * Generate DAG YAML files from all merged lattik_table definitions and
  * upload them to S3.  Returns the list of S3 keys that were written.
@@ -109,16 +252,26 @@ export async function generateDags(): Promise<string[]> {
   for (const table of lattikTables) {
     const spec = table.spec as Record<string, unknown>;
     const tableName = (spec.name as string) ?? table.name;
-    const dagSpec = dagSpecForLattikTable(tableName, spec);
 
+    // Forward-run DAG
+    const dagSpec = dagSpecForLattikTable(tableName, spec);
     const header =
       `# DAG: ${dagSpec.dag_id}\n` +
       `# Generated by Lattik Studio from merged definition "${tableName}"\n\n`;
     const yamlContent = header + toYaml(dagSpec);
     const key = `${S3_DAG_PREFIX}${dagSpec.dag_id}.yaml`;
-
     await putObject(S3_BUCKET, key, yamlContent);
     writtenKeys.push(key);
+
+    // Backfill DAG
+    const backfillSpec = backfillDagSpecForLattikTable(tableName, spec);
+    const backfillHeader =
+      `# DAG: ${backfillSpec.dag_id}\n` +
+      `# Backfill DAG generated by Lattik Studio for "${tableName}"\n\n`;
+    const backfillYaml = backfillHeader + toYaml(backfillSpec);
+    const backfillKey = `${S3_DAG_PREFIX}${backfillSpec.dag_id}.yaml`;
+    await putObject(S3_BUCKET, backfillKey, backfillYaml);
+    writtenKeys.push(backfillKey);
   }
 
   // Clean up S3 keys for DAGs whose definitions were removed
