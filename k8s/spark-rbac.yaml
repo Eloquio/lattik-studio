@@ -63,3 +63,18 @@ type: Opaque
 stringData:
   AWS_ACCESS_KEY_ID: lattik
   AWS_SECRET_ACCESS_KEY: lattik-local
+---
+# Shared secret the Lattik Table batch drivers use to authenticate against
+# the Lattik Studio commit API. Rotate by updating both this secret and
+# LATTIK_API_TOKEN in apps/web/.env — the web app and drivers must agree.
+#
+# Local dev uses a well-known value; in production this should be a
+# 32+ byte random string from `openssl rand -hex 32`.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: lattik-api-credentials
+  namespace: workloads
+type: Opaque
+stringData:
+  LATTIK_API_TOKEN: lattik-local-dev-token

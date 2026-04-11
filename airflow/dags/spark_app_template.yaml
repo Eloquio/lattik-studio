@@ -28,6 +28,8 @@ spec:
     envFrom:
       - secretRef:
           name: minio-credentials
+      - secretRef:
+          name: lattik-api-credentials
     env:
       - name: AWS_REGION
         value: us-east-1
@@ -38,6 +40,8 @@ spec:
     envFrom:
       - secretRef:
           name: minio-credentials
+      - secretRef:
+          name: lattik-api-credentials
     env:
       - name: AWS_REGION
         value: us-east-1

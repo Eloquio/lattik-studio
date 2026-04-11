@@ -230,16 +230,23 @@ export const lattikTableCommits = pgTable(
 export const lattikColumnLoads = pgTable(
   "lattik_column_load",
   {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
     tableName: text("table_name").notNull(),
     columnName: text("column_name").notNull(),
     ds: date("ds", { mode: "string" }).notNull(),
+    // Nullable: null means daily cadence (no hour). Unique constraint below
+    // uses `nullsNotDistinct` so null counts as a real value for uniqueness.
     hour: integer("hour"),
     loadId: text("load_id").notNull(),
     manifestVersion: integer("manifest_version").notNull(),
     committedAt: timestamp("committed_at", { mode: "date" }).notNull().defaultNow(),
   },
   (t) => [
-    primaryKey({ columns: [t.tableName, t.columnName, t.ds, t.hour] }),
+    unique("uq_lattik_column_load")
+      .on(t.tableName, t.columnName, t.ds, t.hour)
+      .nullsNotDistinct(),
     index("idx_lattik_column_loads_ds").on(t.tableName, t.ds, t.hour),
   ]
 );

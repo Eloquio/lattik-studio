@@ -28,10 +28,20 @@ from pyspark.sql.types import StructType
 # ---------------------------------------------------------------------------
 
 LATTIK_API = os.environ.get("LATTIK_API_URL", "https://lattik-studio.dev/api/lattik")
+LATTIK_API_TOKEN = os.environ.get("LATTIK_API_TOKEN")
 S3_ENDPOINT = os.environ.get("S3_ENDPOINT", "http://minio.minio.svc.cluster.local:9000")
 S3_BUCKET = os.environ.get("S3_BUCKET", "warehouse")
 TARGET_BUCKET_SIZE = int(os.environ.get("TARGET_BUCKET_SIZE", str(128 * 1024 * 1024)))
 FORMAT_ID = os.environ.get("FORMAT_ID", "parquet")
+
+
+def _auth_headers() -> dict:
+    """Bearer-token auth header for all Lattik Studio API calls."""
+    if not LATTIK_API_TOKEN:
+        raise RuntimeError(
+            "LATTIK_API_TOKEN is not set — cannot authenticate to Lattik Studio API"
+        )
+    return {"Authorization": f"Bearer {LATTIK_API_TOKEN}"}
 
 
 # ---------------------------------------------------------------------------
@@ -296,14 +306,18 @@ def commit_via_api(table_name: str, base_version: int, load_id: str,
                    columns: dict[str, str], ds: str, hour: int | None) -> int:
     """Commit via the Lattik Studio API. Retries on OCC conflict."""
     while True:
-        resp = requests.post(f"{LATTIK_API}/commit", json={
-            "table_name": table_name,
-            "base_version": base_version,
-            "load_id": load_id,
-            "columns": columns,
-            "ds": ds,
-            "hour": hour,
-        })
+        resp = requests.post(
+            f"{LATTIK_API}/commit",
+            headers=_auth_headers(),
+            json={
+                "table_name": table_name,
+                "base_version": base_version,
+                "load_id": load_id,
+                "columns": columns,
+                "ds": ds,
+                "hour": hour,
+            },
+        )
         result = resp.json()
 
         if result["status"] == "committed":
@@ -359,8 +373,11 @@ def main():
             sys.exit(1)
 
         # Read latest commit version from the API
-        resp = requests.get(f"{LATTIK_API}/commit",
-                           params={"table": table_name, "mode": "latest"})
+        resp = requests.get(
+            f"{LATTIK_API}/commit",
+            headers=_auth_headers(),
+            params={"table": table_name, "mode": "latest"},
+        )
         if resp.status_code == 404:
             base_version = 0
         else:

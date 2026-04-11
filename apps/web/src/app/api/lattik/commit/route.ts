@@ -1,6 +1,8 @@
 import { eq, and, desc, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
+import { requireLattikAuth } from "@/lib/lattik-auth";
+import { log } from "@/lib/log";
 import { putObject } from "@/lib/s3-client";
 
 const S3_BUCKET = process.env.S3_DAG_BUCKET ?? "warehouse";
@@ -22,6 +24,13 @@ const S3_BUCKET = process.env.S3_DAG_BUCKET ?? "warehouse";
  * The caller (Spark job) handles conflicts by rebasing and retrying.
  */
 export async function POST(request: Request) {
+  const authError = requireLattikAuth(request);
+  if (authError) {
+    log.warn("lattik.commit.unauthorized", {});
+    return authError;
+  }
+
+  const startedAt = Date.now();
   const body = await request.json();
 
   const {
@@ -42,11 +51,27 @@ export async function POST(request: Request) {
   };
 
   if (!table_name || base_version === undefined || !load_id || !columns || !ds) {
+    log.warn("lattik.commit.invalid_request", {
+      table_name,
+      has_base_version: base_version !== undefined,
+      has_load_id: !!load_id,
+      has_columns: !!columns,
+      has_ds: !!ds,
+    });
     return Response.json(
       { status: "error", message: "Missing required fields" },
       { status: 400 },
     );
   }
+
+  log.info("lattik.commit.start", {
+    table_name,
+    base_version,
+    load_id,
+    ds,
+    hour,
+    column_count: Object.keys(columns).length,
+  });
 
   const db = getDb();
 
@@ -146,6 +171,16 @@ export async function POST(request: Request) {
       }
     });
 
+    log.info("lattik.commit.committed", {
+      table_name,
+      version: newVersion,
+      load_id,
+      ds,
+      hour,
+      column_count: Object.keys(columns).length,
+      duration_ms: Date.now() - startedAt,
+    });
+
     return Response.json({
       status: "committed",
       version: newVersion,
@@ -163,6 +198,13 @@ export async function POST(request: Request) {
         .orderBy(desc(schema.lattikTableCommits.manifestVersion))
         .limit(1);
 
+      log.info("lattik.commit.conflict", {
+        table_name,
+        attempted_version: newVersion,
+        latest_version: latest[0]?.manifestVersion ?? base_version,
+        duration_ms: Date.now() - startedAt,
+      });
+
       return Response.json({
         status: "conflict",
         base_version: latest[0]?.manifestVersion ?? base_version,
@@ -170,6 +212,15 @@ export async function POST(request: Request) {
       });
     }
 
+    log.error("lattik.commit.failed", {
+      table_name,
+      base_version,
+      load_id,
+      ds,
+      hour,
+      duration_ms: Date.now() - startedAt,
+      error: err instanceof Error ? err.message : String(err),
+    });
     throw err;
   }
 }
@@ -181,16 +232,29 @@ export async function POST(request: Request) {
  * manifest_load_id for the requested time travel mode.
  */
 export async function GET(request: Request) {
+  const authError = requireLattikAuth(request);
+  if (authError) {
+    log.warn("lattik.commit.read.unauthorized", {});
+    return authError;
+  }
+
+  const startedAt = Date.now();
   const url = new URL(request.url);
   const tableName = url.searchParams.get("table");
   const mode = url.searchParams.get("mode") ?? "latest";
 
   if (!tableName) {
+    log.warn("lattik.commit.read.invalid_request", { mode });
     return Response.json(
       { status: "error", message: "Missing 'table' parameter" },
       { status: 400 },
     );
   }
+
+  log.info("lattik.commit.read.start", {
+    table_name: tableName,
+    mode,
+  });
 
   const db = getDb();
 
@@ -203,12 +267,23 @@ export async function GET(request: Request) {
       .limit(1);
 
     if (result.length === 0) {
+      log.info("lattik.commit.read.not_found", {
+        table_name: tableName,
+        mode,
+        duration_ms: Date.now() - startedAt,
+      });
       return Response.json(
         { status: "error", message: `No commits for table '${tableName}'` },
         { status: 404 },
       );
     }
 
+    log.info("lattik.commit.read.resolved", {
+      table_name: tableName,
+      mode,
+      manifest_version: result[0].manifestVersion,
+      duration_ms: Date.now() - startedAt,
+    });
     return Response.json({
       status: "ok",
       manifest_version: result[0].manifestVersion,
@@ -219,6 +294,11 @@ export async function GET(request: Request) {
   if (mode === "wall_time") {
     const ts = url.searchParams.get("ts");
     if (!ts) {
+      log.warn("lattik.commit.read.invalid_request", {
+        table_name: tableName,
+        mode,
+        reason: "missing_ts",
+      });
       return Response.json(
         { status: "error", message: "Missing 'ts' parameter for wall_time mode" },
         { status: 400 },
@@ -238,12 +318,25 @@ export async function GET(request: Request) {
       .limit(1);
 
     if (result.length === 0) {
+      log.info("lattik.commit.read.not_found", {
+        table_name: tableName,
+        mode,
+        ts,
+        duration_ms: Date.now() - startedAt,
+      });
       return Response.json(
         { status: "error", message: `No commits for '${tableName}' before ${ts}` },
         { status: 404 },
       );
     }
 
+    log.info("lattik.commit.read.resolved", {
+      table_name: tableName,
+      mode,
+      ts,
+      manifest_version: result[0].manifestVersion,
+      duration_ms: Date.now() - startedAt,
+    });
     return Response.json({
       status: "ok",
       manifest_version: result[0].manifestVersion,
@@ -257,6 +350,11 @@ export async function GET(request: Request) {
     const columnParam = url.searchParams.get("columns"); // comma-separated
 
     if (!dsParam) {
+      log.warn("lattik.commit.read.invalid_request", {
+        table_name: tableName,
+        mode,
+        reason: "missing_ds",
+      });
       return Response.json(
         { status: "error", message: "Missing 'ds' parameter" },
         { status: 400 },
@@ -295,6 +393,15 @@ export async function GET(request: Request) {
       const requestedColumns = columnParam.split(",");
       const missing = requestedColumns.filter((c) => !columnLoads[c]);
       if (missing.length > 0) {
+        log.info("lattik.commit.read.not_found", {
+          table_name: tableName,
+          mode,
+          ds: dsParam,
+          hour: hourParam,
+          requested: requestedColumns,
+          missing,
+          duration_ms: Date.now() - startedAt,
+        });
         return Response.json({
           status: "error",
           message: `Columns not loaded for ds=${dsParam}: ${missing.join(", ")}`,
@@ -309,6 +416,14 @@ export async function GET(request: Request) {
       result[col] = info.load_id;
     }
 
+    log.info("lattik.commit.read.resolved", {
+      table_name: tableName,
+      mode,
+      ds: dsParam,
+      hour: hourParam,
+      column_count: Object.keys(result).length,
+      duration_ms: Date.now() - startedAt,
+    });
     return Response.json({
       status: "ok",
       ds: dsParam,
@@ -316,6 +431,11 @@ export async function GET(request: Request) {
     });
   }
 
+  log.warn("lattik.commit.read.invalid_request", {
+    table_name: tableName,
+    mode,
+    reason: "unknown_mode",
+  });
   return Response.json(
     { status: "error", message: `Unknown mode: ${mode}` },
     { status: 400 },
