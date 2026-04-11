@@ -103,10 +103,11 @@ metadata:
   name: iceberg-rest
   namespace: iceberg
 spec:
-  type: ClusterIP
+  type: NodePort
   selector:
     app: iceberg-rest
   ports:
     - name: rest
       port: 8181
       targetPort: 8181
+      nodePort: 30818
