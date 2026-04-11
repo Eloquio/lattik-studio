@@ -136,6 +136,7 @@ Set in `apps/web/.env` (gitignored):
 - `GITEA_URL` — Gitea HTTP URL (default: `http://localhost:3300`)
 - `GITEA_TOKEN` — Gitea API token (from `pnpm gitea:init-logs`)
 - `GITEA_WEBHOOK_SECRET` — HMAC secret for webhook verification (generate with `openssl rand -hex 32`)
+- `LATTIK_API_TOKEN` — Bearer token for the Lattik Table commit API. Must match the `LATTIK_API_TOKEN` key in the `lattik-api-credentials` secret in the `workloads` namespace ([`k8s/spark-rbac.yaml`](k8s/spark-rbac.yaml)) so Spark batch drivers can authenticate. Generate with `openssl rand -hex 32`
 - `S3_ENDPOINT` — MinIO S3 API endpoint (default: `http://localhost:9000`)
 - `S3_ACCESS_KEY_ID` — MinIO access key (default: `lattik`)
 - `S3_SECRET_ACCESS_KEY` — MinIO secret key (default: `lattik-local`)
