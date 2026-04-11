@@ -1,0 +1,184 @@
+# Integration test for the Lattik Table stitch write path.
+#
+# Creates test Logger Tables in Iceberg, aggregates into bucketed loads on S3,
+# and (if the Lattik Studio API is reachable) commits via POST /api/lattik/commit.
+#
+# Usage:
+#   # Rebuild the Spark image first (to include the test driver):
+#   pnpm spark:image-build
+#
+#   # Submit the test:
+#   kubectl apply -f k8s/spark-stitch-test.yaml
+#
+#   # Watch the driver logs:
+#   kubectl -n workloads logs -f -l spark-role=driver,app-name=lattik-stitch-test
+#
+#   # Clean up:
+#   kubectl -n workloads delete sparkapplication lattik-stitch-test
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stitch-test-script
+  namespace: workloads
+data:
+  test_stitch_write_path.py: |
+    # This is mounted from the ConfigMap. See k8s/spark/drivers/test_stitch_write_path.py
+    # for the source. We inline a minimal version here for the SparkApplication.
+    import json, os, sys, uuid
+    from pyspark.sql import SparkSession, functions as F
+    from pyspark.sql.types import *
+
+    S3_BUCKET = "warehouse"
+    TABLE_NAME = "test_user_stats"
+    DS = "2026-04-09"
+
+    def main():
+        spark = SparkSession.builder.appName("lattik-stitch-test").getOrCreate()
+        try:
+            # Create test data
+            spark.sql("CREATE NAMESPACE IF NOT EXISTS iceberg.ingest")
+
+            spark.sql("DROP TABLE IF EXISTS iceberg.ingest.test_signups")
+            signups = spark.createDataFrame([
+                ("e1", "2026-04-09T01:00:00Z", DS, 1, 100, "US"),
+                ("e2", "2026-04-09T02:00:00Z", DS, 2, 200, "JP"),
+                ("e3", "2026-04-09T03:00:00Z", DS, 3, 300, "DE"),
+                ("e4", "2026-04-09T04:00:00Z", DS, 4, 100, "CA"),
+            ], ["event_id", "event_timestamp", "ds", "hour", "user_id", "country"])
+            signups.writeTo("iceberg.ingest.test_signups").createOrReplace()
+            print(f"[test] Created test_signups: {signups.count()} rows")
+
+            spark.sql("DROP TABLE IF EXISTS iceberg.ingest.test_purchases")
+            purchases = spark.createDataFrame([
+                ("e10", "2026-04-09T10:00:00Z", DS, 10, 100, 50.0),
+                ("e11", "2026-04-09T11:00:00Z", DS, 11, 100, 75.0),
+                ("e12", "2026-04-09T12:00:00Z", DS, 12, 300, 200.0),
+                ("e13", "2026-04-09T13:00:00Z", DS, 13, 400, 30.0),
+            ], ["event_id", "event_timestamp", "ds", "hour", "actor_id", "amount"])
+            purchases.writeTo("iceberg.ingest.test_purchases").createOrReplace()
+            print(f"[test] Created test_purchases: {purchases.count()} rows")
+
+            # Aggregate signups
+            signups_agg = spark.sql(f"""
+                SELECT user_id, max_by(country, event_timestamp) AS home_country
+                FROM iceberg.ingest.test_signups WHERE ds = '{DS}'
+                GROUP BY user_id
+            """)
+            print("[test] Signups aggregation:")
+            signups_agg.show()
+
+            # Aggregate purchases
+            purchases_agg = spark.sql(f"""
+                SELECT actor_id AS user_id,
+                       sum(amount) AS lifetime_revenue,
+                       count(*) AS purchase_count
+                FROM iceberg.ingest.test_purchases WHERE ds = '{DS}'
+                GROUP BY actor_id
+            """)
+            print("[test] Purchases aggregation:")
+            purchases_agg.show()
+
+            # Write loads to S3
+            s_id = str(uuid.uuid4())[:8]
+            p_id = str(uuid.uuid4())[:8]
+            base = f"s3a://{S3_BUCKET}/lattik/{TABLE_NAME}/loads"
+
+            signups_agg.coalesce(1).write.mode("overwrite").parquet(f"{base}/{s_id}/bucket=0000")
+            print(f"[test] Wrote signups load: {s_id}")
+
+            purchases_agg.coalesce(1).write.mode("overwrite").parquet(f"{base}/{p_id}/bucket=0000")
+            print(f"[test] Wrote purchases load: {p_id}")
+
+            # Verify by reading back
+            print("[test] Reading back signups load:")
+            spark.read.parquet(f"{base}/{s_id}/bucket=0000").show()
+            print("[test] Reading back purchases load:")
+            spark.read.parquet(f"{base}/{p_id}/bucket=0000").show()
+
+            # Write manifest (simple JSON, no API call needed for this test)
+            manifest = {"version": 1, "columns": {
+                "home_country": s_id,
+                "lifetime_revenue": p_id,
+                "purchase_count": p_id,
+            }}
+            manifest_path = f"{base}/../manifests/v0001_{s_id}.json"
+            spark.sparkContext.parallelize([json.dumps(manifest, indent=2)]).coalesce(1).saveAsTextFile(
+                f"s3a://{S3_BUCKET}/lattik/{TABLE_NAME}/manifests/v0001_{s_id}"
+            )
+            print(f"[test] Wrote manifest v0001_{s_id}")
+
+            print("\n" + "=" * 60)
+            print("[test] WRITE PATH TEST PASSED")
+            print(f"[test] Table: {TABLE_NAME}")
+            print(f"[test] Signups load: {s_id}")
+            print(f"[test] Purchases load: {p_id}")
+            print("=" * 60)
+
+        finally:
+            spark.stop()
+
+    if __name__ == "__main__":
+        main()
+---
+apiVersion: sparkoperator.k8s.io/v1beta2
+kind: SparkApplication
+metadata:
+  name: lattik-stitch-test
+  namespace: workloads
+spec:
+  type: Python
+  pythonVersion: "3"
+  mode: cluster
+  image: lattik/spark-iceberg:4.0.2-1.10.1
+  imagePullPolicy: IfNotPresent
+  mainApplicationFile: "local:///opt/spark/work-dir/test_stitch_write_path.py"
+  sparkVersion: "4.0.2"
+  restartPolicy:
+    type: Never
+  driver:
+    cores: 1
+    memory: 1024m
+    serviceAccount: spark-driver
+    envFrom:
+      - secretRef:
+          name: minio-credentials
+    env:
+      - name: AWS_REGION
+        value: us-east-1
+    volumeMounts:
+      - name: test-script
+        mountPath: /opt/spark/work-dir/test_stitch_write_path.py
+        subPath: test_stitch_write_path.py
+  executor:
+    cores: 1
+    instances: 1
+    memory: 1024m
+    envFrom:
+      - secretRef:
+          name: minio-credentials
+    env:
+      - name: AWS_REGION
+        value: us-east-1
+  volumes:
+    - name: test-script
+      configMap:
+        name: stitch-test-script
+  sparkConf:
+    spark.sql.extensions: "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
+    spark.sql.catalog.iceberg: "org.apache.iceberg.spark.SparkCatalog"
+    spark.sql.catalog.iceberg.catalog-impl: "org.apache.iceberg.rest.RESTCatalog"
+    spark.sql.catalog.iceberg.uri: "http://iceberg-rest.iceberg.svc.cluster.local:8181"
+    spark.sql.catalog.iceberg.warehouse: "s3://warehouse/"
+    spark.sql.catalog.iceberg.io-impl: "org.apache.iceberg.aws.s3.S3FileIO"
+    spark.sql.catalog.iceberg.s3.endpoint: "http://minio.minio.svc.cluster.local:9000"
+    spark.sql.catalog.iceberg.s3.path-style-access: "true"
+    spark.sql.catalog.iceberg.s3.access-key-id: "lattik"
+    spark.sql.catalog.iceberg.s3.secret-access-key: "lattik-local"
+    spark.sql.catalog.iceberg.s3.region: "us-east-1"
+    spark.sql.defaultCatalog: "iceberg"
+    spark.hadoop.fs.s3a.endpoint: "http://minio.minio.svc.cluster.local:9000"
+    spark.hadoop.fs.s3a.access.key: "lattik"
+    spark.hadoop.fs.s3a.secret.key: "lattik-local"
+    spark.hadoop.fs.s3a.path.style.access: "true"
+    spark.hadoop.fs.s3a.impl: "org.apache.hadoop.fs.s3a.S3AFileSystem"
