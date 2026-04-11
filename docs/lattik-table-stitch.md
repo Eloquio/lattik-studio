@@ -1427,6 +1427,10 @@ Spark handles the distributed shuffle (which is what it's good at). The Rust cor
 The batch job is what the Airflow DAG's `build__<table>` task runs. It processes each family independently, creating a new load for each:
 
 ```python
+import requests
+
+LATTIK_API = "https://lattik-studio.dev/api/lattik"
+
 def build_lattik_table(spark, table_name, ds, hour, spec, format_id="vortex",
                        target_bucket_size=128 * 1024 * 1024):
     """
@@ -1435,16 +1439,13 @@ def build_lattik_table(spark, table_name, ds, hour, spec, format_id="vortex",
     """
     table_path = f"s3://warehouse/lattik/{table_name}"
 
-    # Step 1: Read latest commit from Postgres
-    base_version, base_load_id = db.query_one(
-        "SELECT manifest_version, manifest_load_id "
-        "FROM lattik_table_commits WHERE table_name = %s "
-        "ORDER BY manifest_version DESC LIMIT 1", table_name
-    )
+    # Step 1: Read latest commit from the API
+    resp = requests.get(f"{LATTIK_API}/commit", params={"table": table_name, "mode": "latest"})
+    base_version = resp.json().get("manifest_version", 0)
 
     # Step 2: Write loads to S3 (immutable — this is the expensive step, done once)
     # Each load writes load.json + bucketed data (+ PK index if format supports it)
-    load_results = {}  # family_name → (load_id, column_names)
+    column_overrides = {}  # column_name → load_id
     for family in spec["column_families"]:
         family_df = aggregate_family(spark, family)
         column_names = [col["name"] for col in family["columns"]]
@@ -1455,76 +1456,40 @@ def build_lattik_table(spark, table_name, ds, hour, spec, format_id="vortex",
             format_id=format_id,
             target_bucket_size=target_bucket_size,
         )
-        load_results[family["name"]] = (load_id, column_names)
+        for col_name in column_names:
+            column_overrides[col_name] = load_id
 
-    # Step 3: Build manifest and commit (with OCC retry)
-    primary_load_id = list(load_results.values())[0][0]
-    commit(table_name, table_path, spec, ds, hour,
-           base_version, base_load_id, primary_load_id, load_results)
+    # Step 3: Commit via API (handles OCC, manifest write, Postgres transaction)
+    primary_load_id = list(set(column_overrides.values()))[0]
+    commit_via_api(table_name, base_version, primary_load_id, column_overrides, ds, hour)
 
-def commit(table_name, table_path, spec, ds, hour,
-           base_version, base_load_id, our_load_id, load_results):
-    """Build a new manifest, commit to both Postgres tables with OCC."""
+def commit_via_api(table_name, base_version, load_id, columns, ds, hour):
+    """Commit via the Lattik Studio API. Retries on OCC conflict."""
     while True:
-        # Read the base manifest's column map
-        base_manifest = read_s3_json(
-            f"{table_path}/manifests/v{base_version:04d}_{base_load_id}.json"
-        )
-
-        # Build new column map: carry forward base columns, override with our new loads
-        new_column_map = dict(base_manifest.get("columns", {}))
-        for family in spec["column_families"]:
-            load_id, _ = load_results[family["name"]]
-            for col in family["columns"]:
-                new_column_map[col["name"]] = load_id
-
-        # Write new manifest to S3 (immutable, single snapshot)
-        new_version = base_version + 1
-        write_s3_json(f"{table_path}/manifests/v{new_version:04d}_{our_load_id}.json", {
-            "version": new_version,
-            "columns": new_column_map,
+        resp = requests.post(f"{LATTIK_API}/commit", json={
+            "table_name": table_name,
+            "base_version": base_version,
+            "load_id": load_id,
+            "columns": columns,
+            "ds": ds,
+            "hour": hour,
         })
+        result = resp.json()
 
-        # Atomic commit to both Postgres tables in one transaction
-        try:
-            with db.transaction():
-                # 1. Insert into commit log (PK constraint = OCC)
-                db.execute(
-                    "INSERT INTO lattik_table_commits "
-                    "(table_name, manifest_version, manifest_load_id) "
-                    "VALUES (%s, %s, %s)",
-                    table_name, new_version, our_load_id
-                )
+        if result["status"] == "committed":
+            return result["version"]
 
-                # 2. Upsert per-column ETL time tracking
-                for family in spec["column_families"]:
-                    load_id, column_names = load_results[family["name"]]
-                    for col_name in column_names:
-                        db.execute(
-                            "INSERT INTO lattik_column_loads "
-                            "(table_name, column_name, ds, hour, load_id, manifest_version) "
-                            "VALUES (%s, %s, %s, %s, %s, %s) "
-                            "ON CONFLICT (table_name, column_name, ds, hour) DO UPDATE "
-                            "SET load_id = EXCLUDED.load_id, "
-                            "    manifest_version = EXCLUDED.manifest_version, "
-                            "    committed_at = now()",
-                            table_name, col_name, ds, hour, load_id, new_version
-                        )
-            return  # success — both tables committed atomically
+        if result["status"] == "conflict":
+            # Another writer committed first. Rebase on the new version.
+            # Load data is already on S3 — only the manifest needs rebuilding.
+            # The API handles manifest construction, so we just retry with the new base.
+            base_version = result["base_version"]
+            continue
 
-        except UniqueViolation:
-            pass  # conflict on lattik_table_commits — another writer committed first
-
-        # Rebase: read the winner's version and retry.
-        # Load data is already on S3 — only the manifest is regenerated.
-        base_version, base_load_id = db.query_one(
-            "SELECT manifest_version, manifest_load_id "
-            "FROM lattik_table_commits WHERE table_name = %s "
-            "ORDER BY manifest_version DESC LIMIT 1", table_name
-        )
+        raise RuntimeError(f"Commit failed: {result}")
 ```
 
-Both Postgres inserts happen in a single transaction — if the commit log INSERT succeeds, the column loads UPSERTs are guaranteed to succeed too (no PK conflict on that table thanks to `ON CONFLICT DO UPDATE`). If the commit log INSERT fails (OCC conflict), the whole transaction rolls back and neither table is affected.
+The Spark job never connects to Postgres directly. All commit logic (manifest write, OCC, Postgres transactions) lives in the Lattik Studio API at `POST /api/lattik/commit`. The Spark job only needs S3 credentials (for writing load data) and the API endpoint (for committing).
 
 **No cross-family join at write time.** Each family is self-contained. The stitch is purely a read-time concern.
 
