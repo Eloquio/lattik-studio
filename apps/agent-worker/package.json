@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "tsx src/index.ts",
-    "dev": "tsx watch src/index.ts"
+    "start": "tsx --use-system-ca --env-file=.env src/index.ts",
+    "dev": "tsx watch --use-system-ca --env-file=.env src/index.ts"
   },
   "dependencies": {
     "ai": "^6.0.141",
