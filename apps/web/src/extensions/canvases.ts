@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import type { Spec } from "@json-render/core";
 import { DataArchitectCanvas } from "./data-architect/canvas/data-architect-canvas";
+import { DataAnalystCanvas } from "./data-analyst/canvas/data-analyst-canvas";
 
 type CanvasComponent = ComponentType<{
   spec: Spec | null;
@@ -11,6 +12,7 @@ type CanvasComponent = ComponentType<{
 
 const canvases: Record<string, CanvasComponent> = {
   "data-architect": DataArchitectCanvas,
+  "data-analyst": DataAnalystCanvas,
 };
 
 export function getCanvas(id: string): CanvasComponent | undefined {

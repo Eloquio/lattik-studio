@@ -6,12 +6,31 @@ import { DefaultChatTransport } from "ai";
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Bot, Pencil, Plus, Trash2 } from "lucide-react";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { buildSpecFromParts } from "@json-render/react";
 import { ToolResult } from "./tool-result";
 import { ReviewSuggestions } from "./review-suggestions";
 import type { ReviewSuggestion } from "@/extensions/data-architect/tools/review-definition";
 import { saveConversation, deleteConversation } from "@/lib/actions/conversations";
 import type { TaskStackEntry } from "@/lib/types/task-stack";
+
+/** Map extensionId → human-readable display name for the chat header and
+ *  per-message agent labels. Keeps the client component free of server-only
+ *  registry imports. Falls back to a formatted version of the ID. */
+function extensionDisplayName(extensionId: string): string {
+  const known: Record<string, string> = {
+    "data-architect": "Data Architect",
+    "data-analyst": "Data Analyst",
+    "pipeline-manager": "Pipeline Manager",
+  };
+  return (
+    known[extensionId] ??
+    extensionId
+      .split("-")
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ")
+  );
+}
 
 interface ChatPanelProps {
   chatId: string;
@@ -94,15 +113,26 @@ export function ChatPanel({
   useEffect(() => {
     for (const msg of messages) {
       if (msg.role === "assistant" && !messageAgentMap.current.has(msg.id)) {
-        messageAgentMap.current.set(msg.id, extensionIdRef.current);
+        // Infer the producing agent from the message's own tool parts rather
+        // than extensionIdRef, which may have already been updated by the
+        // handoff detection effect that runs in the same render cycle.
+        // A message containing a tool-handoff part was produced by the
+        // assistant (extensionId = null), not the specialist it handed off to.
+        const hasHandoff = msg.parts?.some(
+          (p) => p.type === "tool-handoff"
+        );
+        messageAgentMap.current.set(
+          msg.id,
+          hasHandoff ? null : extensionIdRef.current
+        );
       }
     }
   }, [messages]);
 
   function getAgentLabel(messageId: string) {
     const agentId = messageAgentMap.current.get(messageId);
-    if (agentId === "data-architect") return "Data Architect";
-    return "Assistant";
+    if (!agentId) return "Assistant";
+    return extensionDisplayName(agentId);
   }
 
   useEffect(() => {
@@ -312,7 +342,7 @@ export function ChatPanel({
   // kind render tools (renderEntityForm, renderLoggerTableForm, etc.) or
   // generateYaml, and the tool returns a complete server-built spec. The
   // matched tools are:
-  //   - tool-render*Form (form rendering)
+  //   - tool-render* (any render tool — forms, overviews, detail views)
   //   - tool-generateYaml (YAML editor rendering)
   // This effect must run after the JSONL stream-rebuild effect above so its
   // setCanvasSpec call wins on conflict (in practice there is no conflict —
@@ -323,11 +353,11 @@ export function ChatPanel({
     for (const msg of messages) {
       if (msg.role !== "assistant") continue;
       for (const part of msg.parts) {
-        const isRenderFormPart =
-          part.type.startsWith("tool-render") && part.type.endsWith("Form");
+        const isRenderPart = part.type.startsWith("tool-render");
         const isGenerateYamlPart = part.type === "tool-generateYaml";
+        const isRunQueryPart = part.type === "tool-runQuery";
         if (
-          (isRenderFormPart || isGenerateYamlPart) &&
+          (isRenderPart || isGenerateYamlPart || isRunQueryPart) &&
           "state" in part &&
           (part as { state: string }).state === "output-available" &&
           "output" in part
@@ -373,7 +403,7 @@ export function ChatPanel({
         <div className="flex items-center gap-2">
           <Bot className="h-4 w-4 text-[#e0a96e]" />
           <span className="text-sm font-medium text-white/70">
-            {activeExtensionId === "data-architect" ? "Data Architect" : "Lattik Studio Assistant"}
+            {activeExtensionId ? extensionDisplayName(activeExtensionId) : "Lattik Studio Assistant"}
           </span>
         </div>
         <div className="flex items-center gap-1.5">
@@ -441,12 +471,13 @@ export function ChatPanel({
                     <span className="text-xs font-semibold text-[#e0a96e]">
                       {getAgentLabel(message.id)}
                     </span>
-                    <div className="mt-1 border-l-2 border-[#e0a96e]/40 pl-4 text-sm text-white/90 prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-headings:text-white prose-strong:text-white prose-code:text-[#e0a96e] prose-code:bg-white/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-pre:bg-white/5 prose-pre:border prose-pre:border-white/10 prose-a:text-[#e0a96e] prose-a:font-medium prose-a:underline prose-a:decoration-[#e0a96e]/50 prose-a:underline-offset-2 hover:prose-a:text-[#f0bb84] hover:prose-a:decoration-[#e0a96e]">
+                    <div className="mt-1 border-l-2 border-[#e0a96e]/40 pl-4 text-sm text-white/90 prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-headings:text-white prose-strong:text-white prose-code:text-[#e0a96e] prose-code:bg-white/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-pre:bg-white/5 prose-pre:border prose-pre:border-white/10 prose-a:text-[#e0a96e] prose-a:font-medium prose-a:underline prose-a:decoration-[#e0a96e]/50 prose-a:underline-offset-2 hover:prose-a:text-[#f0bb84] hover:prose-a:decoration-[#e0a96e] prose-table:border-collapse prose-table:w-full prose-table:text-xs prose-th:border prose-th:border-white/20 prose-th:bg-white/5 prose-th:px-2 prose-th:py-1 prose-th:text-left prose-th:text-white/80 prose-td:border prose-td:border-white/10 prose-td:px-2 prose-td:py-1">
                       {message.parts.map((part, i) => {
                         if (part.type === "text") {
                           return (
                             <Markdown
                               key={i}
+                              remarkPlugins={[remarkGfm]}
                               skipHtml
                               disallowedElements={["script", "iframe", "object", "embed", "form"]}
                               components={{

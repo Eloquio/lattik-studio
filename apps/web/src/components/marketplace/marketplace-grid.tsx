@@ -84,13 +84,14 @@ export function MarketplaceGrid({ agents, enabledIds: initialEnabledIds }: Marke
   const Icon = selectedAgent ? (iconMap[selectedAgent.icon] || Blocks) : Blocks;
 
   return (
-    <div className="flex h-full flex-col gap-0 overflow-hidden rounded-xl border border-white/10 bg-white/5 backdrop-blur-sm">
+    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-white/10 bg-white/5 backdrop-blur-sm">
       {error && (
         <div className="flex items-center justify-between border-b border-red-500/20 bg-red-500/10 px-4 py-2">
           <span className="text-xs text-red-400">{error}</span>
           <button onClick={() => setError(null)} className="text-xs text-red-400/60 hover:text-red-400">dismiss</button>
         </div>
       )}
+      <div className="flex flex-1 overflow-hidden">
       {/* Sidebar */}
       <div className="flex w-64 shrink-0 flex-col border-r border-white/10">
         {/* Search */}
@@ -210,6 +211,7 @@ export function MarketplaceGrid({ agents, enabledIds: initialEnabledIds }: Marke
             Select an agent to view details
           </div>
         )}
+      </div>
       </div>
     </div>
   );
