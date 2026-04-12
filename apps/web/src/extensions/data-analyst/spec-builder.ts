@@ -20,6 +20,10 @@ export interface AnalystCanvasState {
   rowCount?: number;
   truncated?: boolean;
   chart?: ChartConfig;
+  /** Panel visibility — all default to true when data exists */
+  showSql?: boolean;
+  showResults?: boolean;
+  showChart?: boolean;
 }
 
 export type ChartType = "bar" | "line" | "area" | "pie" | "scatter";
@@ -43,29 +47,35 @@ export function buildAnalystCanvasSpec(state: AnalystCanvasState): Spec {
   const children: string[] = [];
   const elements: Record<string, { type: string; props: Record<string, unknown>; children?: string[] }> = {};
 
-  // SQL Editor — always shown if we have SQL
-  if (state.sql !== undefined) {
+  const showSql = state.showSql !== false;
+  const showResults = state.showResults !== false;
+  const showChart = state.showChart !== false;
+
+  // SQL Editor
+  if (state.sql !== undefined && showSql) {
     children.push("sql-editor");
     elements["sql-editor"] = { type: "SqlEditor", props: {} };
   }
 
-  // Query Stats + Results Table — shown after query runs
+  // Query Stats + Results Table
   if (state.queryStatus === "success" && state.columns && state.rows) {
     children.push("query-stats");
     elements["query-stats"] = { type: "QueryStats", props: {} };
 
-    children.push("results-table");
-    elements["results-table"] = { type: "ResultsTable", props: {} };
+    if (showResults) {
+      children.push("results-table");
+      elements["results-table"] = { type: "ResultsTable", props: {} };
+    }
   }
 
-  // Query error — shown when query fails
+  // Query error
   if (state.queryStatus === "error" && state.queryError) {
     children.push("query-error");
     elements["query-error"] = { type: "QueryError", props: {} };
   }
 
-  // Chart — shown when chart config exists and we have data
-  if (state.chart && state.columns && state.rows) {
+  // Chart
+  if (state.chart && state.columns && state.rows && showChart) {
     const chartComponentType = chartTypeToComponent(state.chart.type);
     children.push("chart-container");
     elements["chart-container"] = {
@@ -93,6 +103,9 @@ export function buildAnalystCanvasSpec(state: AnalystCanvasState): Spec {
       rowCount: state.rowCount ?? 0,
       truncated: state.truncated ?? false,
       chart: state.chart ?? null,
+      showSql: state.showSql ?? true,
+      showResults: state.showResults ?? true,
+      showChart: state.showChart ?? true,
     },
   };
 }
@@ -130,5 +143,8 @@ export function extractAnalystState(canvasState: unknown): AnalystCanvasState {
     rowCount: typeof state.rowCount === "number" ? state.rowCount : undefined,
     truncated: typeof state.truncated === "boolean" ? state.truncated : undefined,
     chart: state.chart && typeof state.chart === "object" ? state.chart as ChartConfig : undefined,
+    showSql: typeof state.showSql === "boolean" ? state.showSql : undefined,
+    showResults: typeof state.showResults === "boolean" ? state.showResults : undefined,
+    showChart: typeof state.showChart === "boolean" ? state.showChart : undefined,
   };
 }

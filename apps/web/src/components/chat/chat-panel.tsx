@@ -356,8 +356,9 @@ export function ChatPanel({
         const isRenderPart = part.type.startsWith("tool-render");
         const isGenerateYamlPart = part.type === "tool-generateYaml";
         const isRunQueryPart = part.type === "tool-runQuery";
+        const isUpdateLayoutPart = part.type === "tool-updateLayout";
         if (
-          (isRenderPart || isGenerateYamlPart || isRunQueryPart) &&
+          (isRenderPart || isGenerateYamlPart || isRunQueryPart || isUpdateLayoutPart) &&
           "state" in part &&
           (part as { state: string }).state === "output-available" &&
           "output" in part

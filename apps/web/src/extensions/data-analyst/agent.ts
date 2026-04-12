@@ -10,6 +10,7 @@ import {
   createRunQueryTool,
   createRenderChartTool,
   createReadCanvasStateTool,
+  createUpdateLayoutTool,
 } from "./tools";
 import { listDefinitionsTool } from "../data-architect/tools/list-definitions";
 import { getDefinitionTool } from "../data-architect/tools/get-definition";
@@ -78,7 +79,11 @@ export function dataAnalystAgent(options?: AgentOptions): ExtensionAgent {
     ? `[CONTEXT] ${options.resumeContext}\n\n${instructions}`
     : instructions;
 
-  const getCanvasState = () => options?.canvasState;
+  // Mutable canvas state so tools within the same request can see each
+  // other's updates (e.g. runQuery produces results, then renderChart reads them).
+  let latestCanvasState: unknown = options?.canvasState;
+  const getCanvasState = () => latestCanvasState;
+  const setCanvasState = (spec: unknown) => { latestCanvasState = spec; };
 
   return new ToolLoopAgent({
     id: "data-analyst",
@@ -88,10 +93,11 @@ export function dataAnalystAgent(options?: AgentOptions): ExtensionAgent {
       getSkill: getSkillTool,
       listTables: listTablesTool,
       describeTable: describeTableTool,
-      renderSqlEditor: createRenderSqlEditorTool(getCanvasState),
-      runQuery: createRunQueryTool(getCanvasState),
-      renderChart: createRenderChartTool(getCanvasState),
+      renderSqlEditor: createRenderSqlEditorTool(getCanvasState, setCanvasState),
+      runQuery: createRunQueryTool(getCanvasState, setCanvasState),
+      renderChart: createRenderChartTool(getCanvasState, setCanvasState),
       readCanvasState: createReadCanvasStateTool(getCanvasState),
+      updateLayout: createUpdateLayoutTool(getCanvasState, setCanvasState),
       listDefinitions: listDefinitionsTool,
       getDefinition: getDefinitionTool,
       handback: {

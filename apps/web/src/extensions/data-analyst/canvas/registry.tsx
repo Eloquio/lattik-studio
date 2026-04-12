@@ -23,7 +23,7 @@ import {
 } from "recharts";
 import CodeMirror from "@uiw/react-codemirror";
 import { sql as sqlLanguage } from "@codemirror/lang-sql";
-import { AlertCircle, ChevronLeft, ChevronRight, Table2 } from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Table2 } from "lucide-react";
 import { catalog } from "./catalog";
 
 // ---- State helper ----
@@ -144,6 +144,7 @@ function ResultsTableComponent() {
   const [columns] = useField<{ name: string; type: string }[]>("columns");
   const [rows] = useField<unknown[][]>("rows");
   const [page, setPage] = useState(0);
+  const [collapsed, setCollapsed] = useState(false);
 
   if (!columns?.length || !rows?.length) return null;
 
@@ -152,68 +153,86 @@ function ResultsTableComponent() {
 
   return (
     <div className={cardCls}>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="border-b border-stone-200 bg-stone-50">
-              {columns.map((col) => (
-                <th
-                  key={col.name}
-                  className="whitespace-nowrap px-3 py-2 text-left font-medium text-stone-600"
-                >
-                  {col.name}
-                  <span className="ml-1 text-[10px] font-normal text-stone-400">
-                    {col.type}
-                  </span>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {pageRows.map((row, ri) => (
-              <tr
-                key={ri}
-                className="border-b border-stone-100 last:border-0 hover:bg-stone-50/50"
-              >
-                {columns.map((col, ci) => (
-                  <td
-                    key={col.name}
-                    className="whitespace-nowrap px-3 py-1.5 text-stone-700 font-mono"
+      <button
+        className={`${headerCls} w-full cursor-pointer select-none hover:bg-stone-100 transition-colors`}
+        onClick={() => setCollapsed((c) => !c)}
+      >
+        <Table2 className="h-3.5 w-3.5 text-stone-400" />
+        <span className={`${headerTitleCls} flex-1 text-left`}>
+          Results ({rows.length} rows)
+        </span>
+        {collapsed ? (
+          <ChevronDown className="h-3.5 w-3.5 text-stone-400" />
+        ) : (
+          <ChevronUp className="h-3.5 w-3.5 text-stone-400" />
+        )}
+      </button>
+      {!collapsed && (
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-stone-200 bg-stone-50">
+                  {columns.map((col) => (
+                    <th
+                      key={col.name}
+                      className="whitespace-nowrap px-3 py-2 text-left font-medium text-stone-600"
+                    >
+                      {col.name}
+                      <span className="ml-1 text-[10px] font-normal text-stone-400">
+                        {col.type}
+                      </span>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {pageRows.map((row, ri) => (
+                  <tr
+                    key={ri}
+                    className="border-b border-stone-100 last:border-0 hover:bg-stone-50/50"
                   >
-                    {row[ci] === null ? (
-                      <span className="text-stone-300 italic">null</span>
-                    ) : (
-                      String(row[ci])
-                    )}
-                  </td>
+                    {columns.map((col, ci) => (
+                      <td
+                        key={col.name}
+                        className="whitespace-nowrap px-3 py-1.5 text-stone-700 font-mono"
+                      >
+                        {row[ci] === null ? (
+                          <span className="text-stone-300 italic">null</span>
+                        ) : (
+                          String(row[ci])
+                        )}
+                      </td>
+                    ))}
+                  </tr>
                 ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between border-t border-stone-200 bg-stone-50 px-3 py-1.5">
-          <span className="text-[11px] text-stone-500">
-            Page {page + 1} of {totalPages}
-          </span>
-          <div className="flex gap-1">
-            <button
-              className="rounded p-1 text-stone-400 hover:bg-stone-200 hover:text-stone-600 disabled:opacity-30 disabled:hover:bg-transparent"
-              disabled={page === 0}
-              onClick={() => setPage((p) => p - 1)}
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-            </button>
-            <button
-              className="rounded p-1 text-stone-400 hover:bg-stone-200 hover:text-stone-600 disabled:opacity-30 disabled:hover:bg-transparent"
-              disabled={page >= totalPages - 1}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
+              </tbody>
+            </table>
           </div>
-        </div>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between border-t border-stone-200 bg-stone-50 px-3 py-1.5">
+              <span className="text-[11px] text-stone-500">
+                Page {page + 1} of {totalPages}
+              </span>
+              <div className="flex gap-1">
+                <button
+                  className="rounded p-1 text-stone-400 hover:bg-stone-200 hover:text-stone-600 disabled:opacity-30 disabled:hover:bg-transparent"
+                  disabled={page === 0}
+                  onClick={() => setPage((p) => p - 1)}
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  className="rounded p-1 text-stone-400 hover:bg-stone-200 hover:text-stone-600 disabled:opacity-30 disabled:hover:bg-transparent"
+                  disabled={page >= totalPages - 1}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
