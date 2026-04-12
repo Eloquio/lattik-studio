@@ -10,7 +10,7 @@ A local mirror of the production data lake (S3 + Iceberg) running in the kind cl
 | **iceberg-rest** | Iceberg REST catalog. Stores which tables exist and where their metadata lives. SQLite-backed. | `tabulario/iceberg-rest:1.6.0` | `iceberg` | `8181` |
 | **MinIO** | S3-compatible object storage. Holds the actual parquet data files and Iceberg metadata.json files. | `minio/minio` | `minio` | `9000` (S3 API), `9001` (web console) |
 | **Spark Operator** | [kubeflow/spark-operator](https://github.com/kubeflow/spark-operator). Watches the `workloads` namespace for `SparkApplication` CRDs and spawns driver+executor pods. | (helm-managed) | `spark-operator` | — |
-| **Spark drivers / executors** | Per-job pods spawned by `SparkApplication` CRDs. Custom image with Iceberg + AWS bundle baked in. | `lattik/spark-iceberg:4.0.2-1.10.1` (built locally) | `workloads` | — |
+| **Spark drivers / executors** | Per-job pods spawned by `SparkApplication` CRDs. Airflow-triggered jobs use `lattik/spark-stitch` (self-contained stitch image built by `projects/lattik-stitch`); manual test fixtures use `lattik/spark-iceberg` (Iceberg-only image built locally). Driver scripts are mounted via a `spark-drivers` ConfigMap, not baked in. | `lattik/spark-stitch:0.1.0-spark4.0.2-iceberg1.10.1` / `lattik/spark-iceberg:4.0.2-1.10.1` | `workloads` | — |
 
 All services run in the kind cluster. Their data persistence is handled by `PersistentVolumeClaim`s against kind's default StorageClass — see [Persistence](#persistence) below.
 
