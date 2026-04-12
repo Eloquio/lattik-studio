@@ -21,6 +21,18 @@ spec:
     type: OnFailure
     onFailureRetries: 1
     onFailureRetryInterval: 30
+  volumes:
+    # Driver scripts mounted from the `spark-drivers` ConfigMap in the
+    # workloads namespace. Populated by `pnpm spark-drivers:sync` from
+    # k8s/spark/drivers/ at dev:up time. Per-file subPath mounts below
+    # shadow the image's baked-in files at /opt/spark/work-dir/<file>
+    # with ConfigMap contents — while the image still bakes them in,
+    # the ConfigMap contents are byte-identical so behavior is unchanged.
+    # When the image is cut over to lattik/spark-stitch (which does NOT
+    # bake the drivers in), this mount becomes the only source for them.
+    - name: spark-drivers
+      configMap:
+        name: spark-drivers
   driver:
     cores: 1
     memory: 1024m
@@ -33,6 +45,16 @@ spec:
     env:
       - name: AWS_REGION
         value: us-east-1
+    volumeMounts:
+      - name: spark-drivers
+        mountPath: /opt/spark/work-dir/lattik_driver_utils.py
+        subPath: lattik_driver_utils.py
+      - name: spark-drivers
+        mountPath: /opt/spark/work-dir/lattik_table_driver.py
+        subPath: lattik_table_driver.py
+      - name: spark-drivers
+        mountPath: /opt/spark/work-dir/lattik_table_backfill.py
+        subPath: lattik_table_backfill.py
   executor:
     cores: 1
     instances: 1
@@ -45,6 +67,16 @@ spec:
     env:
       - name: AWS_REGION
         value: us-east-1
+    volumeMounts:
+      - name: spark-drivers
+        mountPath: /opt/spark/work-dir/lattik_driver_utils.py
+        subPath: lattik_driver_utils.py
+      - name: spark-drivers
+        mountPath: /opt/spark/work-dir/lattik_table_driver.py
+        subPath: lattik_table_driver.py
+      - name: spark-drivers
+        mountPath: /opt/spark/work-dir/lattik_table_backfill.py
+        subPath: lattik_table_backfill.py
   sparkConf:
     spark.sql.extensions: "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
     spark.sql.catalog.iceberg: "org.apache.iceberg.spark.SparkCatalog"
