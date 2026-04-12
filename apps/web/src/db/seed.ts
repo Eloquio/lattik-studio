@@ -13,6 +13,26 @@ const FIRST_PARTY_AGENTS = [
     type: "first-party" as const,
     published: true,
   },
+  {
+    id: "data-analyst",
+    name: "Data Analyst",
+    description:
+      "Query data with SQL, explore tables, and visualize results with charts. Run queries against Trino and create bar, line, area, pie, and scatter charts.",
+    icon: "chart-bar",
+    category: "Data Analysis",
+    type: "first-party" as const,
+    published: true,
+  },
+  {
+    id: "pipeline-manager",
+    name: "Pipeline Manager",
+    description:
+      "Monitor, trigger, and troubleshoot Airflow DAGs for Lattik Tables. View run history, inspect task failures, retry jobs, and manage backfills.",
+    icon: "workflow",
+    category: "Pipeline Operations",
+    type: "first-party" as const,
+    published: true,
+  },
 ];
 
 async function seed() {
