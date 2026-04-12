@@ -9,7 +9,10 @@ import {
 /** Max rows to return to the agent for reasoning (keeps context small). */
 const AGENT_SAMPLE_SIZE = 20;
 
-export function createRunQueryTool(getCanvasState: () => unknown) {
+export function createRunQueryTool(
+  getCanvasState: () => unknown,
+  setCanvasState: (spec: unknown) => void
+) {
   return {
     description:
       "Execute a SQL query against Trino and display results on the canvas. " +
@@ -55,6 +58,8 @@ export function createRunQueryTool(getCanvasState: () => unknown) {
             : undefined,
         });
 
+        setCanvasState(spec);
+
         return {
           spec,
           columns: result.columns,
@@ -84,6 +89,8 @@ export function createRunQueryTool(getCanvasState: () => unknown) {
           truncated: undefined,
           chart: undefined,
         });
+
+        setCanvasState(spec);
 
         return {
           spec,

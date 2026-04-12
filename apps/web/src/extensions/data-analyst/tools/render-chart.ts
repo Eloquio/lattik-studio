@@ -6,7 +6,10 @@ import {
   type ChartType,
 } from "../spec-builder";
 
-export function createRenderChartTool(getCanvasState: () => unknown) {
+export function createRenderChartTool(
+  getCanvasState: () => unknown,
+  setCanvasState: (spec: unknown) => void
+) {
   return {
     description:
       "Add or update a chart visualization on the canvas based on the current query results. " +
@@ -69,6 +72,8 @@ export function createRenderChartTool(getCanvasState: () => unknown) {
           yColumns: input.yColumns,
         },
       });
+
+      setCanvasState(spec);
 
       return {
         spec,

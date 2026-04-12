@@ -5,7 +5,10 @@ import {
   extractAnalystState,
 } from "../spec-builder";
 
-export function createRenderSqlEditorTool(getCanvasState: () => unknown) {
+export function createRenderSqlEditorTool(
+  getCanvasState: () => unknown,
+  setCanvasState: (spec: unknown) => void
+) {
   return {
     description:
       "Render an editable SQL editor on the canvas. The user can review and modify the query before running it. " +
@@ -30,6 +33,8 @@ export function createRenderSqlEditorTool(getCanvasState: () => unknown) {
         truncated: undefined,
         chart: undefined,
       });
+
+      setCanvasState(spec);
 
       return {
         spec,
