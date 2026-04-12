@@ -7,7 +7,7 @@ spec:
   type: Python
   pythonVersion: "3"
   mode: cluster
-  image: lattik/spark-iceberg:4.0.2-1.10.1
+  image: lattik/spark-stitch:0.1.0-spark4.0.2-iceberg1.10.1
   imagePullPolicy: IfNotPresent
   mainApplicationFile: "local:///opt/spark/work-dir/lattik_table_driver.py"
   arguments:
