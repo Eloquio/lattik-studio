@@ -1,6 +1,7 @@
 import { zodSchema } from "ai";
 import { z } from "zod";
 import { executeQuery, TrinoQueryError } from "../lib/trino-client";
+import { executeDuckDbQuery, isLattikScanQuery } from "../lib/duckdb-client";
 import {
   buildAnalystCanvasSpec,
   extractAnalystState,
@@ -37,7 +38,9 @@ export function createRunQueryTool(
       }
 
       try {
-        const result = await executeQuery(sql);
+        const result = isLattikScanQuery(sql)
+          ? await executeDuckDbQuery(sql)
+          : await executeQuery(sql);
         const durationStr = result.durationMs < 1000
           ? `${result.durationMs}ms`
           : `${(result.durationMs / 1000).toFixed(2)}s`;
