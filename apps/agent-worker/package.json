@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "tsx --use-system-ca --env-file=.env src/index.ts",
-    "dev": "tsx watch --use-system-ca --env-file=.env src/index.ts"
+    "dev": "tsx watch --use-system-ca --env-file-if-exists=.env src/index.ts"
   },
   "dependencies": {
     "ai": "^6.0.141",
