@@ -60,7 +60,7 @@ writeFileSync(ENV_PATH, env);
 // Also create apps/agent-worker/.env with the shared TASK_AGENT_SECRET
 if (!existsSync(AGENT_WORKER_ENV_PATH)) {
   const agentSecret = autoFilled.TASK_AGENT_SECRET;
-  writeFileSync(AGENT_WORKER_ENV_PATH, `TASK_AGENT_SECRET=${agentSecret}\n`);
+  writeFileSync(AGENT_WORKER_ENV_PATH, `TASK_API_URL=https://lattik-studio.dev\nTASK_AGENT_SECRET=${agentSecret}\n`);
 }
 
 console.log("");

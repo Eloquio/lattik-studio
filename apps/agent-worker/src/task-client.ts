@@ -3,9 +3,12 @@
  * All agent interactions with the task queue go through this client.
  */
 
-const API_BASE = process.env.TASK_API_URL ?? "http://localhost:3000";
+const API_BASE = process.env.TASK_API_URL;
 const API_SECRET = process.env.TASK_AGENT_SECRET;
 
+if (!API_BASE) {
+  throw new Error("TASK_API_URL is required");
+}
 if (!API_SECRET) {
   throw new Error("TASK_AGENT_SECRET is required");
 }
