@@ -67,24 +67,19 @@ packages/              Shared packages
 ## Development
 
 ```bash
-# Bring up the full dev stack: kind cluster + namespaces + postgres + gitea + trino/minio/iceberg-rest + airflow
-# (Spark Operator and Kafka are opt-in via `pnpm spark:start` / `pnpm kafka:start`)
+# Bring up prerequisites: kind cluster + namespaces + postgres + db schema + seed data
 pnpm dev:up
-
-# Or, for a minimum env (cluster + postgres only — much faster, ~6 GB less RAM):
-pnpm cluster:up && pnpm db:start
-
-# Push database schema
-pnpm db:push
-
-# If gitea is running, grab the API token from the init logs and set GITEA_TOKEN in apps/web/.env
-pnpm gitea:init-logs
 
 # Start portless proxy with .dev TLD (required for Google OAuth)
 portless proxy start --tld dev
 
-# Run dev server (serves at https://lattik-studio.dev)
+# Start the dev server (serves at https://lattik-studio.dev)
+# Also brings up remaining services (gitea, trino, kafka, spark, airflow, etc.)
+# in the background — tail -f .dev-services.log to follow progress.
 pnpm dev
+
+# Or, for a minimum env (cluster + postgres only — much faster, ~6 GB less RAM):
+# pnpm cluster:up && pnpm db:start && pnpm db:push
 
 # Build
 pnpm build
@@ -98,14 +93,14 @@ pnpm dev:down
 - `cluster:up` / `cluster:down` — kind cluster lifecycle. `cluster:up` also applies [`k8s/namespaces.yaml`](k8s/namespaces.yaml) so every per-service script can assume its namespace exists. `cluster:down` deletes the cluster, which kills every service and PVC inside it.
 - `db:start` / `db:stop`, `gitea:start` / `gitea:stop`, `trino:start` / `trino:stop`, `airflow:start` / `airflow:stop` — per-service. Each `*:start` assumes the cluster is already up. `airflow:start` additionally assumes `db:start` has run, since Airflow's metadata DB is the existing postgres.
 - `spark:image-build` / `spark:start` / `spark:stop` / `spark:logs` / `spark:submit-example` — Spark stack. `spark:image-build` builds and `kind load`s `lattik/spark-iceberg` (used only by the manual test fixtures `k8s/spark-example.yaml` and `k8s/spark-stitch-test.yaml`; NOT used by Airflow-triggered jobs). `spark:start` helm-installs the operator; `spark:submit-example` round-trips an Iceberg write+read through the same catalog Trino uses.
-- `spark-drivers:sync` — populates the `spark-drivers` ConfigMap in the `workloads` namespace from `k8s/spark/drivers/`. Idempotent (create-or-update). Run automatically by `dev:up` between `spark:start` and `airflow:start`. Re-run manually after editing any driver script to pick up changes without an image rebuild.
+- `spark-drivers:sync` — populates the `spark-drivers` ConfigMap in the `workloads` namespace from `k8s/spark/drivers/`. Idempotent (create-or-update). Run automatically by `dev:services` between `spark:start` and `airflow:start`. Re-run manually after editing any driver script to pick up changes without an image rebuild.
 - `stitch:spark:image-build` / `stitch:trino:image-build` / `stitch:image-build` — delegates to `../lattik-stitch/scripts/image-build.sh`. Builds the self-contained `lattik/spark-stitch` and `lattik/trino-stitch` images (Rust JNI + Kotlin/Java plugins + Iceberg runtime + Arrow deps) and kind-loads them. `stitch:image-build` builds both sequentially. Tags are versioned — see the [lattik-stitch README](../../lattik-stitch/README.md) for the tag scheme.
 - `airflow:image-build` — builds the custom `lattik/airflow:3.2.0` image (adds `boto3` for S3 access) and loads it into the kind cluster. Must be run before `airflow:start` on a fresh cluster.
 - `airflow:dags-sync` — copies DAG files from `airflow/dags/` into the kind node. Called automatically by `airflow:start`.
 - `kafka:start` / `kafka:stop` / `kafka:logs` / `kafka:cli` — Kafka broker. `kafka:start` deploys a single-node KRaft broker; `kafka:cli` opens a shell in the pod (Kafka CLI tools live in `/opt/kafka/bin/`).
 - `schema-registry:start` / `schema-registry:stop` / `schema-registry:logs` — Confluent Schema Registry. Requires `kafka:start` first. Stateless — schemas are stored in Kafka.
 - `ingest:image-build` / `ingest:start` / `ingest:stop` / `ingest:logs` — Go ingestion service. `ingest:image-build` builds and loads the `lattik/ingest` image; `ingest:start` deploys into `workloads` ns. Requires `kafka:start` first.
-- `dev:up` / `dev:down` — convenience aggregations. `dev:up` brings up the cluster + every service in sequence, including `spark-drivers:sync` (ConfigMap population) and `stitch:image-build` (via `images:build`); `dev:down` is an alias for `cluster:down`. Note: `spark:image-build` is NOT included in `dev:up` — the `lattik/spark-iceberg` image is only needed for optional manual fixtures.
+- `dev:up` / `dev:services` / `dev:down` — convenience aggregations. `dev:up` brings up the prerequisites (env, cluster, postgres, schema push, seed) — everything needed before the web UI can start. `dev:services` brings up the remaining infrastructure (image builds, gitea, trino, kafka, schema-registry, ingest, spark, airflow) — automatically started in the background by `pnpm dev`. `dev:down` is an alias for `cluster:down`. Note: `spark:image-build` is NOT included — the `lattik/spark-iceberg` image is only needed for optional manual fixtures.
 
 ### Namespace layout
 

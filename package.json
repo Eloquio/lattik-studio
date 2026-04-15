@@ -2,7 +2,7 @@
   "name": "lattik-studio",
   "private": true,
   "scripts": {
-    "dev": "turbo dev",
+    "dev": "pnpm dev:up",
     "build": "turbo build",
     "lint": "turbo lint",
     "cluster:up": "(kind get clusters 2>/dev/null | grep -q '^lattik$' || kind create cluster --name lattik --config k8s/kind-config.yaml) && kubectl apply -f k8s/namespaces.yaml",
@@ -48,7 +48,9 @@
     "stitch:image-build": "pnpm stitch:spark:image-build && pnpm stitch:trino:image-build",
     "env:bootstrap": "node scripts/bootstrap-env.mjs",
     "images:build": "pnpm airflow:image-build && pnpm ingest:image-build && pnpm stitch:image-build",
-    "dev:up": "pnpm env:bootstrap && pnpm cluster:up && pnpm images:build && pnpm db:start && pnpm db:push && pnpm db:seed && pnpm gitea:start && pnpm gitea:token-sync && pnpm trino:start && pnpm kafka:start && pnpm schema-registry:start && pnpm ingest:start && pnpm spark:start && pnpm spark-drivers:sync && pnpm airflow:start && node scripts/print-next-steps.mjs",
+    "dev:up": "./scripts/dev.sh",
+    "dev:services": "pnpm images:build && pnpm gitea:start && pnpm gitea:token-sync && pnpm trino:start && pnpm kafka:start && pnpm schema-registry:start && pnpm ingest:start && pnpm spark:start && pnpm spark-drivers:sync && pnpm airflow:start && echo '✅ All services ready'",
+    "dev:status": "node scripts/dev-status.mjs",
     "dev:down": "pnpm cluster:down",
     "spark:submit-example": "kubectl delete -f k8s/spark-example.yaml --ignore-not-found && kubectl apply -f k8s/spark-example.yaml && kubectl -n workloads wait --for=jsonpath='{.status.applicationState.state}'=COMPLETED sparkapplication/iceberg-demo --timeout=300s && kubectl -n workloads logs -l sparkoperator.k8s.io/app-name=iceberg-demo,spark-role=driver --tail=80",
     "test:e2e": "cd apps/web && pnpm test:e2e"
@@ -59,6 +61,7 @@
   "packageManager": "pnpm@10.33.0+sha512.10568bb4a6afb58c9eb3630da90cc9516417abebd3fabbe6739f0ae795728da1491e9db5a544c76ad8eb7570f5c4bb3d6c637b2cb41bfdcdb47fa823c8649319",
   "pnpm": {
     "onlyBuiltDependencies": [
+      "duckdb",
       "esbuild",
       "msw",
       "sharp",

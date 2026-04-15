@@ -19,7 +19,7 @@ if (existsSync(ENV_PATH)) {
 const line = (s = "") => console.log(s);
 line();
 line("---------------------------------------------------");
-line("  Lattik Studio dev stack is up");
+line("  Lattik Studio prerequisites ready");
 line("---------------------------------------------------");
 line();
 
@@ -30,6 +30,10 @@ if (gatewayMissing) {
 }
 
 line("  Next steps:");
-line("    1. In a separate terminal:  pnpm dev");
-line("    2. Open:                    https://lattik-studio.dev");
+line("    1. Start the dev server:  pnpm dev");
+line("    2. Open:                  https://lattik-studio.dev");
+line();
+line("  pnpm dev will start the web UI immediately and bring up");
+line("  remaining services (gitea, trino, kafka, etc.) in the background.");
+line("  Run  tail -f .dev-services.log  to follow their progress.");
 line();
