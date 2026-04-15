@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Printed at the end of `pnpm dev:up` to remind the user to start portless
-// and the Next.js dev server.
+// Printed at the end of `pnpm dev:up` to remind the user to start the
+// Next.js dev server.
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -30,7 +30,6 @@ if (gatewayMissing) {
 }
 
 line("  Next steps:");
-line("    1. In a separate terminal:  sudo portless proxy start --tld dev");
-line("    2. In a separate terminal:  pnpm dev");
-line("    3. Open:                    https://lattik-studio.dev");
+line("    1. In a separate terminal:  pnpm dev");
+line("    2. Open:                    https://lattik-studio.dev");
 line();
