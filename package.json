@@ -5,64 +5,51 @@
     "dev": "turbo dev",
     "build": "turbo build",
     "lint": "turbo lint",
-
     "cluster:up": "(kind get clusters 2>/dev/null | grep -q '^lattik$' || kind create cluster --name lattik --config k8s/kind-config.yaml) && kubectl apply -f k8s/namespaces.yaml",
     "cluster:down": "kind delete cluster --name lattik",
-
     "db:start": "kubectl apply -f k8s/postgres.yaml && until kubectl -n postgres get pod -l app=postgres 2>/dev/null | grep -q postgres; do sleep 2; done && kubectl -n postgres wait --for=condition=ready pod -l app=postgres --timeout=120s",
     "db:stop": "kubectl delete -f k8s/postgres.yaml --ignore-not-found",
     "db:logs": "kubectl -n postgres logs -l app=postgres -f",
     "db:push": "cd apps/web && npx drizzle-kit push",
     "db:seed": "cd apps/web && pnpm tsx --env-file=.env src/db/seed.ts",
-
     "gitea:start": "kubectl apply -f k8s/gitea.yaml && until kubectl -n gitea get pod -l app=gitea 2>/dev/null | grep -q gitea; do sleep 2; done && kubectl -n gitea wait --for=condition=ready pod -l app=gitea --timeout=120s && (kubectl -n gitea exec deploy/gitea -- su git -c 'gitea admin user create --admin --username lattik-admin --password lattik-local --email admin@lattik.local --must-change-password=false' 2>/dev/null || true) && kubectl -n gitea delete job gitea-init --ignore-not-found && kubectl apply -f k8s/gitea-init.yaml && kubectl -n gitea wait --for=condition=complete job/gitea-init --timeout=120s",
     "gitea:stop": "kubectl delete -f k8s/gitea-init.yaml --ignore-not-found && kubectl delete -f k8s/gitea.yaml --ignore-not-found",
     "gitea:logs": "kubectl -n gitea logs -l app=gitea -f",
     "gitea:init-logs": "kubectl -n gitea logs job/gitea-init -f",
     "gitea:token-sync": "node scripts/sync-gitea-token.mjs",
-
     "trino:start": "kubectl apply -f k8s/minio.yaml && kubectl -n minio wait --for=condition=ready pod -l app=minio --timeout=120s && kubectl -n minio wait --for=condition=complete job/minio-init --timeout=120s && kubectl apply -f k8s/iceberg-rest.yaml && kubectl -n iceberg wait --for=condition=ready pod -l app=iceberg-rest --timeout=120s && kubectl apply -f k8s/trino.yaml && kubectl -n trino wait --for=condition=ready pod -l app=trino --timeout=300s && echo 'Trino ready at http://localhost:8080 (MinIO console: http://localhost:9001)'",
     "trino:stop": "kubectl delete -f k8s/trino.yaml --ignore-not-found && kubectl delete -f k8s/iceberg-rest.yaml --ignore-not-found && kubectl delete -f k8s/minio.yaml --ignore-not-found",
     "trino:logs": "kubectl -n trino logs -l app=trino -f",
     "trino:cli": "kubectl -n trino exec -it deploy/trino -- trino",
-
     "kafka:start": "kubectl apply -f k8s/kafka.yaml && until kubectl -n kafka get pod -l app=kafka 2>/dev/null | grep -q kafka; do sleep 2; done && kubectl -n kafka wait --for=condition=ready pod -l app=kafka --timeout=120s && echo 'Kafka ready — in-cluster: kafka.kafka:9092, host: localhost:9094 (port-forward or recreate cluster)'",
     "kafka:stop": "kubectl delete -f k8s/kafka.yaml --ignore-not-found",
     "kafka:logs": "kubectl -n kafka logs -l app=kafka -f",
     "kafka:cli": "kubectl -n kafka exec -it deploy/kafka -- bash",
-
-    "schema-registry:start": "kubectl apply -f k8s/schema-registry.yaml && until kubectl -n schema-registry get pod -l app=schema-registry 2>/dev/null | grep -q schema-registry; do sleep 2; done && kubectl -n schema-registry wait --for=condition=ready pod -l app=schema-registry --timeout=120s && echo 'Schema Registry ready — in-cluster: sr.schema-registry:8081, host: localhost:8081'",
+    "schema-registry:start": "kubectl apply -f k8s/schema-registry.yaml && until kubectl -n schema-registry get pod -l app=schema-registry 2>/dev/null | grep -q schema-registry; do sleep 2; done && kubectl -n schema-registry wait --for=condition=ready pod -l app=schema-registry --timeout=300s && echo 'Schema Registry ready — in-cluster: sr.schema-registry:8081, host: localhost:8081'",
     "schema-registry:stop": "kubectl delete -f k8s/schema-registry.yaml --ignore-not-found",
     "schema-registry:logs": "kubectl -n schema-registry logs -l app=schema-registry -f",
-
     "ingest:image-build": "docker build -t lattik/ingest:latest -f apps/ingest/Dockerfile apps/ingest && kind load docker-image lattik/ingest:latest --name lattik",
     "ingest:start": "kubectl apply -f k8s/ingest.yaml && until kubectl -n workloads get pod -l app=ingest 2>/dev/null | grep -q ingest; do sleep 2; done && kubectl -n workloads wait --for=condition=ready pod -l app=ingest --timeout=120s && echo 'Ingest ready — in-cluster: ingest.workloads:8090, host: localhost:8090'",
     "ingest:stop": "kubectl delete -f k8s/ingest.yaml --ignore-not-found",
     "ingest:logs": "kubectl -n workloads logs -l app=ingest -f",
-
     "spark:image-build": "docker build -t lattik/spark-iceberg:4.0.2-1.10.1 -f k8s/spark/Dockerfile . && kind load docker-image lattik/spark-iceberg:4.0.2-1.10.1 --name lattik",
     "spark:start": "(helm repo add spark-operator https://kubeflow.github.io/spark-operator 2>/dev/null || true) && helm repo update spark-operator >/dev/null && helm upgrade --install spark-operator spark-operator/spark-operator --namespace spark-operator --values k8s/spark/operator-values.yaml --wait --timeout 5m && kubectl apply -f k8s/spark-rbac.yaml && echo 'Spark Operator ready (SparkApplications go in the workloads namespace)'",
     "spark:stop": "helm uninstall spark-operator --namespace spark-operator --ignore-not-found && kubectl delete -f k8s/spark-rbac.yaml --ignore-not-found",
     "spark:logs": "kubectl -n spark-operator logs -l app.kubernetes.io/name=spark-operator -f",
     "spark-drivers:sync": "kubectl create configmap spark-drivers --namespace=workloads --from-file=k8s/spark/drivers/ --dry-run=client -o yaml | kubectl apply -f -",
-
     "airflow:image-build": "docker build -t lattik/airflow:3.2.0 -f k8s/airflow/Dockerfile . && kind load docker-image lattik/airflow:3.2.0 --name lattik",
     "airflow:start": "kubectl apply -f k8s/airflow.yaml && kubectl wait --for=condition=complete job/airflow-init --timeout=300s && pnpm airflow:dags-sync && kubectl wait --for=condition=ready pod -l app=airflow-api-server --timeout=300s && echo 'Airflow ready at http://localhost:8088 (no credentials — click Sign In)'",
     "airflow:stop": "kubectl delete -f k8s/airflow.yaml --ignore-not-found",
     "airflow:logs": "kubectl logs -l app=airflow-scheduler -f",
     "airflow:init-logs": "kubectl logs job/airflow-init -f",
     "airflow:dags-sync": "for f in airflow/dags/*; do docker cp \"$f\" lattik-control-plane:/var/local/airflow-dags/; done && echo 'DAGs synced to kind node'",
-
-    "stitch:spark:image-build": "../lattik-stitch/scripts/image-build.sh spark",
-    "stitch:trino:image-build": "../lattik-stitch/scripts/image-build.sh trino",
+    "stitch:spark:image-build": "../lattik-stitch/scripts/image-build.sh spark --force",
+    "stitch:trino:image-build": "../lattik-stitch/scripts/image-build.sh trino --force",
     "stitch:image-build": "pnpm stitch:spark:image-build && pnpm stitch:trino:image-build",
-
     "env:bootstrap": "node scripts/bootstrap-env.mjs",
     "images:build": "pnpm airflow:image-build && pnpm ingest:image-build && pnpm stitch:image-build",
-
     "dev:up": "pnpm env:bootstrap && pnpm cluster:up && pnpm images:build && pnpm db:start && pnpm db:push && pnpm db:seed && pnpm gitea:start && pnpm gitea:token-sync && pnpm trino:start && pnpm kafka:start && pnpm schema-registry:start && pnpm ingest:start && pnpm spark:start && pnpm spark-drivers:sync && pnpm airflow:start && node scripts/print-next-steps.mjs",
     "dev:down": "pnpm cluster:down",
-
     "spark:submit-example": "kubectl delete -f k8s/spark-example.yaml --ignore-not-found && kubectl apply -f k8s/spark-example.yaml && kubectl -n workloads wait --for=jsonpath='{.status.applicationState.state}'=COMPLETED sparkapplication/iceberg-demo --timeout=300s && kubectl -n workloads logs -l sparkoperator.k8s.io/app-name=iceberg-demo,spark-role=driver --tail=80",
     "test:e2e": "cd apps/web && pnpm test:e2e"
   },
@@ -71,6 +58,11 @@
   },
   "packageManager": "pnpm@10.33.0+sha512.10568bb4a6afb58c9eb3630da90cc9516417abebd3fabbe6739f0ae795728da1491e9db5a544c76ad8eb7570f5c4bb3d6c637b2cb41bfdcdb47fa823c8649319",
   "pnpm": {
-    "onlyBuiltDependencies": ["duckdb"]
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "msw",
+      "sharp",
+      "unrs-resolver"
+    ]
   }
 }

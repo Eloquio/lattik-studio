@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Creates apps/web/.env from apps/web/.env.example on first run, auto-filling
-// secrets and prompting for the AI Gateway key. Idempotent: if apps/web/.env
-// already exists, this is a no-op.
+// Creates apps/web/.env from apps/web/.env.example and apps/agent-worker/.env
+// on first run, auto-filling secrets and prompting for the AI Gateway key.
+// Idempotent: if both .env files already exist, this is a no-op.
 
 import { createInterface } from "node:readline/promises";
 import { randomBytes } from "node:crypto";
@@ -13,7 +13,9 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const EXAMPLE_PATH = resolve(SCRIPT_DIR, "../apps/web/.env.example");
 const ENV_PATH = resolve(SCRIPT_DIR, "../apps/web/.env");
 
-if (existsSync(ENV_PATH)) {
+const AGENT_WORKER_ENV_PATH = resolve(SCRIPT_DIR, "../apps/agent-worker/.env");
+
+if (existsSync(ENV_PATH) && existsSync(AGENT_WORKER_ENV_PATH)) {
   console.log("[env:bootstrap] apps/web/.env already exists — skipping.");
   process.exit(0);
 }
@@ -55,8 +57,14 @@ for (const [key, value] of Object.entries(autoFilled)) {
 
 writeFileSync(ENV_PATH, env);
 
+// Also create apps/agent-worker/.env with the shared TASK_AGENT_SECRET
+if (!existsSync(AGENT_WORKER_ENV_PATH)) {
+  const agentSecret = autoFilled.TASK_AGENT_SECRET;
+  writeFileSync(AGENT_WORKER_ENV_PATH, `TASK_AGENT_SECRET=${agentSecret}\n`);
+}
+
 console.log("");
-console.log("[env:bootstrap] Created apps/web/.env");
+console.log("[env:bootstrap] Created apps/web/.env and apps/agent-worker/.env");
 if (filled.length > 0) {
   console.log("[env:bootstrap] Auto-configured:");
   for (const key of filled) console.log(`              - ${key}`);
