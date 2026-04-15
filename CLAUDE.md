@@ -144,6 +144,8 @@ Set in `apps/web/.env` (gitignored):
 - `S3_SECRET_ACCESS_KEY` — MinIO secret key (default: `lattik-local`)
 - `S3_DAG_BUCKET` — S3 bucket for DAG YAML specs (default: `warehouse`)
 - `S3_DAG_PREFIX` — S3 key prefix for DAG YAMLs (default: `airflow-dags/`)
+- `DUCKDB_EXTENSION_PATH` — (optional) path to the `lattik_stitch_duckdb.duckdb_extension` file. When set, the DuckDB client loads it on startup to enable `lattik_scan()` queries
+- `LATTIK_WAREHOUSE_PATH` — S3 path prefix for Lattik Tables (default: `s3://warehouse/lattik`)
 
 ## Database
 
