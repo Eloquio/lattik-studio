@@ -69,19 +69,15 @@ packages/              Shared packages
 ## Development
 
 ```bash
-# Bring up prerequisites: kind cluster + namespaces + postgres + db schema + seed data
-pnpm dev:up
-
 # Start portless proxy with .dev TLD (required for Google OAuth)
 portless proxy start --tld dev
 
-# Start the dev server (serves at https://lattik-studio.dev)
-# Also brings up remaining services (gitea, trino, kafka, spark, airflow, etc.)
-# in the background — tail -f .dev-services.log to follow progress.
-pnpm dev
+# Full setup — bootstrap + services + dev server
+pnpm dev:up
 
-# Or, for a minimum env (cluster + postgres only — much faster, ~6 GB less RAM):
-# pnpm cluster:up && pnpm db:start && pnpm db:push
+# Or run steps separately:
+pnpm dev:bootstrap   # Preflight + .env + cluster + Postgres + schema + seed
+pnpm dev:services    # Build images, start Gitea, Trino, Kafka, Spark, Airflow
 
 # Build
 pnpm build

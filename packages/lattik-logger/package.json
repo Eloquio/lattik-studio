@@ -21,7 +21,6 @@
   "scripts": {
     "generate": "buf generate",
     "build": "buf generate && tsc -p tsconfig.build.json",
-    "dev": "tsc -p tsconfig.build.json --watch",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "echo 'no lint configured yet'"

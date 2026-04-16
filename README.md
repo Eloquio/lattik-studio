@@ -30,35 +30,27 @@ sudo portless proxy start --tld dev
 # Install dependencies
 pnpm install
 
-# Start everything — preflight checks, environment setup, services, and dev server
+# Bootstrap — preflight checks, .env generation, cluster + Postgres + schema + seed
+pnpm dev:bootstrap
+
+# Start background services + dev server
 pnpm dev:up
 ```
 
-`pnpm dev:up` runs through these phases automatically:
-
-1. **Preflight checks** — validates Docker, kind, helm, Node, pnpm, RAM, disk, and port availability
-2. **Environment bootstrap** — generates `apps/web/.env` (prompts for your AI Gateway key, auto-generates all secrets)
-3. **Required services** — creates the kind cluster, starts PostgreSQL, pushes the DB schema, and seeds data
-4. **Dev server** — starts the Next.js app at https://lattik-studio.dev
-5. **Background services** — builds images and starts Gitea, Trino, MinIO, Kafka, Spark, Airflow, etc. (progress logged to `.dev-services.log`)
-
-First run takes **15-20 minutes** (image builds + container pulls). Subsequent runs take ~2 minutes.
-
 Sign in with **admin / admin** — no Google OAuth setup required for local development.
 
-### Verify
+### Commands
 
-Check the status of all services at any time:
+| Command | Description |
+|---|---|
+| `pnpm dev:bootstrap` | Preflight checks, `.env` generation, cluster + Postgres + schema + seed |
+| `pnpm dev:up` | Background services + dev server (run bootstrap first) |
+| `pnpm dev:web` | Dev server only (Next.js + agent-worker via Turbo) |
+| `pnpm dev:services` | Build images, start Gitea, Trino, Kafka, Spark, Airflow, etc. |
+| `pnpm dev:status` | Check the status of all services |
+| `pnpm dev:down` | Delete the kind cluster (all data is wiped) |
 
-```bash
-pnpm dev:status
-```
-
-### Teardown
-
-```bash
-pnpm dev:down   # Deletes the kind cluster — all data is wiped
-```
+First run takes ~15 minutes (image pulls); subsequent runs take ~2 minutes.
 
 ## Documentation
 

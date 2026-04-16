@@ -46,7 +46,7 @@ export async function claimTask(
 
   if (res.status === 204) return null;
   if (!res.ok) {
-    throw new Error(`Failed to claim task: ${res.status} ${await res.text()}`);
+    throw new Error(`Failed to claim task: ${res.status} ${res.statusText}`);
   }
   return res.json();
 }
@@ -61,9 +61,7 @@ export async function completeTask(
     body: JSON.stringify({ result }),
   });
   if (!res.ok) {
-    throw new Error(
-      `Failed to complete task: ${res.status} ${await res.text()}`
-    );
+    throw new Error(`Failed to complete task: ${res.status} ${res.statusText}`);
   }
 }
 
@@ -74,6 +72,6 @@ export async function failTask(id: string, error: string): Promise<void> {
     body: JSON.stringify({ error }),
   });
   if (!res.ok) {
-    throw new Error(`Failed to fail task: ${res.status} ${await res.text()}`);
+    throw new Error(`Failed to fail task: ${res.status} ${res.statusText}`);
   }
 }
