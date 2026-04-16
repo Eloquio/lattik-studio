@@ -1,0 +1,50 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/lattik-stitch-core",
+    "crates/lattik-format-parquet",
+    "crates/lattik-stitch-jni",
+    "crates/lattik-format-vortex",
+    "crates/lattik-stitch-duckdb",  # package name: lattik_stitch_duckdb
+    # "crates/lattik-format-lance",    # future
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/eloqu-io/eloquio"
+
+[workspace.dependencies]
+# Arrow / Parquet
+arrow = { version = "58", features = ["ffi"] }
+parquet = { version = "58", features = ["arrow", "object_store"] }
+
+# S3
+object_store = { version = "0.13", features = ["aws"] }
+
+# Vortex file format
+vortex = { version = "0.68", features = ["tokio", "object_store"] }
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Hashing
+xxhash-rust = { version = "0.8", features = ["xxh64"] }
+
+# JNI
+jni = "0.21"
+
+# Async utilities
+futures = "0.3"
+
+# Logging
+tracing = "0.1"

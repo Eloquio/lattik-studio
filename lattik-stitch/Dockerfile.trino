@@ -1,0 +1,58 @@
+# Multi-stage build for the Lattik Trino connector plugin.
+#
+# Stage 1: Build the Rust native library (liblattik_stitch_jni.so)
+# Stage 2: Build the Trino connector JARs with Maven + JDK 25
+# Stage 3: Assemble the Trino image with the plugin
+#
+# Build (preferred — dual-tags with short-sha and :dev, kind-loads both):
+#   ./scripts/image-build.sh trino
+#
+# Manual build (no tag hygiene — avoid):
+#   docker build -f Dockerfile.trino -t lattik/trino-stitch:dev .
+#   kind load docker-image lattik/trino-stitch:dev --name lattik
+
+# ---- Stage 1: Rust native library ----
+FROM rust:1.90-bookworm AS rust-builder
+RUN apt-get update -qq && apt-get install -y -qq g++ cmake libclang-dev && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ crates/
+RUN cargo build --release -p lattik-stitch-jni
+
+# ---- Stage 2: Trino connector JARs (Maven + JDK 25) ----
+FROM maven:3.9-eclipse-temurin-25 AS java-builder
+WORKDIR /build
+
+# Copy POM first for dependency caching
+COPY java/lattik-trino/pom.xml .
+RUN mvn dependency:go-offline -B || true
+
+# Copy source and build
+COPY java/lattik-trino/src/ src/
+RUN mvn package -DskipTests -Dsort.skip=true -Dmaven.gitcommitid.skip=true -B
+
+# ---- Stage 3: Final Trino image ----
+FROM trinodb/trino:480
+
+USER root
+
+# Create the plugin directory
+RUN mkdir -p /usr/lib/trino/plugin/lattik
+
+# Copy the plugin JARs from the Maven build
+# The trino-plugin packaging creates a directory at target/<artifactId>-<version>/
+COPY --from=java-builder /build/target/lattik-trino-0.1.0/ /usr/lib/trino/plugin/lattik/
+
+# Copy the Rust native library
+COPY --from=rust-builder /build/target/release/liblattik_stitch_jni.so /usr/lib/trino/plugin/lattik/
+
+# Add the Lattik catalog configuration
+RUN echo 'connector.name=lattik' > /etc/trino/catalog/lattik.properties && \
+    echo 'warehouse=s3://warehouse' >> /etc/trino/catalog/lattik.properties && \
+    echo 'jdbc-url=jdbc:postgresql://postgres.postgres.svc.cluster.local:5432/lattik_studio?user=lattik&password=lattik-local' >> /etc/trino/catalog/lattik.properties && \
+    echo 'max-stitch-loads=3' >> /etc/trino/catalog/lattik.properties
+
+# Fix ownership
+RUN chown -R trino:trino /usr/lib/trino/plugin/lattik /etc/trino/catalog/lattik.properties
+
+USER trino

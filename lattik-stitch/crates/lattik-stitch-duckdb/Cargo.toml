@@ -1,0 +1,22 @@
+[package]
+name = "lattik_stitch_duckdb"
+description = "DuckDB loadable extension for Lattik Tables — stitch-on-read from S3"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+lattik-stitch-core = { path = "../lattik-stitch-core" }
+lattik-format-parquet = { path = "../lattik-format-parquet" }
+lattik-format-vortex = { path = "../lattik-format-vortex" }
+duckdb = { version = "1.10502", features = ["loadable-extension"] }
+arrow = { workspace = true }
+object_store = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+futures = { workspace = true }

@@ -1,0 +1,22 @@
+[package]
+name = "lattik-stitch-jni"
+description = "JNI bridge exposing lattik-stitch to Spark and Trino via Arrow C Data Interface"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]  # Produces a .so/.dylib/.dll for JNI loading
+
+[dependencies]
+lattik-stitch-core = { path = "../lattik-stitch-core" }
+lattik-format-parquet = { path = "../lattik-format-parquet" }
+lattik-format-vortex = { path = "../lattik-format-vortex" }
+arrow = { workspace = true }
+object_store = { workspace = true }
+tokio = { workspace = true }
+jni = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }

@@ -1,0 +1,141 @@
+# Integration test: Lattik Table stitch READ path.
+#
+# Requires:
+# 1. The write path test (spark-stitch-test.yaml) has run successfully,
+#    creating test data on S3 and a commit in Postgres.
+# 2. The lattik/spark-stitch image has been built:
+#    ./scripts/image-build.sh spark
+#
+# Usage:
+#   kubectl apply -f k8s/spark-stitch-read-test.yaml
+#   kubectl -n workloads logs -f lattik-stitch-read-test-driver
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stitch-read-test-script
+  namespace: workloads
+data:
+  test_stitch_read_path.py: |
+    """Test reading a Lattik Table via the LattikCatalog."""
+    from pyspark.sql import SparkSession
+
+    spark = (
+        SparkSession.builder
+        .appName("lattik-stitch-read-test")
+        .getOrCreate()
+    )
+
+    try:
+        # Test 1: List tables via the LattikCatalog
+        print("[test] Listing Lattik tables...")
+        spark.sql("SHOW TABLES IN lattik").show()
+
+        # Test 2: Describe the test table
+        print("[test] Describing lattik.test_user_stats...")
+        spark.sql("DESCRIBE lattik.default.test_user_stats").show()
+
+        # Test 3: Read all columns
+        print("[test] SELECT * (should fail if > 3 loads)...")
+        try:
+            spark.sql("SELECT * FROM lattik.default.test_user_stats").show()
+        except Exception as e:
+            print(f"[test] Expected SELECT * rejection: {e}")
+
+        # Test 4: Read specific columns
+        print("[test] SELECT home_country, lifetime_revenue...")
+        result = spark.sql("""
+            SELECT user_id, home_country, lifetime_revenue
+            FROM lattik.default.test_user_stats
+        """)
+        result.show()
+
+        # Test 5: Point lookup
+        print("[test] WHERE user_id = 100...")
+        spark.sql("""
+            SELECT user_id, home_country, lifetime_revenue
+            FROM lattik.default.test_user_stats
+            WHERE user_id = 100
+        """).show()
+
+        print("=" * 60)
+        print("[test] READ PATH TEST PASSED")
+        print("=" * 60)
+
+    finally:
+        spark.stop()
+---
+apiVersion: sparkoperator.k8s.io/v1beta2
+kind: SparkApplication
+metadata:
+  name: lattik-stitch-read-test
+  namespace: workloads
+spec:
+  type: Python
+  pythonVersion: "3"
+  mode: cluster
+  image: lattik/spark-stitch:dev
+  imagePullPolicy: IfNotPresent
+  mainApplicationFile: "local:///opt/spark/work-dir/test_stitch_read_path.py"
+  sparkVersion: "4.0.2"
+  restartPolicy:
+    type: Never
+  driver:
+    cores: 1
+    memory: 1024m
+    serviceAccount: spark-driver
+    javaOptions: "-Djava.library.path=/opt/spark/jars"
+    envFrom:
+      - secretRef:
+          name: minio-credentials
+    env:
+      - name: AWS_REGION
+        value: us-east-1
+      - name: S3_ENDPOINT
+        value: "http://minio.minio.svc.cluster.local:9000"
+    volumeMounts:
+      - name: test-script
+        mountPath: /opt/spark/work-dir/test_stitch_read_path.py
+        subPath: test_stitch_read_path.py
+  executor:
+    cores: 1
+    instances: 1
+    memory: 1024m
+    deleteOnTermination: false
+    javaOptions: "-Djava.library.path=/opt/spark/jars"
+    envFrom:
+      - secretRef:
+          name: minio-credentials
+    env:
+      - name: AWS_REGION
+        value: us-east-1
+      - name: S3_ENDPOINT
+        value: "http://minio.minio.svc.cluster.local:9000"
+  volumes:
+    - name: test-script
+      configMap:
+        name: stitch-read-test-script
+  sparkConf:
+    # Iceberg catalog (for reading Logger Tables)
+    spark.sql.extensions: "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
+    spark.sql.catalog.iceberg: "org.apache.iceberg.spark.SparkCatalog"
+    spark.sql.catalog.iceberg.catalog-impl: "org.apache.iceberg.rest.RESTCatalog"
+    spark.sql.catalog.iceberg.uri: "http://iceberg-rest.iceberg.svc.cluster.local:8181"
+    spark.sql.catalog.iceberg.warehouse: "s3://warehouse/"
+    spark.sql.catalog.iceberg.io-impl: "org.apache.iceberg.aws.s3.S3FileIO"
+    spark.sql.catalog.iceberg.s3.endpoint: "http://minio.minio.svc.cluster.local:9000"
+    spark.sql.catalog.iceberg.s3.path-style-access: "true"
+    spark.sql.catalog.iceberg.s3.access-key-id: "lattik"
+    spark.sql.catalog.iceberg.s3.secret-access-key: "lattik-local"
+    spark.sql.catalog.iceberg.s3.region: "us-east-1"
+    # Lattik catalog (for reading stitched tables)
+    spark.sql.catalog.lattik: "com.eloquio.lattik.spark.LattikCatalog"
+    spark.sql.catalog.lattik.warehouse: "s3://warehouse"
+    spark.sql.catalog.lattik.jdbc-url: "jdbc:postgresql://postgres.postgres.svc.cluster.local:5432/lattik_studio?user=lattik&password=lattik-local"
+    spark.sql.catalog.lattik.max-stitch-loads: "3"
+    # S3A filesystem
+    spark.hadoop.fs.s3a.endpoint: "http://minio.minio.svc.cluster.local:9000"
+    spark.hadoop.fs.s3a.access.key: "lattik"
+    spark.hadoop.fs.s3a.secret.key: "lattik-local"
+    spark.hadoop.fs.s3a.path.style.access: "true"
+    spark.hadoop.fs.s3a.impl: "org.apache.hadoop.fs.s3a.S3AFileSystem"
