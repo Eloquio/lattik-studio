@@ -1,0 +1,19 @@
+[package]
+name = "lattik-format-vortex"
+description = "Vortex FamilyFormat implementation for lattik-stitch — PK index sidecar + fast random access"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lattik-stitch-core = { path = "../lattik-stitch-core" }
+arrow = { workspace = true }
+vortex = { workspace = true }
+object_store = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

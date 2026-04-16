@@ -1,0 +1,21 @@
+[package]
+name = "lattik-format-parquet"
+description = "Parquet FamilyFormat implementation for lattik-stitch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lattik-stitch-core = { path = "../lattik-stitch-core" }
+arrow = { workspace = true }
+parquet = { workspace = true }
+object_store = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+bytes = "1"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
