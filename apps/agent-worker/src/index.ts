@@ -69,7 +69,8 @@ async function main() {
     try {
       await pollOnce();
     } catch (err) {
-      console.error("Poll error:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Poll error:", msg);
     }
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }

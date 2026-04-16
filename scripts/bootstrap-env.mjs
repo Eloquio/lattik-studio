@@ -74,5 +74,3 @@ if (!gatewayKey.trim()) {
   console.log("[env:bootstrap] AI_GATEWAY_API_KEY was skipped — chat agent won't work");
   console.log("              until you add it to apps/web/.env");
 }
-console.log("");
-console.log("[env:bootstrap] Auth: sign in with admin/admin (no Google OAuth needed)");

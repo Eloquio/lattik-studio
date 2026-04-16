@@ -49,6 +49,8 @@
     "env:bootstrap": "node scripts/bootstrap-env.mjs",
     "images:build": "pnpm airflow:image-build && pnpm ingest:image-build && pnpm stitch:image-build",
     "dev:up": "./scripts/dev.sh",
+    "dev:web": "turbo dev",
+    "dev:bootstrap": "./scripts/bootstrap.sh",
     "dev:services": "pnpm images:build && pnpm gitea:start && pnpm gitea:token-sync && pnpm trino:start && pnpm kafka:start && pnpm schema-registry:start && pnpm ingest:start && pnpm spark:start && pnpm spark-drivers:sync && pnpm airflow:start && echo '✅ All services ready'",
     "dev:status": "node scripts/dev-status.mjs",
     "dev:down": "pnpm cluster:down",
