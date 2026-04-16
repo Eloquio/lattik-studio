@@ -19,9 +19,9 @@ step() {
   fi
 }
 
-step "preflight" node scripts/preflight.mjs
+step "check-deps" node scripts/preflight.mjs
 
-log "env"
+log "init-env"
 if [ ! -f apps/web/.env ] || [ ! -f apps/agent-worker/.env ]; then
   node scripts/bootstrap-env.mjs
 fi

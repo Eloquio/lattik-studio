@@ -17,6 +17,7 @@ const scriptSrc = ["'self'", "'unsafe-inline'", isDev && "'unsafe-eval'"]
 const nextConfig: NextConfig = {
   allowedDevOrigins: ["lattik-studio.dev"],
   transpilePackages: ["@eloquio/lattik-expression"],
+  serverExternalPackages: ["duckdb"],
   async headers() {
     return [
       {
