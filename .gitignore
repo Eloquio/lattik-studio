@@ -33,6 +33,7 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 .dev-services.log
+.dev-up.log
 
 # env files
 .env
