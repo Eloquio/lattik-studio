@@ -79,7 +79,7 @@ export const renderDimensionFormTool = makeRenderFormTool(
 
 export const renderLoggerTableFormTool = makeRenderFormTool(
   "logger_table",
-  "Render the Logger Table definition form on the canvas. Pass any initial state values you can glean from the user's request — name (in 'schema.table_name' format), description, retention, dedup_window, and user_columns (an array of {name, type, dimension?, description?, pii?}). Implicit columns (event_id, event_timestamp, ds, hour) are added automatically — do NOT include them. The form appears immediately and the user fills in the rest. Use this INSTEAD of emitting any spec code fence.",
+  "Render the Logger Table definition form on the canvas. Pass any initial state values you can glean from the user's request — name (in 'schema.table_name' format), description, retention, dedup_window, and user_columns (an array of {name, type, dimension?, description?, classification?}). `classification` is an object with optional boolean flags {pii, phi, financial, credentials} — set any that apply. Implicit columns (event_id, event_timestamp, ds, hour) are added automatically — do NOT include them. The form appears immediately and the user fills in the rest. Use this INSTEAD of emitting any spec code fence.",
   loggerTableFormInitialStateSchema,
   buildLoggerTableFormSpec
 );

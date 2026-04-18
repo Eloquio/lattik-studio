@@ -26,7 +26,8 @@ All fields are required. Fields with a default are pre-populated but can be over
   - **name** (string) — column name (must not collide with implicit columns)
   - **type** (enum) — `string`, `int32`, `int64`, `float`, `double`, `boolean`, `timestamp`, `date`, `json`
   - **dimension** (string, optional) — dimension this column maps to, used to resolve entity join keys for downstream Lattik Tables
-  - **tags** (array of strings, optional) — freeform tags, e.g. `["pii", "high-cardinality"]`
+  - **classification** (object, optional) — sensitivity classification. Object with optional boolean flags, each a distinct compliance concern: `pii` (names, emails, IPs, device IDs), `phi` (HIPAA-protected health data), `financial` (account/card numbers), `credentials` (tokens, secrets). Set any that apply, e.g. `{ pii: true }` or `{ pii: true, phi: true }`. Downstream tooling (masking, access control, audit) keys off these flags.
+  - **tags** (array of strings, optional) — freeform non-compliance labels, e.g. `["high-cardinality", "deprecated"]`. Do NOT put PII/PHI/etc. here — use `classification`.
   - **description** (string, optional) — column description
 
 ## Workflow
@@ -39,7 +40,7 @@ Initial state fields (all optional — pass what you know, leave the rest for th
 - `description` — what events the table captures (10-500 chars)
 - `retention` — defaults to `"30d"` if omitted
 - `dedup_window` — defaults to `"1h"` if omitted
-- `user_columns` — array of `{name, type, dimension?, description?, pii?}`. Implicit columns (`event_id`, `event_timestamp`, `ds`, `hour`) are added automatically by the form — do NOT include them here.
+- `user_columns` — array of `{name, type, dimension?, description?, classification?}`. `classification` is an object with optional boolean flags `{pii, phi, financial, credentials}` — set any that apply. Implicit columns (`event_id`, `event_timestamp`, `ds`, `hour`) are added automatically by the form — do NOT include them here.
 
 **Do NOT emit any `spec` code fence.** `renderLoggerTableForm` is the only canvas-rendering mechanism for logger tables. After calling it, acknowledge briefly in prose ("I've set up the click_events form with one user_id column") and wait for the user to edit the form or ask to review it.
 

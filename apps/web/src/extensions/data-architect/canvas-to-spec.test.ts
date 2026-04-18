@@ -106,24 +106,49 @@ describe("canvasStateToSpec(lattik_table)", () => {
 });
 
 describe("canvasStateToSpec(logger_table)", () => {
-  it("renames user_columns → columns and adds pii tag when pii is set", () => {
+  it("renames user_columns → columns and passes classification through, dropping false/undefined flags", () => {
     const spec = canvasStateToSpec("logger_table", canvas({
       name: "events.signups",
       description: "raw signups",
       retention: "30d",
       dedup_window: "1h",
       user_columns: [
-        { _key: "c1", name: "email", type: "string", pii: true },
-        { _key: "c2", name: "country", type: "string", pii: false },
+        { _key: "c1", name: "email", type: "string", classification: { pii: true, phi: false } },
+        { _key: "c2", name: "ssn", type: "string", classification: { pii: true, phi: true } },
+        { _key: "c3", name: "country", type: "string", classification: { pii: false } },
+        { _key: "c4", name: "amount", type: "int64" },
       ],
     })) as {
-      columns: Array<{ name: string; type: string; tags?: string[]; pii?: boolean }>;
+      columns: Array<{ name: string; type: string; classification?: Record<string, boolean>; tags?: string[] }>;
     };
 
-    assert.strictEqual(spec.columns.length, 2);
-    assert.strictEqual(spec.columns[0].name, "email");
-    assert.deepStrictEqual(spec.columns[0].tags, ["pii"]);
-    assert.strictEqual(spec.columns[0].pii, undefined, "pii bool should not leak into spec");
-    assert.strictEqual(spec.columns[1].tags, undefined, "no tags when pii is false");
+    assert.strictEqual(spec.columns.length, 4);
+    assert.deepStrictEqual(spec.columns[0].classification, { pii: true });
+    assert.deepStrictEqual(spec.columns[1].classification, { pii: true, phi: true });
+    assert.strictEqual(spec.columns[2].classification, undefined, "no classification when all flags are false");
+    assert.strictEqual(spec.columns[3].classification, undefined, "omitted classification stays omitted");
+  });
+
+  it("preserves freeform tags alongside classification", () => {
+    const spec = canvasStateToSpec("logger_table", canvas({
+      name: "events.signups",
+      description: "",
+      retention: "30d",
+      dedup_window: "1h",
+      user_columns: [
+        {
+          _key: "c1",
+          name: "user_id",
+          type: "string",
+          classification: { pii: true },
+          tags: ["high-cardinality"],
+        },
+      ],
+    })) as {
+      columns: Array<{ classification?: Record<string, boolean>; tags?: string[] }>;
+    };
+
+    assert.deepStrictEqual(spec.columns[0].classification, { pii: true });
+    assert.deepStrictEqual(spec.columns[0].tags, ["high-cardinality"]);
   });
 });
