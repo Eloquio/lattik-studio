@@ -48,7 +48,7 @@ const inputCls =
   "rounded-md border border-stone-200 bg-white px-2.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-400 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500/30";
 
 // ---- Column helpers ----
-interface UserColumn { _key: string; name: string; type: string; description?: string; dimension?: string; classification?: Classification }
+interface UserColumn { _key: string; name: string; type: string; description?: string; dimension?: string; classification?: Classification; tags?: string[] }
 const SNAKE_CASE_RE = /^[a-z][a-z0-9]*(_[a-z0-9]+)*$/;
 const TYPE_OPTIONS: ScalarTypeKind[] = ["string", "int32", "int64", "float", "double", "boolean", "timestamp", "date", "json"];
 
@@ -1180,12 +1180,16 @@ export const { registry, handlers } = defineRegistry(catalog, {
       const [newColDesc, setNewColDesc] = useState("");
       const [newColDim, setNewColDim] = useState("");
       const [newColClassification, setNewColClassification] = useState<Classification | undefined>(undefined);
+      const [newColTags, setNewColTags] = useState<string[]>([]);
+      const [newTagDraft, setNewTagDraft] = useState("");
       const [editIdx, setEditIdx] = useState<number | null>(null);
       const [editName, setEditName] = useState("");
       const [editType, setEditType] = useState("string");
       const [editDesc, setEditDesc] = useState("");
       const [editDim, setEditDim] = useState("");
       const [editClassification, setEditClassification] = useState<Classification | undefined>(undefined);
+      const [editTags, setEditTags] = useState<string[]>([]);
+      const [editTagDraft, setEditTagDraft] = useState("");
 
       const updateCol = (i: number, patch: Partial<UserColumn>) =>
         store.set("/user_columns", columns.map((c, j) => (j === i ? { ...c, ...patch } : c)));
@@ -1193,8 +1197,9 @@ export const { registry, handlers } = defineRegistry(catalog, {
         if (!newColName.trim()) return;
         const dim = newColDim.trim() || undefined;
         if (dim && !SNAKE_CASE_RE.test(dim)) return;
-        store.set("/user_columns", [...columns, { _key: genKey("col"), name: newColName.trim(), type: newColType, description: newColDesc.trim() || undefined, dimension: dim, classification: newColClassification }]);
-        setNewColName(""); setNewColType(""); setNewColDesc(""); setNewColDim(""); setNewColClassification(undefined);
+        const tags = newColTags.length > 0 ? newColTags : undefined;
+        store.set("/user_columns", [...columns, { _key: genKey("col"), name: newColName.trim(), type: newColType, description: newColDesc.trim() || undefined, dimension: dim, classification: newColClassification, tags }]);
+        setNewColName(""); setNewColType(""); setNewColDesc(""); setNewColDim(""); setNewColClassification(undefined); setNewColTags([]); setNewTagDraft("");
         setShowAddCol(false);
       };
       const removeCol = (i: number) =>
@@ -1206,21 +1211,24 @@ export const { registry, handlers } = defineRegistry(catalog, {
         setEditDesc(columns[i].description ?? "");
         setEditDim(columns[i].dimension ?? "");
         setEditClassification(columns[i].classification);
+        setEditTags(columns[i].tags ?? []);
+        setEditTagDraft("");
       };
       const saveEdit = () => {
         if (editIdx === null || !editName.trim()) return;
         const dim = editDim.trim() || undefined;
         if (dim && !SNAKE_CASE_RE.test(dim)) return;
-        updateCol(editIdx, { name: editName.trim(), type: editType, description: editDesc.trim() || undefined, dimension: dim, classification: editClassification });
+        const tags = editTags.length > 0 ? editTags : undefined;
+        updateCol(editIdx, { name: editName.trim(), type: editType, description: editDesc.trim() || undefined, dimension: dim, classification: editClassification, tags });
         setEditIdx(null);
       };
       const cancelEdit = () => setEditIdx(null);
-      const closePopup = () => { setShowAddCol(false); cancelEdit(); setNewColName(""); setNewColType(""); setNewColDesc(""); setNewColDim(""); setNewColClassification(undefined); };
+      const closePopup = () => { setShowAddCol(false); cancelEdit(); setNewColName(""); setNewColType(""); setNewColDesc(""); setNewColDim(""); setNewColClassification(undefined); setNewColTags([]); setNewTagDraft(""); setEditTagDraft(""); };
 
       const allPreviewCols = [...IMPLICIT_TOP, ...columns.filter((c) => c.name), ...IMPLICIT_BOTTOM];
 
       return (
-        <div className="flex flex-col gap-5">
+        <div className="flex min-h-0 flex-1 flex-col gap-5">
           <h2 className="flex items-center gap-1.5 text-sm font-semibold text-stone-800">
             <Table2 className="h-4 w-4 text-stone-400" />Logger Table
           </h2>
@@ -1281,21 +1289,22 @@ export const { registry, handlers } = defineRegistry(catalog, {
           </div>
 
           {/* Columns */}
-          <div className="flex flex-col gap-2">
+          <div className="flex min-h-0 flex-1 flex-col gap-2">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-stone-500">Columns</span>
-            <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-stone-200 bg-stone-50">
-                    <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Column</th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Type</th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Description</th>
-                    <th className="px-2.5 py-1.5 w-8" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {/* System columns (top) */}
-                  {IMPLICIT_TOP.map((c) => <ImplicitRow key={c.name} name={c.name} type={c.type} description={c.description} highlighted={hoveredCol === c.name} onHover={() => setHoveredCol(c.name)} onLeave={() => setHoveredCol(null)} />)}
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-stone-200 bg-white">
+              <div className="min-h-0 flex-1 overflow-auto">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 z-10 bg-stone-50">
+                    <tr className="border-b border-stone-200">
+                      <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Column</th>
+                      <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Type</th>
+                      <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Description</th>
+                      <th className="px-2.5 py-1.5 w-8" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {/* System columns (top) */}
+                    {IMPLICIT_TOP.map((c) => <ImplicitRow key={c.name} name={c.name} type={c.type} description={c.description} highlighted={hoveredCol === c.name} onHover={() => setHoveredCol(c.name)} onLeave={() => setHoveredCol(null)} />)}
 
                   {/* Separator: user columns section */}
                   <tr>
@@ -1353,15 +1362,16 @@ export const { registry, handlers } = defineRegistry(catalog, {
                     </td>
                   </tr>
                   {IMPLICIT_BOTTOM.map((c) => <ImplicitRow key={c.name} name={c.name} type={c.type} description={c.description} highlighted={hoveredCol === c.name} onHover={() => setHoveredCol(c.name)} onLeave={() => setHoveredCol(null)} />)}
-                </tbody>
-              </table>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
 
-          {/* Review table button */}
+          {/* Review table button — sits below the scrollable columns table */}
           <button
             onClick={() => sendChatMessage("Review table")}
-            className="flex items-center justify-center gap-2 rounded-lg bg-stone-800 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-700 transition-colors"
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-stone-800 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-700 transition-colors"
           >
             <Send className="h-3.5 w-3.5" />
             Review Table
@@ -1404,6 +1414,49 @@ export const { registry, handlers } = defineRegistry(catalog, {
                       );
                     })}
                   </div>
+
+                  {/* Tags — freeform non-compliance labels (e.g. "high-cardinality", "deprecated"). */}
+                  {(() => {
+                    const tags = editIdx !== null ? editTags : newColTags;
+                    const setTags = editIdx !== null ? setEditTags : setNewColTags;
+                    const draft = editIdx !== null ? editTagDraft : newTagDraft;
+                    const setDraft = editIdx !== null ? setEditTagDraft : setNewTagDraft;
+                    const commitDraft = () => {
+                      const t = draft.trim();
+                      if (!t) return;
+                      if (tags.includes(t)) { setDraft(""); return; }
+                      setTags([...tags, t]);
+                      setDraft("");
+                    };
+                    const removeTag = (t: string) => setTags(tags.filter((x) => x !== t));
+                    return (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {tags.map((t) => (
+                          <span key={t} className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-medium text-stone-600">
+                            {t}
+                            <button type="button" onClick={() => removeTag(t)} className="text-stone-400 hover:text-stone-700 transition-colors">
+                              <X className="h-2.5 w-2.5" />
+                            </button>
+                          </span>
+                        ))}
+                        <input
+                          type="text"
+                          value={draft}
+                          onChange={(e) => setDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === ",") {
+                              e.preventDefault(); e.stopPropagation(); commitDraft();
+                            } else if (e.key === "Backspace" && !draft && tags.length > 0) {
+                              e.preventDefault(); setTags(tags.slice(0, -1));
+                            }
+                          }}
+                          onBlur={commitDraft}
+                          placeholder={tags.length === 0 ? "Add tag" : ""}
+                          className="flex-1 min-w-[4rem] bg-transparent text-[10px] text-stone-600 placeholder:text-stone-300 focus:outline-none"
+                        />
+                      </div>
+                    );
+                  })()}
 
                   {/* Type */}
                   <div className="relative">
@@ -1760,7 +1813,7 @@ export const { registry, handlers } = defineRegistry(catalog, {
       ];
 
       return (
-        <div className="flex flex-col gap-5">
+        <div className="flex min-h-0 flex-1 flex-col gap-5">
           <h2 className="flex items-center gap-1.5 text-sm font-semibold text-stone-800">
             <Table2 className="h-4 w-4 text-stone-400" />Lattik Table
           </h2>
@@ -1857,19 +1910,20 @@ export const { registry, handlers } = defineRegistry(catalog, {
           )}
 
           {/* Columns */}
-          <div className="flex flex-col gap-2">
+          <div className="flex min-h-0 flex-1 flex-col gap-2">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-stone-500">Columns</span>
-            <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-stone-200 bg-stone-50">
-                    <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Column</th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Type</th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Description</th>
-                    <th className="px-2.5 py-1.5 w-8" />
-                  </tr>
-                </thead>
-                <tbody>
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-stone-200 bg-white">
+              <div className="min-h-0 flex-1 overflow-auto">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 z-10 bg-stone-50">
+                    <tr className="border-b border-stone-200">
+                      <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Column</th>
+                      <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Type</th>
+                      <th className="px-2.5 py-1.5 text-left font-semibold text-stone-600">Description</th>
+                      <th className="px-2.5 py-1.5 w-8" />
+                    </tr>
+                  </thead>
+                  <tbody>
                   {/* Primary key columns (locked — they define the grain) */}
                   {pks.filter((pk) => pk.column).map((pk) => (
                     <tr key={pk._key}
@@ -1941,16 +1995,17 @@ export const { registry, handlers } = defineRegistry(catalog, {
                       </button>
                     </td>
                   </tr>
-                </tbody>
-              </table>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
 
-          {/* Review table button */}
+          {/* Review table button — sits below the scrollable columns table */}
           {previewCols.length > 0 && (
             <button
               onClick={() => sendChatMessage("Review table")}
-              className="flex items-center justify-center gap-2 rounded-lg bg-stone-800 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-700 transition-colors"
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-stone-800 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-700 transition-colors"
             >
               <Send className="h-3.5 w-3.5" />
               Review Table
@@ -2182,15 +2237,17 @@ export const { registry, handlers } = defineRegistry(catalog, {
             </div>
           )}
 
-          {/* Submit PR button */}
-          <button
-            onClick={() => sendChatMessage("Create the PR")}
-            disabled={files.length === 0}
-            className="flex items-center justify-center gap-2 rounded-lg bg-stone-800 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Send className="h-3.5 w-3.5" />
-            Create PR
-          </button>
+          {/* Submit PR button — sticks to the bottom of the canvas scroll container */}
+          <div className="sticky bottom-0 -mx-5 mt-auto -mb-5 border-t border-stone-200 bg-stone-50/95 px-5 py-3 backdrop-blur-sm">
+            <button
+              onClick={() => sendChatMessage("Create the PR")}
+              disabled={files.length === 0}
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-stone-800 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Send className="h-3.5 w-3.5" />
+              Create PR
+            </button>
+          </div>
         </div>
       );
     },

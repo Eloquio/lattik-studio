@@ -52,7 +52,7 @@ After rendering, briefly tell the user which columns would benefit from a dimens
 **Do NOT emit any `spec` code fence.** `renderLoggerTableForm` is the only canvas-rendering mechanism for logger tables. After calling it, acknowledge briefly in prose ("I've set up the click_events form with one user_id column") and wait for the user to edit the form or ask to review it.
 
 ### Step 2: AI Review
-When the user asks to review, call `reviewDefinition({kind: "logger_table"})`. The tool runs a focused reviewer on the canvas form state and returns actionable fixes — you do NOT generate the suggestions yourself.
+When the user asks to review, call `reviewDefinition({kind: "logger_table"})`. The tool runs a focused reviewer on the canvas form state and returns actionable fixes — you do NOT generate the suggestions yourself. If the user has stated explicit requirements during the conversation that deviate from defaults (e.g. "keep 90-day retention for compliance", "user_id must stay a string — upstream producer confirmed"), also pass them as `userConstraints: "…"` so the reviewer won't propose changes that contradict the user's intent. Omit the parameter otherwise — don't invent constraints or paraphrase the form state back.
 
 **After the tool returns, STAY OUT OF THE WAY.** The suggestions are already rendered as interactive cards in the chat — the user clicks ✓ or ✗ directly on each card. Your role at this moment is minimal:
 

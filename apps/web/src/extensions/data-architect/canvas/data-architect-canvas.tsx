@@ -76,7 +76,7 @@ export function DataArchitectCanvas({ spec, loading, onStateChange, onSendMessag
           initialState={prevStateRef.current}
           onStateChange={onStateChange}
         >
-          <div className="relative flex flex-1 flex-col gap-4 p-5">
+          <div className="relative flex min-h-0 flex-1 flex-col gap-4 p-5">
             <Renderer spec={spec} registry={registry} loading={loading} />
           </div>
         </JSONUIProvider>

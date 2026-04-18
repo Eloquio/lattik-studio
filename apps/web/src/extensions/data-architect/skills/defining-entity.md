@@ -25,7 +25,7 @@ Initial state fields (all optional — pass what you know, leave the rest for th
 **Do NOT emit any `spec` code fence.** `renderEntityForm` is the only canvas-rendering mechanism for entities. After calling it, acknowledge briefly in prose and wait for the user to edit the form or ask to review it.
 
 ### Step 2: AI Review
-When the user asks to review, call `reviewDefinition({kind: "entity"})`. The tool runs a focused reviewer on the canvas form state and returns actionable fixes — you do NOT generate the suggestions yourself.
+When the user asks to review, call `reviewDefinition({kind: "entity"})`. The tool runs a focused reviewer on the canvas form state and returns actionable fixes — you do NOT generate the suggestions yourself. If the user has stated explicit requirements during the conversation that deviate from defaults (e.g. "id_type must be string — that's what upstream sends"), also pass them as `userConstraints: "…"` so the reviewer won't propose changes that contradict the user's intent. Omit the parameter otherwise — don't invent constraints or paraphrase the form state back.
 
 **After the tool returns, STAY OUT OF THE WAY.** The suggestions are already rendered as interactive cards in the chat — the user clicks ✓ or ✗ directly on each card. Your role at this moment is minimal:
 
