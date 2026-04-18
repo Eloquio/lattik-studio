@@ -12,6 +12,9 @@ spec:
       containers:
         - name: init
           image: curlimages/curl:8.5.0
+          envFrom:
+            - secretRef:
+                name: gitea-webhook-config
           command:
             - sh
             - -c
@@ -88,6 +91,43 @@ spec:
                   "auto_init": true,
                   "default_branch": "main"
                 }' || echo "Repo may already exist, continuing..."
+
+              # Register webhook on pipelines repo — fires on PR merge into
+              # main so the web app can generate DAG specs and persist
+              # definition state. host.docker.internal is how pods in kind
+              # reach the Next.js dev server running on the host (port 3000
+              # bypasses portless TLS, which has a cert for lattik-studio.dev
+              # and wouldn't match this Host header).
+              if [ -z "$GITEA_WEBHOOK_SECRET" ]; then
+                echo "Warning: GITEA_WEBHOOK_SECRET is empty — skipping webhook registration."
+                echo "Set it in apps/web/.env and re-run 'pnpm gitea:start'."
+              else
+                # Delete any existing hooks so re-running the init job
+                # doesn't stack up duplicates pointing at the same URL.
+                EXISTING=$(curl -sf -u "lattik-admin:lattik-local" \
+                  "$GITEA_URL/api/v1/repos/lattik/pipelines/hooks" || echo "[]")
+                echo "$EXISTING" \
+                  | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' \
+                  | while read -r ID; do
+                      [ -n "$ID" ] && curl -sf -X DELETE -u "lattik-admin:lattik-local" \
+                        "$GITEA_URL/api/v1/repos/lattik/pipelines/hooks/$ID" || true
+                    done
+
+                curl -sf -X POST "$GITEA_URL/api/v1/repos/lattik/pipelines/hooks" \
+                  -H "Content-Type: application/json" \
+                  -u "lattik-admin:lattik-local" \
+                  -d "{
+                    \"type\": \"gitea\",
+                    \"active\": true,
+                    \"events\": [\"pull_request\"],
+                    \"config\": {
+                      \"url\": \"http://host.docker.internal:3000/api/webhooks/gitea\",
+                      \"content_type\": \"json\",
+                      \"secret\": \"$GITEA_WEBHOOK_SECRET\"
+                    }
+                  }" > /dev/null && echo "Webhook registered on lattik/pipelines." \
+                    || echo "Failed to register webhook. Check Gitea logs."
+              fi
 
               echo "Gitea initialization complete."
               echo "Access Gitea at: http://localhost:3300"

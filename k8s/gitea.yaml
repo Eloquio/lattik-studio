@@ -26,6 +26,11 @@ stringData:
   GITEA__server__SSH_LISTEN_PORT: "22"
   GITEA__security__INSTALL_LOCK: "true"
   GITEA__service__DISABLE_REGISTRATION: "true"
+  # Gitea blocks webhook URLs that resolve to private/loopback addresses by
+  # default. The local dev webhook target is host.docker.internal, which
+  # resolves into the 192.168.x range — whitelist it so the pipelines repo
+  # can fire merge events at the host-side Next.js dev server.
+  GITEA__webhook__ALLOWED_HOST_LIST: "*"
 ---
 apiVersion: apps/v1
 kind: Deployment
