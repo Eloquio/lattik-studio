@@ -1,7 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { MessageSquare, Store } from "lucide-react";
+import { signOut } from "next-auth/react";
+import { LogOut, MessageSquare, Store } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -40,6 +41,16 @@ export function NavPanel({ historyOpen, onChatClick }: NavPanelProps) {
           <Store className="h-5 w-5" />
         </TooltipTrigger>
         <TooltipContent side="right">Marketplace</TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger
+          className="mt-auto flex h-10 w-10 items-center justify-center rounded-md text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+          onClick={() => signOut({ redirectTo: "/sign-in" })}
+        >
+          <LogOut className="h-5 w-5" />
+        </TooltipTrigger>
+        <TooltipContent side="right">Sign out</TooltipContent>
       </Tooltip>
     </nav>
   );

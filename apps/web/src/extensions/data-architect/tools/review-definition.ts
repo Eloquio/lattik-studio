@@ -177,7 +177,7 @@ function agentInstruction(suggestionCount: number): string {
 export function createReviewDefinitionTool(getCanvasState: () => unknown) {
   return {
     description:
-      "Run an AI review of the definition currently on the canvas. Reads the canvas state directly. Returns a list of one-click fixes rendered as cards in the chat. If the tool returns an empty suggestions list, the definition is clean — proceed to the next workflow step.",
+      "Run an AI review of the definition currently on the canvas. Reads the canvas state directly. Returns a list of one-click fixes rendered as cards in the chat. If the tool returns an empty suggestions list, the definition is clean — proceed to the next workflow step. Pass `userConstraints` to record any explicit user-stated requirements so the reviewer doesn't propose changes that contradict them.",
     inputSchema: zodSchema(
       z.object({
         kind: z
@@ -189,9 +189,17 @@ export function createReviewDefinitionTool(getCanvasState: () => unknown) {
             "metric",
           ])
           .describe("The type of definition currently on the canvas"),
+        userConstraints: z
+          .string()
+          .optional()
+          .describe(
+            "Optional short summary of explicit user-stated requirements from the conversation (e.g. 'Retention must stay at 90 days for compliance'; 'user_id is a string, not int64 — upstream producer confirmed'). Populate this when the user has locked down a specific choice you want the reviewer to respect. Omit when the user hasn't stated anything binding — do NOT invent constraints or paraphrase the form state back here."
+          ),
       })
     ),
-    execute: async (input: { kind: DefinitionKind }) => {
+    execute: async (
+      input: { kind: DefinitionKind; userConstraints?: string }
+    ) => {
       const canvasState = getCanvasState();
       const formState = sanitizeCanvasFormState(canvasState);
 
@@ -214,12 +222,16 @@ export function createReviewDefinitionTool(getCanvasState: () => unknown) {
         }. Skip cross-definition consistency checks for this run.)`;
       }
 
+      const constraintsBlock = input.userConstraints?.trim()
+        ? `\n\n## User-stated constraints\n\nThe user has explicitly stated the following during the conversation. Treat these as load-bearing decisions the user has made deliberately — do NOT propose changes that contradict them, even if they deviate from convention.\n\n${input.userConstraints.trim()}`
+        : "";
+
       try {
         const result = await generateObject({
           model: gateway("anthropic/claude-sonnet-4.6"),
           schema: reviewerOutputSchema,
           system: `${reviewerPolicy}\n\n${skillDoc}`,
-          prompt: `The user is authoring a ${input.kind} definition. The current canvas form state is:\n\n\`\`\`json\n${JSON.stringify(formState, null, 2)}\n\`\`\`\n\n${workspaceContext}\n\nReview it and return actionable fixes. Use canvas form state JSON Pointer paths in your actions (the field names you see above). Remember: do NOT recommend column type changes based on convention — only flag a type if you can verify a conflict against the workspace context above. Return \`suggestions: []\` if there is nothing concrete to fix.`,
+          prompt: `The user is authoring a ${input.kind} definition. The current canvas form state is:\n\n\`\`\`json\n${JSON.stringify(formState, null, 2)}\n\`\`\`\n\n${workspaceContext}${constraintsBlock}\n\nReview it and return actionable fixes. Use canvas form state JSON Pointer paths in your actions (the field names you see above). Remember: do NOT recommend column type changes based on convention — only flag a type if you can verify a conflict against the workspace context above. Return \`suggestions: []\` if there is nothing concrete to fix.`,
         });
 
         const suggestions = result.object.suggestions;
