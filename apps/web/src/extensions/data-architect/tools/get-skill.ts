@@ -5,7 +5,10 @@ import { skills, getSkillContent } from "../skills";
 export const getSkillTool = {
   description:
     "Load a skill document to guide the workflow. Call this before starting any definition task. Available skills: " +
-    skills.map((s) => s.id).join(", "),
+    skills
+      .filter((s) => s.audience === "agent")
+      .map((s) => s.id)
+      .join(", "),
   inputSchema: zodSchema(
     z.object({
       skillId: z.string().describe("The skill ID to load"),

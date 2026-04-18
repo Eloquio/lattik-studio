@@ -13,6 +13,7 @@ import {
   buildLattikTableFormSpec,
   buildMetricFormSpec,
 } from "../form-spec-builders";
+import { loadMergedDimensions } from "../validation/referential";
 
 /**
  * The render*Form tools replace the old "emit JSONL spec patches in a code
@@ -77,12 +78,82 @@ export const renderDimensionFormTool = makeRenderFormTool(
   buildDimensionFormSpec
 );
 
-export const renderLoggerTableFormTool = makeRenderFormTool(
-  "logger_table",
-  "Render the Logger Table definition form on the canvas. Pass any initial state values you can glean from the user's request — name (in 'schema.table_name' format), description, retention, dedup_window, and user_columns (an array of {name, type, dimension?, description?, classification?}). `classification` is an object with optional boolean flags {pii, phi, financial, credentials} — set any that apply. Implicit columns (event_id, event_timestamp, ds, hour) are added automatically — do NOT include them. The form appears immediately and the user fills in the rest. Use this INSTEAD of emitting any spec code fence.",
-  loggerTableFormInitialStateSchema,
-  buildLoggerTableFormSpec
-);
+// Defense-in-depth: strip any `dimension` references on user_columns that
+// don't correspond to an existing merged Dimension. The skill doc already
+// forbids the agent from inventing bindings, but LLMs occasionally drift —
+// this guarantees the canvas never shows a binding that will fail static
+// check. Dropped bindings are surfaced in the tool result so the agent can
+// mention them to the user.
+async function stripUnknownDimensions(
+  initialState: z.infer<typeof loggerTableFormInitialStateSchema>
+): Promise<{
+  initialState: z.infer<typeof loggerTableFormInitialStateSchema>;
+  dropped: Array<{ column: string; dimension: string }>;
+}> {
+  const userColumns = initialState.user_columns ?? [];
+  const hasBindings = userColumns.some((c) => c.dimension);
+  if (!hasBindings) return { initialState, dropped: [] };
+
+  // Fail-open on DB trouble: if we can't load the dimension list, leave the
+  // bindings as-is and let static check catch any stragglers. A render-time
+  // DB hiccup should not block the user from seeing their form.
+  let existingNames: Set<string>;
+  try {
+    const merged = await loadMergedDimensions();
+    existingNames = new Set(merged.map((d) => d.name));
+  } catch {
+    return { initialState, dropped: [] };
+  }
+
+  const dropped: Array<{ column: string; dimension: string }> = [];
+  const cleanedColumns = userColumns.map((col) => {
+    if (col.dimension && !existingNames.has(col.dimension)) {
+      dropped.push({ column: col.name, dimension: col.dimension });
+      const { dimension: _stripped, ...rest } = col;
+      return rest;
+    }
+    return col;
+  });
+
+  return {
+    initialState: { ...initialState, user_columns: cleanedColumns },
+    dropped,
+  };
+}
+
+export const renderLoggerTableFormTool = {
+  description:
+    "Render the Logger Table definition form on the canvas. Pass any initial state values you can glean from the user's request — name (in 'schema.table_name' format), description, retention, dedup_window, and user_columns (an array of {name, type, dimension?, description?, classification?}). `classification` is an object with optional boolean flags {pii, phi, financial, credentials} — set any that apply. Implicit columns (event_id, event_timestamp, ds, hour) are added automatically — do NOT include them. **IMPORTANT:** only set `dimension` on a column if you have verified via `listDefinitions({kind: \"dimension\"})` that the dimension already exists; otherwise omit the field. Unknown dimension references will be stripped and returned in `droppedDimensionBindings`. The form appears immediately and the user fills in the rest. Use this INSTEAD of emitting any spec code fence.",
+  inputSchema: zodSchema(
+    z.object({
+      initialState: loggerTableFormInitialStateSchema,
+    })
+  ),
+  execute: async (input: {
+    initialState: z.infer<typeof loggerTableFormInitialStateSchema>;
+  }) => {
+    const { initialState, dropped } = await stripUnknownDimensions(
+      input.initialState
+    );
+    const spec = buildLoggerTableFormSpec(initialState);
+    const instruction =
+      dropped.length > 0
+        ? `${RENDER_INSTRUCTION} NOTE: ${dropped.length} dimension binding${
+            dropped.length === 1 ? "" : "s"
+          } pointed to non-existent dimensions and were stripped — ${dropped
+            .map((d) => `${d.column} → ${d.dimension}`)
+            .join(
+              ", "
+            )}. Briefly tell the user which dimensions would need to be defined first if they want those bindings.`
+        : RENDER_INSTRUCTION;
+    return {
+      kind: "logger_table" as const,
+      spec,
+      instruction,
+      droppedDimensionBindings: dropped,
+    };
+  },
+};
 
 export const renderLattikTableFormTool = makeRenderFormTool(
   "lattik_table",

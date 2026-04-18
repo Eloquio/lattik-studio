@@ -30,7 +30,7 @@ The agent is a `ToolLoopAgent` (Vercel AI SDK v6) with a max of 10 tool steps pe
 All five definition types follow the same workflow:
 
 1. **Render Draft on Canvas** — Agent outputs a `spec` code fence with the built-in form component (e.g. `LoggerTableForm`), pre-populating state from the conversation. User edits directly on the canvas or chats with the agent.
-2. **AI Review** — Agent calls `reviewDefinition` and renders suggestions as `ReviewCard` components on the canvas.
+2. **AI Review** — Agent calls `reviewDefinition`, which runs a separate reviewer LLM (Claude Sonnet) guided by the [`reviewing-definitions`](skills/reviewing-definitions.md) skill (review-only audience — not in the agent's skill menu). The tool returns actionable one-click fixes that render as `ReviewCard` components on the canvas.
 3. **Accept/Deny Suggestions** — User accepts or denies each suggestion via canvas buttons. Agent reads decisions with `readCanvasState` and applies accepted changes.
 4. **Static Checks** — Agent calls `staticCheck` which runs validation functions (naming, referential integrity, expression syntax). Failures return to canvas for fixes.
 5. **Generate and Submit** — Agent calls `updateDefinition` to save the draft to the database, then `submitPR` to generate YAML and create a PR in Gitea/GitHub.
@@ -94,8 +94,12 @@ Three layers of validation run during static checks:
 | Layer | Module | What it checks |
 |-------|--------|----------------|
 | **Naming** | `validation/naming.ts` | snake_case, reserved words, length limits, qualified names (`schema.table_name`), retention format (`<n>d`), dedup window format (`<n>h`) |
-| **Referential** | `validation/referential.ts` | Entity exists, table exists, column exists in table — all checked against merged (production) definitions |
+| **Referential** | `validation/referential.ts` | Entity exists, table exists, column exists in table, dimension exists — all checked against merged (production) definitions |
 | **Expression** | `validation/expressions.ts` | lattik-expression parse validity for agg, expr, and derived column expressions |
+
+### Render-time safeguard: unknown dimension bindings
+
+Static check catches a logger-table column bound to a non-existent dimension at step 4 of the workflow, but by then the bad binding has already appeared on the canvas. `renderLoggerTableForm` therefore runs `stripUnknownDimensions` over its `initialState.user_columns` before building the spec — any `dimension` value that doesn't match a merged dimension name is removed, and the dropped bindings are surfaced in the tool result (`droppedDimensionBindings`) so the agent mentions them. The skill doc ([`defining-logger-table.md`](skills/defining-logger-table.md)) is the first line of defense: it requires the agent to call `listDefinitions({ kind: "dimension" })` and verify existence before setting any `dimension`; the render-time strip is belt-and-suspenders against LLM rule drift. Fails open on DB error so a transient hiccup can't block rendering.
 
 ## Schema
 
@@ -141,12 +145,13 @@ data-architect/
 │   ├── lattik-table-card.tsx       Lattik table visualization card
 │   └── json-render/               json-render helpers
 ├── skills/
-│   ├── index.ts                    Skill metadata and loader
-│   ├── defining-entity.md          Entity workflow
-│   ├── defining-dimension.md       Dimension workflow
-│   ├── defining-logger-table.md    Logger table workflow
-│   ├── defining-lattik-table.md    Lattik table workflow
-│   └── defining-metric.md          Metric workflow
+│   ├── index.ts                    Skill metadata and loader (SkillMeta.audience separates agent runbooks from reviewer policy)
+│   ├── defining-entity.md          Entity workflow (audience: agent)
+│   ├── defining-dimension.md       Dimension workflow (audience: agent)
+│   ├── defining-logger-table.md    Logger table workflow (audience: agent)
+│   ├── defining-lattik-table.md    Lattik table workflow (audience: agent)
+│   ├── defining-metric.md          Metric workflow (audience: agent)
+│   └── reviewing-definitions.md    Review policy for the review LLM (audience: reviewer — NOT shown to the agent's skill menu)
 ├── tools/
 │   ├── get-skill.ts          Load skill documents
 │   ├── read-canvas-state.ts  Read canvas form state

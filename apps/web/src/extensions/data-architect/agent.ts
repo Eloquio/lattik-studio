@@ -20,6 +20,7 @@ import {
 } from "./tools";
 
 const skillList = skills
+  .filter((s) => s.audience === "agent")
   .map((s) => `- **${s.id}**: ${s.description}`)
   .join("\n");
 
