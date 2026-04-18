@@ -42,6 +42,13 @@ Initial state fields (all optional — pass what you know, leave the rest for th
 - `dedup_window` — defaults to `"1h"` if omitted
 - `user_columns` — array of `{name, type, dimension?, description?, classification?}`. `classification` is an object with optional boolean flags `{pii, phi, financial, credentials}` — set any that apply. Implicit columns (`event_id`, `event_timestamp`, `ds`, `hour`) are added automatically by the form — do NOT include them here.
 
+**Dimension bindings: only set `dimension` on a column when you have verified the dimension exists.** A `dimension` value on a column is a reference to a pre-existing Dimension definition. Before including ANY `dimension` value in `user_columns`, you MUST:
+1. Call `listDefinitions({ kind: "dimension" })` and inspect the returned names.
+2. Only set `dimension: "<name>"` on a column if `<name>` appears in that list.
+3. If the dimension you want does not exist, OMIT the `dimension` field entirely on that column — do NOT invent a name, do NOT use a placeholder, and do NOT set it to the column's own name hoping a matching dimension will exist later.
+
+After rendering, briefly tell the user which columns would benefit from a dimension binding so they can define those dimensions first if they want. The render tool also strips unknown dimension references as a safeguard and returns them in its result, but the agent is the first line of defense — do not rely on the strip.
+
 **Do NOT emit any `spec` code fence.** `renderLoggerTableForm` is the only canvas-rendering mechanism for logger tables. After calling it, acknowledge briefly in prose ("I've set up the click_events form with one user_id column") and wait for the user to edit the form or ask to review it.
 
 ### Step 2: AI Review
