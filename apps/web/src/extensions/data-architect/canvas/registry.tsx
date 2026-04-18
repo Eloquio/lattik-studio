@@ -1174,6 +1174,15 @@ export const { registry, handlers } = defineRegistry(catalog, {
       const columns = (store.get("/user_columns") as UserColumn[]) ?? [];
 
       const [hoveredCol, setHoveredCol] = useState<string | null>(null);
+      // Each preview header <th> registers itself here so hovering a row in
+      // the Columns table below can scroll the matching preview column into
+      // view when the preview table is wider than the viewport.
+      const previewHeadRefs = useRef<Map<string, HTMLTableCellElement | null>>(new Map());
+      useEffect(() => {
+        if (!hoveredCol) return;
+        const el = previewHeadRefs.current.get(hoveredCol);
+        el?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+      }, [hoveredCol]);
       const [showAddCol, setShowAddCol] = useState(false);
       const [newColName, setNewColName] = useState("");
       const [newColType, setNewColType] = useState("");
@@ -1266,7 +1275,11 @@ export const { registry, handlers } = defineRegistry(catalog, {
                   <thead>
                     <tr className="border-b border-stone-200 bg-stone-50">
                       {allPreviewCols.map((c) => (
-                        <th key={c.name} className={`px-2.5 py-1.5 text-left font-semibold whitespace-nowrap transition-colors ${hoveredCol === c.name ? "bg-amber-100 text-amber-800" : "text-stone-600"}`}>
+                        <th
+                          key={c.name}
+                          ref={(el) => { previewHeadRefs.current.set(c.name, el); }}
+                          className={`px-2.5 py-1.5 text-left font-semibold whitespace-nowrap transition-colors ${hoveredCol === c.name ? "bg-amber-100 text-amber-800" : "text-stone-600"}`}
+                        >
                           {c.name}
                         </th>
                       ))}
@@ -1667,6 +1680,15 @@ export const { registry, handlers } = defineRegistry(catalog, {
       const derived = (store.get("/derived_columns") as DC[]) ?? [];
 
       const [hoveredCol, setHoveredCol] = useState<string | null>(null);
+      // Each preview header <th> registers itself here so hovering a row in
+      // the Columns table below can scroll the matching preview column into
+      // view when the preview table is wider than the viewport.
+      const previewHeadRefs = useRef<Map<string, HTMLTableCellElement | null>>(new Map());
+      useEffect(() => {
+        if (!hoveredCol) return;
+        const el = previewHeadRefs.current.get(hoveredCol);
+        el?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+      }, [hoveredCol]);
 
       // Add Column popup state
       const DERIVED_KEY = "__derived__";
@@ -1886,7 +1908,11 @@ export const { registry, handlers } = defineRegistry(catalog, {
                     <thead>
                       <tr className="border-b border-stone-200 bg-stone-50">
                         {previewCols.map((c) => (
-                          <th key={c.name} className={`px-2.5 py-1.5 text-left font-semibold whitespace-nowrap transition-colors ${hoveredCol === c.name ? "bg-amber-100 text-amber-800" : "text-stone-600"}`}>
+                          <th
+                            key={c.name}
+                            ref={(el) => { previewHeadRefs.current.set(c.name, el); }}
+                            className={`px-2.5 py-1.5 text-left font-semibold whitespace-nowrap transition-colors ${hoveredCol === c.name ? "bg-amber-100 text-amber-800" : "text-stone-600"}`}
+                          >
                             {c.name}
                           </th>
                         ))}
