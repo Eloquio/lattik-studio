@@ -19,10 +19,25 @@ export const entitySchema = z.object({
   id_type: z.enum(["int64", "string"]),
 });
 
+// Sensitivity classification. Each flag is a compliance-grade concern with
+// distinct downstream handling (masking, access control, audit). Kept as a
+// typed object instead of freeform tags so a typo becomes a type error, not a
+// silent policy failure. Extend by adding a new field here; if a category ever
+// needs sub-structure (e.g. direct vs quasi-identifier PII), widen the field
+// from `boolean` to `boolean | { ... }` — the plain `true` stays valid as
+// "yes, unspecified".
+export const classificationSchema = z.object({
+  pii: z.boolean().optional(),
+  phi: z.boolean().optional(),
+  financial: z.boolean().optional(),
+  credentials: z.boolean().optional(),
+});
+
 export const loggerColumnSchema = z.object({
   name: z.string(),
   type: columnTypeSchema,
   dimension: z.string().optional(),
+  classification: classificationSchema.optional(),
   tags: z.array(z.string()).optional(),
   description: z.string().optional(),
 });
@@ -132,7 +147,19 @@ export const pipelineDefinitionSchema = z.object({
 });
 
 export type Entity = z.infer<typeof entitySchema>;
+export type Classification = z.infer<typeof classificationSchema>;
 export type LoggerColumn = z.infer<typeof loggerColumnSchema>;
+
+/**
+ * True iff any sensitivity flag is set. Downstream consumers (masking,
+ * access control, audit) should key off this rather than checking individual
+ * flags, so adding a new category automatically extends the definition of
+ * "sensitive" without touching every call site.
+ */
+export function isSensitive(c: Classification | undefined): boolean {
+  if (!c) return false;
+  return !!(c.pii || c.phi || c.financial || c.credentials);
+}
 export type LoggerTable = z.infer<typeof loggerTableSchema>;
 export type FamilyColumn = z.infer<typeof familyColumnSchema>;
 export type LifetimeWindowColumn = z.infer<typeof lifetimeWindowColumnSchema>;

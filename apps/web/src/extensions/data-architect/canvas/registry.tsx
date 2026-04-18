@@ -10,8 +10,30 @@ import type { ScalarTypeKind } from "@eloquio/lattik-expression";
 import { fromColumnType, parse, KNOWN_AGGREGATES } from "@eloquio/lattik-expression";
 import { listDefinitions, createDefinition } from "@/lib/actions/definitions";
 import { lookupCatalogTable } from "@/lib/actions/iceberg-catalog";
+import type { Classification } from "../schema";
 import { useEntityRegistry } from "./entity-registry-context";
 import { catalog } from "./catalog";
+
+// ---- Classification helpers ----
+// Compliance flags shown on each column. Order here drives the popup pill
+// order and the badge order on column rows, so keep it stable.
+const CLASSIFICATION_CATEGORIES: ReadonlyArray<{
+  key: keyof Classification;
+  label: string;
+  badgeCls: string;
+  pillActiveCls: string;
+}> = [
+  { key: "pii", label: "PII", badgeCls: "bg-red-100 text-red-600", pillActiveCls: "bg-red-100 text-red-600 ring-1 ring-red-200" },
+  { key: "phi", label: "PHI", badgeCls: "bg-purple-100 text-purple-600", pillActiveCls: "bg-purple-100 text-purple-600 ring-1 ring-purple-200" },
+  { key: "financial", label: "Financial", badgeCls: "bg-emerald-100 text-emerald-700", pillActiveCls: "bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200" },
+  { key: "credentials", label: "Credentials", badgeCls: "bg-orange-100 text-orange-700", pillActiveCls: "bg-orange-100 text-orange-700 ring-1 ring-orange-200" },
+];
+
+function toggleClassification(c: Classification | undefined, key: keyof Classification): Classification | undefined {
+  const next: Classification = { ...(c ?? {}) };
+  if (next[key]) delete next[key]; else next[key] = true;
+  return Object.keys(next).length > 0 ? next : undefined;
+}
 
 // ---- State helper hook ----
 function useField(field: string) {
@@ -26,7 +48,7 @@ const inputCls =
   "rounded-md border border-stone-200 bg-white px-2.5 py-1.5 text-xs text-stone-800 placeholder:text-stone-400 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500/30";
 
 // ---- Column helpers ----
-interface UserColumn { _key: string; name: string; type: string; description?: string; dimension?: string; pii?: boolean }
+interface UserColumn { _key: string; name: string; type: string; description?: string; dimension?: string; classification?: Classification }
 const SNAKE_CASE_RE = /^[a-z][a-z0-9]*(_[a-z0-9]+)*$/;
 const TYPE_OPTIONS: ScalarTypeKind[] = ["string", "int32", "int64", "float", "double", "boolean", "timestamp", "date", "json"];
 
@@ -1157,13 +1179,13 @@ export const { registry, handlers } = defineRegistry(catalog, {
       const [newColType, setNewColType] = useState("");
       const [newColDesc, setNewColDesc] = useState("");
       const [newColDim, setNewColDim] = useState("");
-      const [newColPii, setNewColPii] = useState(false);
+      const [newColClassification, setNewColClassification] = useState<Classification | undefined>(undefined);
       const [editIdx, setEditIdx] = useState<number | null>(null);
       const [editName, setEditName] = useState("");
       const [editType, setEditType] = useState("string");
       const [editDesc, setEditDesc] = useState("");
       const [editDim, setEditDim] = useState("");
-      const [editPii, setEditPii] = useState(false);
+      const [editClassification, setEditClassification] = useState<Classification | undefined>(undefined);
 
       const updateCol = (i: number, patch: Partial<UserColumn>) =>
         store.set("/user_columns", columns.map((c, j) => (j === i ? { ...c, ...patch } : c)));
@@ -1171,8 +1193,8 @@ export const { registry, handlers } = defineRegistry(catalog, {
         if (!newColName.trim()) return;
         const dim = newColDim.trim() || undefined;
         if (dim && !SNAKE_CASE_RE.test(dim)) return;
-        store.set("/user_columns", [...columns, { _key: genKey("col"), name: newColName.trim(), type: newColType, description: newColDesc.trim() || undefined, dimension: dim, pii: newColPii || undefined }]);
-        setNewColName(""); setNewColType(""); setNewColDesc(""); setNewColDim(""); setNewColPii(false);
+        store.set("/user_columns", [...columns, { _key: genKey("col"), name: newColName.trim(), type: newColType, description: newColDesc.trim() || undefined, dimension: dim, classification: newColClassification }]);
+        setNewColName(""); setNewColType(""); setNewColDesc(""); setNewColDim(""); setNewColClassification(undefined);
         setShowAddCol(false);
       };
       const removeCol = (i: number) =>
@@ -1183,17 +1205,17 @@ export const { registry, handlers } = defineRegistry(catalog, {
         setEditType(columns[i].type);
         setEditDesc(columns[i].description ?? "");
         setEditDim(columns[i].dimension ?? "");
-        setEditPii(columns[i].pii ?? false);
+        setEditClassification(columns[i].classification);
       };
       const saveEdit = () => {
         if (editIdx === null || !editName.trim()) return;
         const dim = editDim.trim() || undefined;
         if (dim && !SNAKE_CASE_RE.test(dim)) return;
-        updateCol(editIdx, { name: editName.trim(), type: editType, description: editDesc.trim() || undefined, dimension: dim, pii: editPii || undefined });
+        updateCol(editIdx, { name: editName.trim(), type: editType, description: editDesc.trim() || undefined, dimension: dim, classification: editClassification });
         setEditIdx(null);
       };
       const cancelEdit = () => setEditIdx(null);
-      const closePopup = () => { setShowAddCol(false); cancelEdit(); setNewColName(""); setNewColType(""); setNewColDesc(""); setNewColDim(""); setNewColPii(false); };
+      const closePopup = () => { setShowAddCol(false); cancelEdit(); setNewColName(""); setNewColType(""); setNewColDesc(""); setNewColDim(""); setNewColClassification(undefined); };
 
       const allPreviewCols = [...IMPLICIT_TOP, ...columns.filter((c) => c.name), ...IMPLICIT_BOTTOM];
 
@@ -1297,7 +1319,9 @@ export const { registry, handlers } = defineRegistry(catalog, {
                       <td className="px-2.5 py-1.5">
                         <div className="flex items-center gap-1.5">
                           <span className="font-mono text-xs text-stone-800">{col.name || <span className="text-stone-400 italic">unnamed</span>}</span>
-                          {col.pii && <span className="rounded bg-red-100 px-1 py-0.5 text-[9px] font-medium text-red-600">PII</span>}
+                          {CLASSIFICATION_CATEGORIES.filter((cat) => col.classification?.[cat.key]).map((cat) => (
+                            <span key={cat.key} className={`rounded px-1 py-0.5 text-[9px] font-medium ${cat.badgeCls}`}>{cat.label}</span>
+                          ))}
                           {col.dimension && <span className="rounded bg-blue-100 px-1 py-0.5 text-[9px] font-medium text-blue-600">{col.dimension}</span>}
                         </div>
                       </td>
@@ -1358,17 +1382,27 @@ export const { registry, handlers } = defineRegistry(catalog, {
 
                 {/* Body */}
                 <div className="flex flex-col gap-3 px-4 py-4">
-                  {/* PII + Name */}
-                  <div className="flex items-center gap-2">
-                    <button type="button"
-                      onClick={() => editIdx !== null ? setEditPii(!editPii) : setNewColPii(!newColPii)}
-                      className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors ${(editIdx !== null ? editPii : newColPii) ? "bg-red-100 text-red-600 ring-1 ring-red-200" : "bg-stone-100 text-stone-400 hover:bg-stone-200 hover:text-stone-600"}`}>
-                      PII
-                    </button>
-                    <input type="text" value={editIdx !== null ? editName : newColName}
-                      onChange={(e) => editIdx !== null ? setEditName(e.target.value) : setNewColName(e.target.value)}
-                      placeholder="new_column_name" autoFocus maxLength={60}
-                      className="flex-1 min-w-0 bg-transparent text-sm font-semibold font-mono text-stone-800 placeholder:text-stone-300 placeholder:font-sans placeholder:font-normal focus:outline-none" />
+                  {/* Name */}
+                  <input type="text" value={editIdx !== null ? editName : newColName}
+                    onChange={(e) => editIdx !== null ? setEditName(e.target.value) : setNewColName(e.target.value)}
+                    placeholder="new_column_name" autoFocus maxLength={60}
+                    className="w-full bg-transparent text-sm font-semibold font-mono text-stone-800 placeholder:text-stone-300 placeholder:font-sans placeholder:font-normal focus:outline-none" />
+
+                  {/* Classification pills — each flag is an independent compliance concern */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {CLASSIFICATION_CATEGORIES.map((cat) => {
+                      const active = !!(editIdx !== null ? editClassification?.[cat.key] : newColClassification?.[cat.key]);
+                      const onClick = () => {
+                        if (editIdx !== null) setEditClassification((c) => toggleClassification(c, cat.key));
+                        else setNewColClassification((c) => toggleClassification(c, cat.key));
+                      };
+                      return (
+                        <button key={cat.key} type="button" onClick={onClick}
+                          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors ${active ? cat.pillActiveCls : "bg-stone-100 text-stone-400 hover:bg-stone-200 hover:text-stone-600"}`}>
+                          {cat.label}
+                        </button>
+                      );
+                    })}
                   </div>
 
                   {/* Type */}

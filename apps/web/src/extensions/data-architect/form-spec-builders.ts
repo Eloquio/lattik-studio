@@ -1,6 +1,6 @@
 import type { Spec } from "@json-render/core";
 import { z } from "zod";
-import { columnTypeSchema } from "./schema";
+import { classificationSchema, columnTypeSchema } from "./schema";
 
 /**
  * Per-kind form spec builders.
@@ -67,7 +67,11 @@ const loggerColumnInitialStateSchema = z
       .optional()
       .describe("Optional dimension link, e.g. 'user_id'"),
     description: z.string().optional(),
-    pii: z.boolean().optional(),
+    classification: classificationSchema
+      .optional()
+      .describe(
+        "Sensitivity classification. Set any of { pii, phi, financial, credentials } to true to mark the column; downstream tooling keys off these flags for masking and access control."
+      ),
   })
   .describe("A user-defined column on a logger table");
 

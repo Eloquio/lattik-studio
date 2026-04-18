@@ -101,6 +101,30 @@ Three layers of validation run during static checks:
 
 All definition types are defined as Zod schemas in `schema.ts`. The YAML output is a direct serialization of these schemas via `yaml-generator.ts` — no separate YAML schema exists.
 
+### Column Classification
+
+Logger table columns carry a typed `classification` object for sensitivity metadata. Each flag is an independent compliance concern with its own downstream handling (masking, access control, audit):
+
+| Flag | Covers |
+|------|--------|
+| `pii` | Names, emails, IP addresses, device IDs |
+| `phi` | HIPAA-protected health data |
+| `financial` | Account numbers, card data |
+| `credentials` | Tokens, passwords, secrets (should be rare) |
+
+Spec shape (see `schema.ts` → `classificationSchema`):
+```ts
+classification?: { pii?: boolean; phi?: boolean; financial?: boolean; credentials?: boolean }
+```
+
+The canvas form state and the saved spec share this shape exactly — the `LoggerTableForm` popup renders one toggle pill per category, `canvas-to-spec.ts` passes the object through (stripping flags that are false/undefined), and `tags: ["pii"]`-style encodings are no longer produced. This means loading a saved spec back into the canvas round-trips correctly.
+
+**Why a typed object instead of freeform tags:** a typo in a freeform `tags: ["pii"]` array is a silent policy failure; a typo in `classification.pii` is a type error. Classification is kept separate from `tags` — `tags` is reserved for non-compliance labels (`"high-cardinality"`, `"deprecated"`).
+
+**Extensibility:** add a new compliance category by adding a field to `classificationSchema`. If a category ever needs sub-structure (e.g. direct vs quasi-identifier PII, per-flag masking strategy), widen the field from `boolean` to `boolean | { ... }` — the plain `true` stays valid as "yes, unspecified", so existing specs don't need to migrate.
+
+**Downstream consumers** should key off the `isSensitive(classification)` helper (also in `schema.ts`) rather than inspecting individual flags, so adding a new category automatically broadens the definition of "sensitive" without touching every call site. Today no downstream system (ingest, Kafka, Spark drivers, lattik-stitch, Trino) reads this metadata — it's declarative only. Masking/redaction/access-control enforcement is future work.
+
 ## File Structure
 
 ```

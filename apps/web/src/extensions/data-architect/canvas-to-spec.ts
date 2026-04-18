@@ -166,10 +166,22 @@ function loggerTableFromCanvas(s: Record<string, unknown>): unknown {
     if (col.dimension !== undefined) out.dimension = col.dimension;
     if (col.description !== undefined) out.description = col.description;
 
-    // The form's `pii` toggle maps to a `pii` entry in the saved spec's tags.
-    const tags: string[] = Array.isArray(col.tags) ? (col.tags as string[]).slice() : [];
-    if (col.pii === true && !tags.includes("pii")) tags.push("pii");
-    if (tags.length > 0) out.tags = tags;
+    // Classification flags (pii/phi/financial/credentials) are the canonical
+    // compliance metadata — form state and spec share the same shape, so this
+    // is a pass-through. Drop flags set to false/undefined so the saved spec
+    // only carries the true ones.
+    if (col.classification && typeof col.classification === "object" && !Array.isArray(col.classification)) {
+      const cls = col.classification as Record<string, unknown>;
+      const trimmed: Record<string, true> = {};
+      for (const [k, v] of Object.entries(cls)) {
+        if (v === true) trimmed[k] = true;
+      }
+      if (Object.keys(trimmed).length > 0) out.classification = trimmed;
+    }
+
+    // `tags` is reserved for non-compliance labels (e.g. "high-cardinality",
+    // "deprecated"). Compliance tags like "pii" now live in `classification`.
+    if (Array.isArray(col.tags) && col.tags.length > 0) out.tags = col.tags;
 
     return out;
   });
