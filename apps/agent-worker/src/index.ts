@@ -53,7 +53,7 @@ async function executeTask(task: Task) {
 
 async function pollOnce() {
   for (const agentId of AGENTS) {
-    const task = await claimTask(agentId, `agent-worker-${agentId}`);
+    const task = await claimTask(agentId);
     if (task) {
       await executeTask(task);
     }

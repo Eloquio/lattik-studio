@@ -33,13 +33,16 @@ export async function createRequest(
   return row;
 }
 
-export async function claimRequest() {
+export async function claimRequest(claimedBy: string) {
   const db = getDb();
 
-  // Atomic claim: pick the oldest pending request and set status to "planning".
-  // FOR UPDATE SKIP LOCKED prevents concurrent planners from contending.
-  // There's no claimed_by column on requests today — if we need to audit who
-  // planned which request, add one and record it here.
+  // Atomic claim: pick the oldest pending request, move it to "planning",
+  // and lock it to this claimer. FOR UPDATE SKIP LOCKED lets concurrent
+  // workers claim different requests without contending.
+  //
+  // The row's `agent_id` dictates what the claimer does next:
+  //   - null  → worker acts as planner (decomposes, skill-matches, etc.)
+  //   - set   → worker takes that agent's role and executes directly
   const result = await db.execute<{
     id: string;
     source: RequestSource;
@@ -47,12 +50,16 @@ export async function claimRequest() {
     context: unknown;
     messages: { role: "planner" | "human"; content: string; timestamp: string }[];
     skill_id: string | null;
+    agent_id: string | null;
+    claimed_by: string | null;
     status: RequestStatus;
     created_at: Date;
     updated_at: Date;
   }>(sql`
     UPDATE request
-    SET status = 'planning', updated_at = now()
+    SET status = 'planning',
+        claimed_by = ${claimedBy},
+        updated_at = now()
     WHERE id = (
       SELECT id FROM request
       WHERE status = 'pending'
@@ -319,8 +326,19 @@ export async function claimTask(options: {
   return result[0] ?? null;
 }
 
-export async function completeTask(id: string, result?: unknown) {
+export async function completeTask(
+  id: string,
+  result?: unknown,
+  requireClaimedBy?: string,
+) {
   const db = getDb();
+  const conditions = [
+    eq(schema.tasks.id, id),
+    eq(schema.tasks.status, "claimed"),
+  ];
+  if (requireClaimedBy !== undefined) {
+    conditions.push(eq(schema.tasks.claimedBy, requireClaimedBy));
+  }
   const [row] = await db
     .update(schema.tasks)
     .set({
@@ -328,18 +346,24 @@ export async function completeTask(id: string, result?: unknown) {
       result: result ?? null,
       completedAt: new Date(),
     })
-    .where(
-      and(
-        eq(schema.tasks.id, id),
-        eq(schema.tasks.status, "claimed")
-      )
-    )
+    .where(and(...conditions))
     .returning();
   return row;
 }
 
-export async function failTask(id: string, error: string) {
+export async function failTask(
+  id: string,
+  error: string,
+  requireClaimedBy?: string,
+) {
   const db = getDb();
+  const conditions = [
+    eq(schema.tasks.id, id),
+    eq(schema.tasks.status, "claimed"),
+  ];
+  if (requireClaimedBy !== undefined) {
+    conditions.push(eq(schema.tasks.claimedBy, requireClaimedBy));
+  }
   const [row] = await db
     .update(schema.tasks)
     .set({
@@ -347,12 +371,7 @@ export async function failTask(id: string, error: string) {
       error,
       completedAt: new Date(),
     })
-    .where(
-      and(
-        eq(schema.tasks.id, id),
-        eq(schema.tasks.status, "claimed")
-      )
-    )
+    .where(and(...conditions))
     .returning();
   return row;
 }

@@ -1,13 +1,17 @@
-import { requireTaskAuth } from "@/lib/bearer-auth";
+import { requireWorkerAuth } from "@/lib/bearer-auth";
 import { claimRequest } from "@/lib/task-queue";
 
+/**
+ * Atomically lock the oldest pending request to the authenticated worker.
+ * The returned row's `agent_id` tells the caller what to do next:
+ *   - null  → act as planner and decide which agent should work on it
+ *   - set   → take that agent's role and execute the request directly
+ */
 export async function POST(req: Request) {
-  const authError = requireTaskAuth(req);
-  if (authError) return authError;
+  const auth = await requireWorkerAuth(req);
+  if (auth instanceof Response) return auth;
 
-  // Body is currently ignored — claimRequest() doesn't track the claimer.
-  // The route is POST (not GET) because claiming is a state-changing action.
-  const row = await claimRequest();
+  const row = await claimRequest(auth.workerId);
   if (!row) {
     return new Response(null, { status: 204 });
   }

@@ -12,6 +12,7 @@
     "db:logs": "kubectl -n postgres logs -l app=postgres -f",
     "db:push": "cd apps/web && npx drizzle-kit push",
     "db:seed": "cd apps/web && pnpm tsx --env-file=.env src/db/seed.ts",
+    "worker:bootstrap": "cd apps/web && pnpm tsx --env-file=.env src/db/bootstrap-local-worker.ts",
     "gitea:start": "kubectl apply -f k8s/gitea.yaml && until kubectl -n gitea get pod -l app=gitea 2>/dev/null | grep -q gitea; do sleep 2; done && kubectl -n gitea wait --for=condition=ready pod -l app=gitea --timeout=120s && (kubectl -n gitea exec deploy/gitea -- su git -c 'gitea admin user create --admin --username lattik-admin --password lattik-local --email admin@lattik.local --must-change-password=false' 2>/dev/null || true) && bash scripts/gitea-webhook-secret.sh && kubectl -n gitea delete job gitea-init --ignore-not-found && kubectl apply -f k8s/gitea-init.yaml && kubectl -n gitea wait --for=condition=complete job/gitea-init --timeout=120s",
     "gitea:stop": "kubectl delete -f k8s/gitea-init.yaml --ignore-not-found && kubectl delete -f k8s/gitea.yaml --ignore-not-found",
     "gitea:logs": "kubectl -n gitea logs -l app=gitea -f",

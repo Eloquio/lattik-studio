@@ -2,23 +2,94 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Check, X } from "lucide-react";
-import type { ReviewSuggestion } from "@/extensions/data-architect/tools/review-definition";
+import type {
+  ReviewAction,
+  ReviewSuggestion,
+} from "@/extensions/data-architect/tools/review-definition";
+
+function prettyPath(jsonPointer: string): string {
+  if (!jsonPointer.startsWith("/")) return jsonPointer;
+  const parts = jsonPointer.slice(1).split("/");
+  return parts.reduce((acc, p, i) => {
+    if (/^\d+$/.test(p)) return `${acc}[${p}]`;
+    return i === 0 ? p : `${acc}.${p}`;
+  }, "");
+}
+
+type Leaf = { path: string; value: unknown };
+
+function flattenValue(basePath: string, value: unknown): Leaf[] {
+  if (value === null || typeof value !== "object") {
+    return [{ path: basePath, value }];
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) return [{ path: basePath, value: "(empty list)" }];
+    return value.flatMap((v, i) => flattenValue(`${basePath}[${i}]`, v));
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length === 0) return [{ path: basePath, value: "(empty object)" }];
+  return entries.flatMap(([k, v]) => flattenValue(`${basePath}.${k}`, v));
+}
+
+function formatLeaf(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === null) return "null";
+  if (value === undefined) return "undefined";
+  return String(value);
+}
+
+function ActionPreview({ actions }: { actions: ReviewAction[] }) {
+  if (actions.length === 0) return null;
+  const leaves = actions.flatMap((a) => flattenValue(prettyPath(a.path), a.value));
+  return (
+    <div className="mt-1.5 flex flex-col gap-1 rounded-md border border-white/10 bg-black/20 px-2 py-1">
+      {leaves.map((leaf, i) => (
+        <div key={`${leaf.path}-${i}`} className="flex flex-wrap items-baseline gap-x-1.5">
+          <span className="font-mono text-[10px] text-white/50">{leaf.path}</span>
+          <span className="text-[10px] text-white/30">→</span>
+          <span className="whitespace-pre-wrap break-words text-[11px] leading-snug text-white/85">
+            {formatLeaf(leaf.value)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export interface ReviewStatus {
+  decisions?: Record<string, "accepted" | "denied">;
+  completed?: boolean;
+}
 
 interface ReviewSuggestionsProps {
   suggestions: ReviewSuggestion[];
   onApply?: (changes: Array<{ path: string; value: unknown }>) => void;
   onComplete?: (summary: string) => void;
+  initialStatus?: ReviewStatus;
+  onStatus?: (next: ReviewStatus) => void;
 }
 
-export function ReviewSuggestions({ suggestions, onApply, onComplete }: ReviewSuggestionsProps) {
-  const [decisions, setDecisions] = useState<Record<string, "accepted" | "denied">>({});
-  const completedRef = useRef(false);
+export function ReviewSuggestions({
+  suggestions,
+  onApply,
+  onComplete,
+  initialStatus,
+  onStatus,
+}: ReviewSuggestionsProps) {
+  const [decisions, setDecisions] = useState<Record<string, "accepted" | "denied">>(
+    () => initialStatus?.decisions ?? {}
+  );
+  // Seeded from persisted status so a refresh after the review wrapped up does
+  // not re-fire onComplete (which would spam the thread with another summary).
+  const completedRef = useRef(initialStatus?.completed ?? false);
 
   const handleDecision = (s: ReviewSuggestion, decision: "accepted" | "denied") => {
-    setDecisions((prev) => ({ ...prev, [s.id]: decision }));
+    const next = { ...decisions, [s.id]: decision };
+    setDecisions(next);
     if (decision === "accepted" && s.actions.length > 0 && onApply) {
       onApply(s.actions);
     }
+    onStatus?.({ decisions: next, completed: completedRef.current });
   };
 
   // Auto-advance when all suggestions are decided. When suggestions is empty,
@@ -30,6 +101,7 @@ export function ReviewSuggestions({ suggestions, onApply, onComplete }: ReviewSu
     if (suggestions.length === 0) {
       completedRef.current = true;
       onComplete("Review complete: no issues found. Proceed to the next step.");
+      onStatus?.({ decisions: {}, completed: true });
       return;
     }
     if (allDecided) {
@@ -39,8 +111,9 @@ export function ReviewSuggestions({ suggestions, onApply, onComplete }: ReviewSu
         return `- ${d === "accepted" ? "Accepted" : "Denied"}: "${s.title}"`;
       });
       onComplete(`All suggestions reviewed:\n${lines.join("\n")}\n\nProceed to the next step.`);
+      onStatus?.({ decisions, completed: true });
     }
-  }, [allDecided, decisions, suggestions, onComplete]);
+  }, [allDecided, decisions, suggestions, onComplete, onStatus]);
 
   if (suggestions.length === 0) {
     return (
@@ -52,7 +125,7 @@ export function ReviewSuggestions({ suggestions, onApply, onComplete }: ReviewSu
   }
 
   return (
-    <div className="my-2 flex flex-col gap-2">
+    <div className="my-2 flex flex-col gap-1.5">
       <span className="text-[10px] font-semibold uppercase tracking-wider text-white/40">
         Review Suggestions
       </span>
@@ -61,7 +134,7 @@ export function ReviewSuggestions({ suggestions, onApply, onComplete }: ReviewSu
         return (
           <div
             key={s.id}
-            className={`rounded-lg border border-white/10 px-3 py-2 transition-colors ${
+            className={`rounded-lg border border-white/10 px-3 py-1.5 transition-colors ${
               d === "accepted" ? "bg-green-500/10" : d === "denied" ? "bg-red-500/10" : "bg-white/5"
             }`}
           >
@@ -69,6 +142,7 @@ export function ReviewSuggestions({ suggestions, onApply, onComplete }: ReviewSu
               <div className="flex-1">
                 <div className="text-xs font-semibold text-white/90">{s.title}</div>
                 <div className="mt-0.5 text-[11px] text-white/60">{s.description}</div>
+                <ActionPreview actions={s.actions} />
               </div>
               {!d && (
                 <div className="flex items-center gap-1 shrink-0">

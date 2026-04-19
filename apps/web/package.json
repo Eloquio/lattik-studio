@@ -3,12 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "portless lattik-studio next dev",
+    "dev": "next dev --port 3737",
     "dev:test": "next dev --port 3100",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test src/lib/api-validation.test.ts src/lib/bearer-auth.test.ts src/extensions/data-architect/canvas-to-spec.test.ts",
+    "test": "tsx --test src/lib/api-validation.test.ts src/lib/bearer-auth.test.ts src/lib/worker-tokens.test.ts src/extensions/data-architect/canvas-to-spec.test.ts",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
   },

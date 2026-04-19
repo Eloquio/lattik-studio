@@ -7,7 +7,7 @@ const FIRST_PARTY_AGENTS = [
     id: "data-architect",
     name: "Data Architect",
     description:
-      "Design pipeline architectures: Logger Tables, Lattik Tables, and Canonical Dimensions. Build and visualize data pipelines for your Data Lake.",
+      "Design and manage pipeline concepts: Entities, Dimensions, Logger Tables, Lattik Tables, and Metrics. Owns all deletion flows — route any delete/drop/remove request (for a table, definition, or pipeline concept) to this agent.",
     icon: "blocks",
     category: "Data Architecture",
     type: "first-party" as const,
@@ -17,7 +17,7 @@ const FIRST_PARTY_AGENTS = [
     id: "data-analyst",
     name: "Data Analyst",
     description:
-      "Query data with SQL, explore tables, and visualize results with charts. Run queries against Trino and create bar, line, area, pie, and scatter charts.",
+      "Query data with SQL, explore tables, and visualize results with charts. Runs read-only queries against Trino and creates bar, line, area, pie, and scatter charts. Does NOT delete tables or definitions — route deletions to the Data Architect.",
     icon: "chart-bar",
     category: "Data Analysis",
     type: "first-party" as const,

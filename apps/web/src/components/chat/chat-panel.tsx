@@ -9,7 +9,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { buildSpecFromParts } from "@json-render/react";
 import { ToolResult } from "./tool-result";
-import { ReviewSuggestions } from "./review-suggestions";
+import { ReviewSuggestions, type ReviewStatus } from "./review-suggestions";
 import type { ReviewSuggestion } from "@/extensions/data-architect/tools/review-definition";
 import { saveConversation, deleteConversation } from "@/lib/actions/conversations";
 import type { TaskStackEntry } from "@/lib/types/task-stack";
@@ -86,11 +86,63 @@ export function ChatPanel({
       })
   );
 
-  const { messages, sendMessage, status, error } = useChat({
+  const { messages, sendMessage, setMessages, status, error } = useChat({
     id: chatId,
     messages: initialMessages,
     transport,
   });
+  // Mirror for event handlers that need the latest messages without re-binding
+  // every render (e.g. persisting a tool-card decision: compute next messages,
+  // setMessages, and save — all from the same snapshot).
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+
+  // Upsert a UI-only `data-reviewDecisions` part on the assistant message that
+  // owns the given reviewDefinition tool call, then persist. Kept UI-only
+  // (not inside the tool part's output) so the model-facing context stays
+  // unchanged — convertToModelMessages drops data-* parts by default.
+  const persistReviewStatus = (
+    messageId: string,
+    toolCallId: string,
+    next: ReviewStatus
+  ) => {
+    const current = messagesRef.current;
+    const newMessages = current.map((m) => {
+      if (m.id !== messageId) return m;
+      const others = (m.parts ?? []).filter(
+        (p) =>
+          !(
+            p.type === "data-reviewDecisions" &&
+            (p as { data?: { toolCallId?: string } }).data?.toolCallId === toolCallId
+          )
+      );
+      const newPart = {
+        type: "data-reviewDecisions" as const,
+        id: `reviewDecisions-${toolCallId}`,
+        data: { toolCallId, ...next },
+      };
+      return { ...m, parts: [...others, newPart] } as typeof m;
+    });
+    setMessages(newMessages);
+
+    const firstUserMsg = newMessages.find((m) => m.role === "user");
+    const title = firstUserMsg
+      ? firstUserMsg.parts
+          .filter((p): p is { type: "text"; text: string } => p.type === "text")
+          .map((p) => p.text)
+          .join(" ")
+          .slice(0, 100) || "New Chat"
+      : "New Chat";
+
+    saveConversation({
+      id: chatId,
+      title,
+      messages: newMessages,
+      canvasState: canvasStateRef.current,
+      taskStack: taskStackRef.current,
+      activeExtensionId: extensionIdRef.current,
+    });
+  };
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isLoading = status === "submitted" || status === "streaming";
@@ -355,10 +407,11 @@ export function ChatPanel({
       for (const part of msg.parts) {
         const isRenderPart = part.type.startsWith("tool-render");
         const isGenerateYamlPart = part.type === "tool-generateYaml";
+        const isSubmitPRPart = part.type === "tool-submitPR";
         const isRunQueryPart = part.type === "tool-runQuery";
         const isUpdateLayoutPart = part.type === "tool-updateLayout";
         if (
-          (isRenderPart || isGenerateYamlPart || isRunQueryPart || isUpdateLayoutPart) &&
+          (isRenderPart || isGenerateYamlPart || isSubmitPRPart || isRunQueryPart || isUpdateLayoutPart) &&
           "state" in part &&
           (part as { state: string }).state === "output-available" &&
           "output" in part
@@ -505,6 +558,7 @@ export function ChatPanel({
                             output?: unknown;
                             rawInput?: unknown;
                             errorText?: string;
+                            toolCallId?: string;
                           };
                           const name = part.type.slice(5);
                           // Render review suggestions as interactive cards
@@ -514,14 +568,26 @@ export function ChatPanel({
                             p.output &&
                             typeof p.output === "object" &&
                             "suggestions" in p.output &&
-                            Array.isArray((p.output as Record<string, unknown>).suggestions)
+                            Array.isArray((p.output as Record<string, unknown>).suggestions) &&
+                            p.toolCallId
                           ) {
+                            const toolCallId = p.toolCallId;
+                            const statusPart = message.parts.find(
+                              (pp) =>
+                                pp.type === "data-reviewDecisions" &&
+                                (pp as { data?: { toolCallId?: string } }).data?.toolCallId ===
+                                  toolCallId
+                            ) as { data?: ReviewStatus & { toolCallId: string } } | undefined;
                             return (
                               <ReviewSuggestions
                                 key={i}
                                 suggestions={(p.output as { suggestions: ReviewSuggestion[] }).suggestions}
                                 onApply={onCanvasStateWrite}
                                 onComplete={(summary) => sendMessage({ text: summary })}
+                                initialStatus={statusPart?.data}
+                                onStatus={(next) =>
+                                  persistReviewStatus(message.id, toolCallId, next)
+                                }
                               />
                             );
                           }
@@ -546,7 +612,7 @@ export function ChatPanel({
             })}
             {error && (
               <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-2 text-sm text-red-300">
-                {error.message || "Something went wrong. Please try again."}
+                Something went wrong. Please try again.
               </div>
             )}
             <div ref={messagesEndRef} />

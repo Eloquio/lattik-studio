@@ -97,54 +97,84 @@ export async function POST(req: Request) {
       kind: schema.definitions.kind,
       name: schema.definitions.name,
       spec: schema.definitions.spec,
+      status: schema.definitions.status,
     })
     .from(schema.definitions)
     .where(eq(schema.definitions.prUrl, prUrl));
 
   if (definitions.length === 0) {
-    return Response.json({ status: "ok", updatedCount: 0 });
+    return Response.json({ status: "ok", mergedCount: 0, deletedCount: 0 });
   }
 
-  // Batch update all matching definitions in one query
-  const ids = definitions.map((d) => d.id);
-  await db
-    .update(schema.definitions)
-    .set({
-      status: "merged",
-      prMergedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(inArray(schema.definitions.id, ids));
+  // Rows flipped to `pending_deletion` by the deleteDefinition tool are tied
+  // to a deletion PR — when that PR merges, the YAML file is gone from the
+  // repo and we must drop the row so it stops showing up as a committed
+  // definition in the reviewer's workspace context.
+  const toDelete = definitions.filter((d) => d.status === "pending_deletion");
+  const toMerge = definitions.filter((d) => d.status !== "pending_deletion");
 
-  // Audit: log each definition merge
-  await db.insert(schema.webhookAuditLog).values(
-    definitions.map((d) => ({
+  if (toDelete.length > 0) {
+    // Audit rows must be inserted before the delete so they still carry a
+    // valid `definitionId`. The FK is ON DELETE SET NULL, so subsequent
+    // lookups won't break — but populating it at insert time preserves the
+    // direct link for as long as possible.
+    await db.insert(schema.webhookAuditLog).values(
+      toDelete.map((d) => ({
+        prUrl,
+        definitionId: d.id,
+        action: "definition_deleted" as const,
+        status: "success" as const,
+        detail: `${d.kind} "${d.name}" deleted after deletion PR merged`,
+        receivedAt,
+      }))
+    );
+    await db
+      .delete(schema.definitions)
+      .where(inArray(schema.definitions.id, toDelete.map((d) => d.id)));
+  }
+
+  let requestId: string | undefined;
+  if (toMerge.length > 0) {
+    await db
+      .update(schema.definitions)
+      .set({
+        status: "merged",
+        prMergedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(inArray(schema.definitions.id, toMerge.map((d) => d.id)));
+
+    await db.insert(schema.webhookAuditLog).values(
+      toMerge.map((d) => ({
+        prUrl,
+        definitionId: d.id,
+        action: "definition_merged" as const,
+        status: "success" as const,
+        detail: `${d.kind} "${d.name}" marked as merged`,
+        receivedAt,
+      }))
+    );
+
+    // Create an async request for provisioning infrastructure (Kafka topics,
+    // schema registration, DAG generation). The planner agent will match
+    // this to a skill and create tasks for operator agents to execute.
+    const request = await createRequest("webhook", `PR merged: ${prUrl}`, {
       prUrl,
-      definitionId: d.id,
-      action: "definition_merged" as const,
-      status: "success" as const,
-      detail: `${d.kind} "${d.name}" marked as merged`,
-      receivedAt,
-    }))
-  );
-
-  // Create an async request for provisioning infrastructure (Kafka topics,
-  // schema registration, DAG generation). The planner agent will match this
-  // to a skill and create tasks for operator agents to execute.
-  const request = await createRequest("webhook", `PR merged: ${prUrl}`, {
-    prUrl,
-    definitions: definitions.map((d) => ({
-      id: d.id,
-      kind: d.kind,
-      name: d.name,
-      spec: d.spec,
-    })),
-    receivedAt: receivedAt.toISOString(),
-  });
+      definitions: toMerge.map((d) => ({
+        id: d.id,
+        kind: d.kind,
+        name: d.name,
+        spec: d.spec,
+      })),
+      receivedAt: receivedAt.toISOString(),
+    });
+    requestId = request.id;
+  }
 
   return Response.json({
     status: "ok",
-    updatedCount: definitions.length,
-    requestId: request.id,
+    mergedCount: toMerge.length,
+    deletedCount: toDelete.length,
+    requestId,
   });
 }

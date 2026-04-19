@@ -128,6 +128,50 @@ async function commitFilesUpdate(
   }
 }
 
+export async function deleteFile(
+  branchName: string,
+  path: string,
+  message: string
+) {
+  ensureToken();
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  const existingRes = await fetch(
+    apiUrl(
+      `/repos/${GITEA_ORG}/${GITEA_REPO}/contents/${encodedPath}?ref=${encodeURIComponent(branchName)}`
+    ),
+    { headers: headers() }
+  );
+  if (existingRes.status === 404) {
+    throw new Error(
+      `File '${path}' does not exist on branch '${branchName}' — nothing to delete.`
+    );
+  }
+  if (!existingRes.ok) {
+    throw new Error(
+      `Failed to locate file '${path}' on branch '${branchName}': ${existingRes.status} ${await existingRes.text()}`
+    );
+  }
+  const existing = await existingRes.json();
+  const res = await fetch(
+    apiUrl(`/repos/${GITEA_ORG}/${GITEA_REPO}/contents/${encodedPath}`),
+    {
+      method: "DELETE",
+      headers: headers(),
+      body: JSON.stringify({
+        branch: branchName,
+        message,
+        sha: existing.sha,
+      }),
+    }
+  );
+  if (!res.ok) {
+    throw new Error(
+      `Failed to delete file '${path}' on branch '${branchName}': ${res.status} ${await res.text()}`
+    );
+  }
+  return res.json();
+}
+
 export async function createPullRequest(
   title: string,
   body: string,

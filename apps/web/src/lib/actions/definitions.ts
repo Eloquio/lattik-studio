@@ -55,6 +55,39 @@ export async function updateDefinition(
   return row;
 }
 
+/**
+ * Mark a definition row as awaiting a deletion PR merge. Any authenticated
+ * user may flip a merged (shared) definition into `pending_deletion` — the
+ * Gitea PR itself is what gates the actual data change, and the webhook is
+ * the only thing that consummates the DB cleanup on merge. The ownership
+ * check that `updateDefinition` enforces is therefore deliberately skipped
+ * here; without that, a user could never propose deletion of a definition
+ * they did not originally author.
+ */
+export async function markDefinitionPendingDeletion(
+  id: string,
+  prUrl: string
+) {
+  await requireUser();
+  const db = getDb();
+
+  const [row] = await db
+    .update(schema.definitions)
+    .set({
+      status: "pending_deletion",
+      prUrl,
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.definitions.id, id))
+    .returning();
+
+  if (!row) {
+    throw new Error(`Definition ${id} not found`);
+  }
+
+  return row;
+}
+
 export async function getDefinition(id: string) {
   const user = await requireUser();
   const db = getDb();

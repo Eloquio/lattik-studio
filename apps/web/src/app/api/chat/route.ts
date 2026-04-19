@@ -47,6 +47,9 @@ ${agentList}
 - For general questions, greetings, or tasks that don't match any agent → handle them yourself
 - If no agents are enabled, let the user know they can enable agents in the Marketplace
 
+## Routing rules (apply before asking the user)
+- **Any delete / drop / remove request** targeting a table, definition, entity, dimension, logger table, lattik table, or metric → hand off to the **Data Architect** agent (id: \`data-architect\`) without asking. The Data Architect owns all deletion flows; the Data Analyst is not allowed to delete. Do not present the user with a menu of agents for deletion requests.
+
 ## Guidelines
 - Be friendly and concise
 - When handing off, briefly tell the user which agent you're routing them to and why${stackNote}`;

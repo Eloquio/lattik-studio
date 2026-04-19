@@ -1,21 +1,28 @@
 /**
  * HTTP client for the task queue API.
- * All agent interactions with the task queue go through this client.
+ *
+ * The worker authenticates with a single bearer token of the form
+ * `<workerId>:<secret>`. The server looks up the worker row, checks the
+ * secret, and authorizes each operation against the worker's registered
+ * agent list. One process = one worker identity.
  */
 
 const API_BASE = process.env.TASK_API_URL;
-const API_SECRET = process.env.TASK_AGENT_SECRET;
+const WORKER_ID = process.env.LATTIK_WORKER_ID;
+const WORKER_SECRET = process.env.LATTIK_WORKER_SECRET;
 
 if (!API_BASE) {
   throw new Error("TASK_API_URL is required");
 }
-if (!API_SECRET) {
-  throw new Error("TASK_AGENT_SECRET is required");
+if (!WORKER_ID || !WORKER_SECRET) {
+  throw new Error(
+    "LATTIK_WORKER_ID and LATTIK_WORKER_SECRET are required — register the worker via `pnpm worker:bootstrap`",
+  );
 }
 
 const headers = {
   "Content-Type": "application/json",
-  Authorization: `Bearer ${API_SECRET}`,
+  Authorization: `Bearer ${WORKER_ID}:${WORKER_SECRET}`,
 };
 
 export interface Task {
@@ -34,14 +41,11 @@ export interface Task {
   completed_at: string | null;
 }
 
-export async function claimTask(
-  agentId: string,
-  claimedBy: string
-): Promise<Task | null> {
+export async function claimTask(agentId?: string): Promise<Task | null> {
   const res = await fetch(`${API_BASE}/api/tasks/claim`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ agentId, claimedBy }),
+    body: JSON.stringify(agentId ? { agentId } : {}),
   });
 
   if (res.status === 204) return null;

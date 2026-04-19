@@ -1,5 +1,6 @@
 import { zodSchema } from "ai";
 import { z } from "zod";
+import type { Spec } from "@json-render/core";
 import type { DefinitionKind } from "@/db/schema";
 import {
   createBranch,
@@ -143,12 +144,33 @@ export function createSubmitPRTool(getCanvasState: () => unknown) {
           });
         }
 
+        const filePaths = files.map((f) => f.path);
+        const spec: Spec = {
+          root: "main",
+          elements: {
+            main: {
+              type: "PRSubmittedCard",
+              props: {
+                kind: input.kind,
+                name,
+                prNumber: pr.number,
+                prUrl,
+                branch: branchName,
+                files: filePaths,
+              },
+              children: [],
+            },
+          },
+          state: {},
+        };
+
         return {
           status: "submitted",
           prNumber: pr.number,
           prUrl,
           branch: branchName,
-          files: files.map((f) => f.path),
+          files: filePaths,
+          spec,
         };
       } catch (error) {
         console.error("submitPR error:", error);
