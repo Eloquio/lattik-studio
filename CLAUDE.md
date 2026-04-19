@@ -158,11 +158,13 @@ pnpm db:stop
 # Tear down the entire cluster (kills postgres, gitea, trino, everything)
 pnpm cluster:down
 
-# Connect via psql
-psql postgresql://lattik:lattik-local@localhost:5432/lattik_studio
+# Connect via psql (always exec into the pod — `psql` is not installed on the host)
+kubectl exec -n postgres deployment/postgres -- psql -U lattik -d lattik_studio -c "SELECT 1;"
+# Or open an interactive shell:
+kubectl exec -it -n postgres deployment/postgres -- psql -U lattik -d lattik_studio
 
 # Check pod status
-kubectl get pods -l app=postgres
+kubectl get pods -n postgres -l app=postgres
 ```
 
 - **Driver:** `postgres` (postgres.js) via `drizzle-orm/postgres-js`
