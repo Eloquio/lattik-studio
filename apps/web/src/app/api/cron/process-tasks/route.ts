@@ -29,7 +29,7 @@ export async function GET(req: Request) {
   // Phase 1: Plan — claim pending requests and create tasks from skills
   const skills = loadSkills();
   for (let i = 0; i < BATCH_LIMIT; i++) {
-    const request = await claimRequest();
+    const request = await claimRequest("system-planner");
     if (!request) break;
 
     try {

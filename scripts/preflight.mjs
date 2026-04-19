@@ -17,7 +17,7 @@ const MIN_DISK_GB = 20;
 // Ports that must be free for the full dev stack.
 // portless (443) is checked separately as a warning since it runs before dev:up.
 const REQUIRED_PORTS = [
-  { port: 3000, label: "Next.js dev server" },
+  { port: 3737, label: "Next.js dev server" },
   { port: 3300, label: "Gitea" },
   { port: 5432, label: "PostgreSQL" },
   { port: 8080, label: "Trino" },

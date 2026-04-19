@@ -134,6 +134,18 @@ export const catalog = defineCatalog(schema, {
       description:
         "Multi-file YAML editor with syntax highlighting. Renders one tab per generated YAML file and lets the user manually edit the contents before submitting a PR. State: kind, name, files[] ({path, content}), active_file (number index).",
     },
+    PRSubmittedCard: {
+      props: z.object({
+        kind: z.string(),
+        name: z.string(),
+        prNumber: z.number(),
+        prUrl: z.string(),
+        branch: z.string(),
+        files: z.array(z.string()),
+      }),
+      description:
+        "Success card shown after submitPR succeeds. Displays a celebratory confirmation with a clickable PR link, branch name, and the list of committed files.",
+    },
   },
   actions: {},
 });

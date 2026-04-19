@@ -1,11 +1,13 @@
 import { z } from "zod";
-import { requireTaskAuth } from "@/lib/bearer-auth";
+import { requireWorkerAuth } from "@/lib/bearer-auth";
 import { claimTask } from "@/lib/task-queue";
 import { parseJsonBody } from "@/lib/api-validation";
 
 const claimBodySchema = z.object({
+  // Optional filter: claim only a task for this agent id. Workers that are
+  // willing to execute any agent role omit this and get the oldest pending
+  // task.
   agentId: z.string().min(1).optional(),
-  claimedBy: z.string().min(1),
   // Cap at 1 hour so a buggy caller can't pin tasks indefinitely.
   timeoutMs: z
     .number()
@@ -16,15 +18,15 @@ const claimBodySchema = z.object({
 });
 
 export async function POST(req: Request) {
-  const authError = requireTaskAuth(req);
-  if (authError) return authError;
+  const auth = await requireWorkerAuth(req);
+  if (auth instanceof Response) return auth;
 
   const body = await parseJsonBody(req, claimBodySchema);
   if (body instanceof Response) return body;
 
   const row = await claimTask({
     agentId: body.agentId,
-    claimedBy: body.claimedBy,
+    claimedBy: auth.workerId,
     timeoutMs: body.timeoutMs,
   });
 

@@ -95,9 +95,11 @@ spec:
               # Register webhook on pipelines repo — fires on PR merge into
               # main so the web app can generate DAG specs and persist
               # definition state. host.docker.internal is how pods in kind
-              # reach the Next.js dev server running on the host (port 3000
+              # reach the Next.js dev server running on the host (port 3737
               # bypasses portless TLS, which has a cert for lattik-studio.dev
-              # and wouldn't match this Host header).
+              # and wouldn't match this Host header). The dev server pins
+              # this port via apps/web/package.json; portless reaches it via
+              # the static alias registered in scripts/bootstrap.sh.
               if [ -z "$GITEA_WEBHOOK_SECRET" ]; then
                 echo "Warning: GITEA_WEBHOOK_SECRET is empty — skipping webhook registration."
                 echo "Set it in apps/web/.env and re-run 'pnpm gitea:start'."
@@ -121,7 +123,7 @@ spec:
                     \"active\": true,
                     \"events\": [\"pull_request\"],
                     \"config\": {
-                      \"url\": \"http://host.docker.internal:3000/api/webhooks/gitea\",
+                      \"url\": \"http://host.docker.internal:3737/api/webhooks/gitea\",
                       \"content_type\": \"json\",
                       \"secret\": \"$GITEA_WEBHOOK_SECRET\"
                     }

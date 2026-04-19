@@ -57,10 +57,15 @@ for (const [key, value] of Object.entries(autoFilled)) {
 
 writeFileSync(ENV_PATH, env);
 
-// Also create apps/agent-worker/.env with the shared TASK_AGENT_SECRET
+// Also create apps/agent-worker/.env. Per-agent tokens (LATTIK_AGENT_TOKENS)
+// are minted by `agent-tokens:bootstrap` after the DB is seeded — see
+// scripts/bootstrap.sh. This step only lays down the API URL so the file
+// exists when the token-bootstrap step appends to it.
 if (!existsSync(AGENT_WORKER_ENV_PATH)) {
-  const agentSecret = autoFilled.TASK_AGENT_SECRET;
-  writeFileSync(AGENT_WORKER_ENV_PATH, `TASK_API_URL=https://lattik-studio.dev\nTASK_AGENT_SECRET=${agentSecret}\n`);
+  writeFileSync(
+    AGENT_WORKER_ENV_PATH,
+    `TASK_API_URL=https://lattik-studio.dev\n`,
+  );
 }
 
 console.log("");

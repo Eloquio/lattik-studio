@@ -49,7 +49,7 @@ Run automatically at the start of `dev:up` (before `env:bootstrap`). Checks:
 - [ ] `portless` is installed globally
 - [ ] Available RAM >= 8 GB (warn if < 12 GB)
 - [ ] Available disk space >= 20 GB
-- [ ] Key ports are free: 443, 3000, 3300, 5432, 8080, 8088, 9000, 9001, 9094
+- [ ] Key ports are free: 443, 3300, 3737, 5432, 8080, 8088, 9000, 9001, 9094
 
 Output: a clear checklist with pass/fail per item. Abort on any hard failure with a one-line fix suggestion (e.g., `brew install kind`). Warn on soft failures (low RAM, missing portless).
 

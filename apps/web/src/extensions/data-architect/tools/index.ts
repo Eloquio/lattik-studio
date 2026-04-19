@@ -13,5 +13,6 @@ export { createStaticCheckTool } from "./static-check";
 export { createUpdateDefinitionTool } from "./update-definition";
 export { createGenerateYamlTool } from "./generate-yaml";
 export { createSubmitPRTool } from "./submit-pr";
+export { deleteDefinitionTool } from "./delete-definition";
 export { listDefinitionsTool } from "./list-definitions";
 export { getDefinitionTool } from "./get-definition";

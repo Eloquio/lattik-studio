@@ -79,7 +79,11 @@ export type DefinitionKind =
   | "lattik_table"
   | "metric";
 
-export type DefinitionStatus = "draft" | "pending_review" | "merged";
+export type DefinitionStatus =
+  | "draft"
+  | "pending_review"
+  | "merged"
+  | "pending_deletion";
 
 export const definitions = pgTable(
   "definition",
@@ -132,6 +136,27 @@ export const agents = pgTable("agent", {
   updatedAt: timestamp("updatedAt", { mode: "date" }).notNull().defaultNow(),
 });
 
+/**
+ * Workers are fungible processes that execute tasks. The agent a task should
+ * run under is stored on the task itself; when a worker claims a task it
+ * instantiates that agent role and runs it. Each worker has its own bearer
+ * secret so a compromised process can be revoked without disturbing the
+ * fleet, and ownership of in-flight claims is tracked via `task.claimed_by`.
+ *
+ * Auth: workers present `Authorization: Bearer <workerId>:<secret>`; the
+ * server looks up the row and compares sha256(secret) to `tokenHash`.
+ */
+export const workers = pgTable(
+  "worker",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+  },
+);
+
 export const userAgents = pgTable(
   "user_agent",
   {
@@ -165,6 +190,7 @@ export const rateLimits = pgTable(
 
 export type WebhookActionType =
   | "definition_merged"
+  | "definition_deleted"
   | "kafka_topic_created"
   | "schema_registered"
   | "dag_generated";
@@ -185,7 +211,9 @@ export const webhookAuditLog = pgTable(
     /** The Gitea PR URL that triggered this action. */
     prUrl: text("prUrl").notNull(),
     /** The definition this action relates to (null for non-definition actions). */
-    definitionId: text("definitionId").references(() => definitions.id),
+    definitionId: text("definitionId").references(() => definitions.id, {
+      onDelete: "set null",
+    }),
     /** What kind of action was performed. */
     action: text("action").$type<WebhookActionType>().notNull(),
     /** Whether the action succeeded or failed. */
@@ -291,6 +319,20 @@ export const requests = pgTable(
       .notNull()
       .default([]),
     skillId: text("skill_id"),
+    /**
+     * Agent this request is pre-assigned to, if any. Null means "no agent
+     * decided yet" — whichever worker claims this request becomes the
+     * planner and decides which agent should handle it. A set value skips
+     * planning: the claiming worker takes that agent's role directly.
+     */
+    agentId: text("agent_id"),
+    /**
+     * Worker id that currently holds this request. Set atomically during
+     * claim (FOR UPDATE SKIP LOCKED in claimRequest). Null means the
+     * request is free — either pending (not yet claimed) or the claim was
+     * released. Used for ownership checks on downstream mutations.
+     */
+    claimedBy: text("claimed_by"),
     status: text("status").$type<RequestStatus>().notNull().default("pending"),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),

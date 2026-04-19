@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { defineRegistry, useStateStore } from "@json-render/react";
-import { Check, X, Plus, Trash2, Lock, Table2, Send, FileCode } from "lucide-react";
+import { Check, X, Plus, Trash2, Lock, Table2, Send, FileCode, PartyPopper, GitPullRequest, GitBranch, ExternalLink } from "lucide-react";
 import CodeMirror from "@uiw/react-codemirror";
 import { yaml as yamlLanguage } from "@codemirror/lang-yaml";
 import { useCanvasActions } from "@/components/canvas/canvas-actions-context";
@@ -2274,6 +2274,91 @@ export const { registry, handlers } = defineRegistry(catalog, {
               Create PR
             </button>
           </div>
+        </div>
+      );
+    },
+
+    PRSubmittedCard: ({ props }) => {
+      const kindLabel = props.kind ? props.kind.replace(/_/g, " ") : "definition";
+      return (
+        <div className="flex flex-col gap-5">
+          {/* Hero */}
+          <div className="relative overflow-hidden rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-amber-50 p-6">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-100 ring-4 ring-emerald-50">
+                <PartyPopper className="h-6 w-6 text-emerald-600" />
+              </div>
+              <div className="flex flex-col gap-1">
+                <h2 className="text-base font-semibold text-stone-800">PR submitted successfully</h2>
+                <p className="text-xs text-stone-500">
+                  Your {kindLabel}{" "}
+                  <span className="font-mono text-stone-700">{props.name}</span> is ready for
+                  review.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* PR card */}
+          <a
+            href={props.prUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group flex items-center justify-between gap-3 rounded-lg border border-stone-200 bg-white p-4 transition-colors hover:border-amber-300 hover:bg-amber-50/30"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-md bg-purple-100 text-purple-600">
+                <GitPullRequest className="h-4 w-4" />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs font-medium text-stone-500">Pull Request</span>
+                <span className="text-sm font-semibold text-stone-800 group-hover:text-amber-700">
+                  #{props.prNumber} — Define {kindLabel}: {props.name}
+                </span>
+              </div>
+            </div>
+            <ExternalLink className="h-4 w-4 text-stone-400 group-hover:text-amber-600" />
+          </a>
+
+          {/* Branch */}
+          <div className="flex items-center gap-2 rounded-lg border border-stone-200 bg-stone-50/50 px-3 py-2">
+            <GitBranch className="h-3.5 w-3.5 text-stone-400" />
+            <span className="text-[11px] font-medium uppercase tracking-wider text-stone-400">
+              Branch
+            </span>
+            <span className="ml-1 truncate font-mono text-xs text-stone-700">{props.branch}</span>
+          </div>
+
+          {/* Files */}
+          {props.files.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[11px] font-medium uppercase tracking-wider text-stone-400">
+                Files committed ({props.files.length})
+              </span>
+              <ul className="flex flex-col gap-1 rounded-lg border border-stone-200 bg-white p-2">
+                {props.files.map((path: string) => (
+                  <li
+                    key={path}
+                    className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-stone-700 hover:bg-stone-50"
+                  >
+                    <FileCode className="h-3.5 w-3.5 shrink-0 text-stone-400" />
+                    <span className="truncate font-mono">{path}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* CTA */}
+          <a
+            href={props.prUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-stone-800 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-700"
+          >
+            View PR in Gitea
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
         </div>
       );
     },
