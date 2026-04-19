@@ -11,6 +11,7 @@
  * process can be revoked without rotating a fleet-wide secret.
  */
 
+import { timingSafeEqual } from "node:crypto";
 import { verifyWorkerToken } from "@/lib/worker-tokens";
 
 function verifyBearer(req: Request, envVar: string): boolean {
@@ -20,7 +21,10 @@ function verifyBearer(req: Request, envVar: string): boolean {
   }
   const auth = req.headers.get("authorization");
   if (!auth?.startsWith("Bearer ")) return false;
-  return auth.slice(7) === secret;
+  const presented = Buffer.from(auth.slice(7), "utf8");
+  const expected = Buffer.from(secret, "utf8");
+  if (presented.length !== expected.length) return false;
+  return timingSafeEqual(presented, expected);
 }
 
 /**
