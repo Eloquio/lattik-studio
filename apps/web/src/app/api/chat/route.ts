@@ -21,6 +21,16 @@ const MAX_BODY_SIZE = 2 * 1024 * 1024;
 /** Max messages per request */
 const MAX_MESSAGES = 200;
 
+/**
+ * Sanitize free-form text from the client before embedding it in a system
+ * prompt. Strips newlines/control chars (the primary prompt-injection vector)
+ * and truncates to a bounded length so a malicious client can't balloon the
+ * prompt or inject fake sections.
+ */
+function sanitizeForPrompt(s: string, maxLen = 200): string {
+  return s.replace(/[\r\n\t\u0000-\u001f]+/g, " ").slice(0, maxLen);
+}
+
 function buildAssistantPrompt(
   agents: { id: string; name: string; description: string }[],
   currentTaskStack?: { extensionId: string; reason: string }[]
@@ -30,10 +40,21 @@ function buildAssistantPrompt(
       ? agents.map((a) => `- **${a.name}** (id: "${a.id}"): ${a.description}`).join("\n")
       : "No agents enabled. Suggest the user visit the Agent Marketplace to enable specialized agents.";
 
-  const stackNote =
+  // Only include paused-task context if the stacked extensionId is a known
+  // extension — prevents a malicious client from smuggling arbitrary strings
+  // into the system prompt via `taskStack[0].extensionId`.
+  const pausedEntry =
     currentTaskStack && currentTaskStack.length > 0
-      ? `\n\n## Paused Task\nThere is a paused task on the stack: the "${currentTaskStack[0].extensionId}" agent was working on "${currentTaskStack[0].reason}" and is waiting to resume.\n- Do NOT hand off to a different specialist — handle the user's new request yourself.\n- When the user indicates they are done with their current request ("that's all", "nothing else", "I'm done", etc.), use the handoff tool to resume the paused agent (agentId: "${currentTaskStack[0].extensionId}") so it can continue where it left off.\n- Briefly tell the user you're handing them back to the paused agent.`
-      : "";
+      ? currentTaskStack[0]
+      : undefined;
+  const pausedExtension =
+    pausedEntry && getExtension(pausedEntry.extensionId)
+      ? pausedEntry
+      : undefined;
+
+  const stackNote = pausedExtension
+    ? `\n\n## Paused Task\nThere is a paused task on the stack: the "${pausedExtension.extensionId}" agent was working on "${sanitizeForPrompt(pausedExtension.reason)}" and is waiting to resume.\n- Do NOT hand off to a different specialist — handle the user's new request yourself.\n- When the user indicates they are done with their current request ("that's all", "nothing else", "I'm done", etc.), use the handoff tool to resume the paused agent (agentId: "${pausedExtension.extensionId}") so it can continue where it left off.\n- Briefly tell the user you're handing them back to the paused agent.`
+    : "";
 
   return `You are the Lattik Studio Assistant — the main AI assistant for Lattik Studio, an agentic analytics platform.
 

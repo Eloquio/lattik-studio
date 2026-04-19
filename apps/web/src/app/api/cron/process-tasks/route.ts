@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import {
   claimRequest,
   claimTask,
@@ -17,10 +18,19 @@ const BATCH_LIMIT = 10;
  * Phase 3: Cleanup — check if completed requests can be marked done
  */
 export async function GET(req: Request) {
-  // Verify cron secret (Vercel sets this header automatically)
-  const authHeader = req.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!cronSecret) {
+    console.error("CRON_SECRET is not configured");
+    return Response.json({ error: "Server misconfigured" }, { status: 500 });
+  }
+  const authHeader = req.headers.get("authorization");
+  const presented = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  const presentedBuf = Buffer.from(presented, "utf8");
+  const expectedBuf = Buffer.from(cronSecret, "utf8");
+  if (
+    presentedBuf.length !== expectedBuf.length ||
+    !timingSafeEqual(presentedBuf, expectedBuf)
+  ) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
