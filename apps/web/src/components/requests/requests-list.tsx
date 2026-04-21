@@ -45,7 +45,9 @@ export function RequestsList({ requests }: { requests: RequestListItem[] }) {
         <span className="text-xs font-semibold uppercase tracking-wider text-white/50">
           Requests
         </span>
-        <span className="text-[10px] text-white/30">{requests.length}</span>
+        <span className="text-[10px] text-white/30">
+          {requests.length} {requests.length === 1 ? "request" : "requests"}
+        </span>
       </div>
 
       <div className="flex-1 overflow-y-auto p-2">
