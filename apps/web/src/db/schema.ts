@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
   date,
@@ -130,6 +131,18 @@ export const agents = pgTable("agent", {
    * long-running Spark jobs should set this to several hours.
    */
   staleTimeoutMs: integer("stale_timeout_ms"),
+  /**
+   * Capability ceiling for this agent. A task dispatched to this agent may
+   * only carry a subset of these — the planner / skill recipe is responsible
+   * for choosing a subset, and server-side task insertion enforces the rule.
+   *
+   * Opaque strings; the vocabulary lives in code at use sites (e.g.
+   * "kafka:read", "s3:write", "trino:query"). No central enum.
+   */
+  allowedCapabilities: text("allowed_capabilities")
+    .array()
+    .notNull()
+    .default(sql`ARRAY[]::text[]`),
   authorId: text("authorId").references(() => users.id),
   published: boolean("published").notNull().default(true),
   createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
@@ -146,15 +159,25 @@ export const agents = pgTable("agent", {
  * Auth: workers present `Authorization: Bearer <workerId>:<secret>`; the
  * server looks up the row and compares sha256(secret) to `tokenHash`.
  */
+export type WorkerMode = "cluster" | "host";
+
 export const workers = pgTable(
   "worker",
   {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
     tokenHash: text("token_hash").notNull(),
+    // "cluster" → a k8s Deployment in kind owns the process; revoke tears it down.
+    // "host"    → a developer runs the process manually; revoke just deletes the row.
+    mode: text("mode").$type<WorkerMode>().notNull().default("cluster"),
+    // Updated on every claim poll. A worker is "live" if this is within the
+    // heartbeat threshold (30s). Null means the worker has never polled.
+    // Uses timestamptz so JS Date values round-trip cleanly across server tz.
+    lastSeenAt: timestamp("last_seen_at", { mode: "date", withTimezone: true }),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
   },
+  (t) => [index("idx_worker_last_seen_at").on(t.lastSeenAt)],
 );
 
 export const userAgents = pgTable(
@@ -334,10 +357,20 @@ export const requests = pgTable(
      */
     claimedBy: text("claimed_by"),
     status: text("status").$type<RequestStatus>().notNull().default("pending"),
+    /**
+     * Set on successful claim to `now() + stale_timeout`. The cron pass in
+     * /api/cron/process-tasks resets any `planning` request whose `stale_at`
+     * has passed back to `pending`, releasing claims held by dead workers.
+     * Uses timestamptz so JS Date values round-trip cleanly across server tz.
+     */
+    staleAt: timestamp("stale_at", { mode: "date", withTimezone: true }),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
   },
-  (t) => [index("idx_requests_status").on(t.status)]
+  (t) => [
+    index("idx_requests_status").on(t.status),
+    index("idx_request_stale_at").on(t.staleAt),
+  ]
 );
 
 export type TaskStatus = "draft" | "pending" | "claimed" | "done" | "failed";
@@ -365,8 +398,18 @@ export const tasks = pgTable(
     error: text("error"),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
     claimedAt: timestamp("claimed_at", { mode: "date" }),
-    staleAt: timestamp("stale_at", { mode: "date" }),
+    staleAt: timestamp("stale_at", { mode: "date", withTimezone: true }),
     completedAt: timestamp("completed_at", { mode: "date" }),
+    /**
+     * Per-task capability grant, chosen by the planner or skill recipe. Must
+     * be a subset of agent.allowed_capabilities at insertion time — enforced
+     * in createTask. The worker's agent SDK reads these via ctx.capabilities
+     * and guards resource access via ctx.requireCapability.
+     */
+    capabilities: text("capabilities")
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::text[]`),
   },
   (t) => [
     index("idx_tasks_status").on(t.status),

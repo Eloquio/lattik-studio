@@ -17,9 +17,16 @@
  */
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, gt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
+
+/**
+ * A worker is considered "live" if its last_seen_at falls within this window.
+ * The worker polls every ~5s, so 30s tolerates a few missed polls before the
+ * UI flips it to grey.
+ */
+export const WORKER_LIVENESS_WINDOW_MS = 30_000;
 
 export function hashSecret(secret: string): string {
   return createHash("sha256").update(secret).digest("hex");
@@ -27,12 +34,14 @@ export function hashSecret(secret: string): string {
 
 /**
  * Create or rotate a worker's token. If `id` already exists, this overwrites
- * the hash and name. Returns the plaintext secret — callers must surface it
- * to the user exactly once; it cannot be recovered later.
+ * the hash, name, and (if supplied) mode. Returns the plaintext secret —
+ * callers must surface it to the user exactly once; it cannot be recovered
+ * later.
  */
 export async function registerWorker(input: {
   id: string;
   name: string;
+  mode?: "cluster" | "host";
 }): Promise<string> {
   const db = getDb();
   const secret = randomBytes(32).toString("hex");
@@ -44,12 +53,14 @@ export async function registerWorker(input: {
       id: input.id,
       name: input.name,
       tokenHash,
+      ...(input.mode ? { mode: input.mode } : {}),
     })
     .onConflictDoUpdate({
       target: schema.workers.id,
       set: {
         name: input.name,
         tokenHash,
+        ...(input.mode ? { mode: input.mode } : {}),
         updatedAt: new Date(),
       },
     });
@@ -61,6 +72,33 @@ export async function registerWorker(input: {
 export async function revokeWorker(id: string): Promise<void> {
   const db = getDb();
   await db.delete(schema.workers).where(eq(schema.workers.id, id));
+}
+
+/**
+ * Update a worker's `last_seen_at` to now. Called on every claim-endpoint
+ * poll so the studio can tell live workers from dead ones. Non-throwing —
+ * if the worker row was deleted between auth and this call, silently noop.
+ */
+export async function touchWorkerHeartbeat(id: string): Promise<void> {
+  const db = getDb();
+  await db
+    .update(schema.workers)
+    .set({ lastSeenAt: new Date() })
+    .where(eq(schema.workers.id, id));
+}
+
+/**
+ * Count of workers whose last_seen_at is within the liveness window. Feeds
+ * the "N workers online" badge and the per-row live-pill on /settings/workers.
+ */
+export async function countActiveWorkers(): Promise<number> {
+  const db = getDb();
+  const threshold = new Date(Date.now() - WORKER_LIVENESS_WINDOW_MS);
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(schema.workers)
+    .where(gt(schema.workers.lastSeenAt, threshold));
+  return row?.count ?? 0;
 }
 
 /**

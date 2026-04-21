@@ -15,6 +15,34 @@ import type {
   RequestStatus,
   TaskStatus,
 } from "@/db/schema";
+import { instantiateSkill, type Skill } from "@/lib/skills";
+
+/**
+ * Minimum surface of a drizzle client needed by applySkillRecipe — satisfied
+ * by both the top-level db returned from getDb() and by the tx object passed
+ * into db.transaction(). Typed as a utility rather than importing drizzle's
+ * PgTransaction so we don't couple the helper to a specific driver.
+ */
+type DbLike = ReturnType<typeof getDb>;
+
+/**
+ * Raised when a task is requested with a capability that its target agent
+ * doesn't permit. The caller (planner, skill recipe) must either reduce the
+ * capability set or the agent author must widen the ceiling.
+ */
+export class CapabilityNotPermittedError extends Error {
+  constructor(
+    public readonly agentId: string,
+    public readonly offending: string[],
+    public readonly allowed: string[],
+  ) {
+    super(
+      `Agent "${agentId}" does not permit capabilities [${offending.join(", ")}]. ` +
+        `Allowed: [${allowed.join(", ")}]`,
+    );
+    this.name = "CapabilityNotPermittedError";
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Request operations
@@ -23,18 +51,97 @@ import type {
 export async function createRequest(
   source: RequestSource,
   description: string,
-  context?: unknown
+  context?: unknown,
+  options?: { skillId?: string; status?: RequestStatus; client?: DbLike }
 ) {
-  const db = getDb();
-  const [row] = await db
+  const client = options?.client ?? getDb();
+  const [row] = await client
     .insert(schema.requests)
-    .values({ source, description, context })
+    .values({
+      source,
+      description,
+      context,
+      skillId: options?.skillId,
+      status: options?.status,
+    })
     .returning();
   return row;
 }
 
-export async function claimRequest(claimedBy: string) {
+/**
+ * Expand a Skill into tasks, validating each task's capability grant against
+ * the target agent's ceiling, and insert them at the given status. Runs
+ * within whatever `client` is passed — for the webhook fan-out path, that's
+ * a transaction so a failing validation rolls the whole thing back.
+ *
+ * Returns the inserted task rows.
+ */
+export async function applySkillRecipe(
+  client: DbLike,
+  requestId: string,
+  skill: Skill,
+  args: Record<string, unknown>,
+  status: "draft" | "pending" = "pending",
+) {
+  const defs = instantiateSkill(skill, args);
+
+  // Validate capability subsets BEFORE any insert so a single bad task
+  // aborts the whole fan-out cleanly (the caller's transaction will roll
+  // back the request row along with it).
+  const agentIds = Array.from(new Set(defs.map((d) => d.agentId)));
+  const agentRows =
+    agentIds.length > 0
+      ? await client
+          .select({
+            id: schema.agents.id,
+            allowed: schema.agents.allowedCapabilities,
+          })
+          .from(schema.agents)
+          .where(sql`id IN (${sql.join(agentIds.map((id) => sql`${id}`), sql`, `)})`)
+      : [];
+  const allowedByAgent = new Map(agentRows.map((r) => [r.id, r.allowed]));
+
+  for (const def of defs) {
+    const allowed = allowedByAgent.get(def.agentId);
+    if (allowed === undefined) {
+      throw new Error(
+        `Skill "${skill.name}" references unknown agent "${def.agentId}"`,
+      );
+    }
+    const allowedSet = new Set(allowed);
+    const offending = def.capabilities.filter((c) => !allowedSet.has(c));
+    if (offending.length > 0) {
+      throw new CapabilityNotPermittedError(def.agentId, offending, allowed);
+    }
+  }
+
+  const inserted: typeof schema.tasks.$inferSelect[] = [];
+  for (const def of defs) {
+    const [row] = await client
+      .insert(schema.tasks)
+      .values({
+        requestId,
+        agentId: def.agentId,
+        description: def.description,
+        doneCriteria: def.doneCriteria,
+        status,
+        capabilities: def.capabilities,
+      })
+      .returning();
+    inserted.push(row);
+  }
+  return inserted;
+}
+
+/**
+ * How long a worker is expected to hold a claim on a request before it is
+ * considered stuck. Matches the cron-driven stale-reset pass.
+ */
+export const REQUEST_STALE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+export async function claimRequest(claimedBy: string, timeoutMs: number = REQUEST_STALE_TIMEOUT_MS) {
   const db = getDb();
+  const staleAt = new Date(Date.now() + timeoutMs).toISOString();
 
   // Atomic claim: pick the oldest pending request, move it to "planning",
   // and lock it to this claimer. FOR UPDATE SKIP LOCKED lets concurrent
@@ -53,12 +160,14 @@ export async function claimRequest(claimedBy: string) {
     agent_id: string | null;
     claimed_by: string | null;
     status: RequestStatus;
+    stale_at: Date | null;
     created_at: Date;
     updated_at: Date;
   }>(sql`
     UPDATE request
     SET status = 'planning',
         claimed_by = ${claimedBy},
+        stale_at = ${staleAt}::timestamptz,
         updated_at = now()
     WHERE id = (
       SELECT id FROM request
@@ -71,6 +180,22 @@ export async function claimRequest(claimedBy: string) {
   `);
 
   return result[0] ?? null;
+}
+
+/**
+ * Reset any request whose claim has expired. Mirrors the task-level stale
+ * reset in claimTask. Returns the number of rows released so the cron can
+ * log it. Run from /api/cron/process-tasks.
+ */
+export async function resetStaleRequests(): Promise<number> {
+  const db = getDb();
+  const result = await db.execute<{ id: string }>(sql`
+    UPDATE request
+    SET status = 'pending', claimed_by = NULL, stale_at = NULL, updated_at = now()
+    WHERE status = 'planning' AND stale_at < now()
+    RETURNING id
+  `);
+  return result.length;
 }
 
 /**
@@ -237,12 +362,46 @@ export async function createTask(
   agentId: string,
   description: string,
   doneCriteria: string,
-  status: "draft" | "pending" = "draft"
+  status: "draft" | "pending" = "draft",
+  capabilities: string[] = [],
 ) {
   const db = getDb();
+
+  // Enforce the subset invariant: task.capabilities ⊆ agent.allowed_capabilities.
+  // Run in a read-then-write sequence rather than a CHECK constraint because
+  // the ceiling lives on a different row. The window between read and insert
+  // is acceptably narrow for local dev; for prod we'd move this into a
+  // single stored procedure or a trigger.
+  if (capabilities.length > 0) {
+    const [agentRow] = await db
+      .select({ allowed: schema.agents.allowedCapabilities })
+      .from(schema.agents)
+      .where(eq(schema.agents.id, agentId))
+      .limit(1);
+    if (!agentRow) {
+      throw new Error(`Unknown agent: ${agentId}`);
+    }
+    const allowed = new Set(agentRow.allowed);
+    const offending = capabilities.filter((c) => !allowed.has(c));
+    if (offending.length > 0) {
+      throw new CapabilityNotPermittedError(
+        agentId,
+        offending,
+        agentRow.allowed,
+      );
+    }
+  }
+
   const [row] = await db
     .insert(schema.tasks)
-    .values({ requestId, agentId, description, doneCriteria, status })
+    .values({
+      requestId,
+      agentId,
+      description,
+      doneCriteria,
+      status,
+      capabilities,
+    })
     .returning();
   return row;
 }
@@ -307,6 +466,7 @@ export async function claimTask(options: {
     claimed_at: Date | null;
     stale_at: Date | null;
     completed_at: Date | null;
+    capabilities: string[];
   }>(sql`
     UPDATE task
     SET status = 'claimed',

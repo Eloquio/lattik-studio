@@ -1,5 +1,6 @@
 import { requireWorkerAuth } from "@/lib/bearer-auth";
 import { claimRequest } from "@/lib/task-queue";
+import { touchWorkerHeartbeat } from "@/lib/worker-tokens";
 
 /**
  * Atomically lock the oldest pending request to the authenticated worker.
@@ -10,6 +11,10 @@ import { claimRequest } from "@/lib/task-queue";
 export async function POST(req: Request) {
   const auth = await requireWorkerAuth(req);
   if (auth instanceof Response) return auth;
+
+  // Heartbeat on every poll, regardless of claim outcome — empty polls
+  // still prove the worker is alive.
+  await touchWorkerHeartbeat(auth.workerId);
 
   const row = await claimRequest(auth.workerId);
   if (!row) {
