@@ -1,58 +1,68 @@
 /**
- * Agent worker — polls the task queue and dispatches to specialized agents.
+ * Agent worker — polls the task queue and dispatches to registered agents.
  *
- * Each agent is a cheap LLM (Haiku) with focused tools.
- * The worker claims tasks, runs the agent, and reports results via HTTP.
+ * No agents are registered yet. The worker still runs: every poll
+ * touches /api/tasks/claim so its `last_seen_at` keeps ticking, and the
+ * studio Workers page can show it as live. When a task is claimed the
+ * worker fails it with a clear "no handler" error so an operator knows
+ * to either register an agent here or route the task elsewhere.
  */
 
-import { claimTask, completeTask, failTask, type Task } from "./task-client.js";
-import { createKafkaAgent } from "./agents/kafka.js";
+import {
+  claimTask,
+  completeTask,
+  failTask,
+  type Task,
+} from "./task-client.js";
 
 const POLL_INTERVAL_MS = parseInt(
   process.env.POLL_INTERVAL_MS ?? "5000",
-  10
+  10,
 );
 
-const AGENTS = ["kafka"] as const;
-type AgentId = (typeof AGENTS)[number];
-
-function createAgent(agentId: AgentId, task: Task) {
-  switch (agentId) {
-    case "kafka":
-      return createKafkaAgent({
-        description: task.description,
-        doneCriteria: task.done_criteria,
-      });
-  }
-}
+/**
+ * Map from agent id to the function that runs a task for that agent.
+ * Empty for now — historically held a `kafka` entry; add entries here as
+ * new agents come online.
+ */
+type AgentHandler = (task: Task) => Promise<unknown>;
+const agentHandlers: Record<string, AgentHandler> = {};
 
 async function executeTask(task: Task) {
-  const agentId = task.agent_id as AgentId;
-  if (!AGENTS.includes(agentId)) {
-    await failTask(task.id, `Unknown agent: ${task.agent_id}`);
+  const handler = agentHandlers[task.agent_id];
+  if (!handler) {
+    const message = `No handler registered for agent "${task.agent_id}"`;
+    console.warn(`[${task.agent_id}] ${message} — failing task ${task.id}`);
+    await failTask(task.id, message);
     return;
   }
 
-  console.log(`[${agentId}] Executing task ${task.id}: ${task.description}`);
-
-  const agent = createAgent(agentId, task);
+  console.log(
+    `[${task.agent_id}] Executing task ${task.id}: ${task.description}`,
+  );
 
   try {
-    const result = await agent.generate({
-      prompt: `Execute this task and verify the done criteria.\n\nTask: ${task.description}\nDone Criteria: ${task.done_criteria}`,
-    });
-
-    await completeTask(task.id, { agentResponse: result.text });
-    console.log(`[${agentId}] Task ${task.id} completed`);
+    const result = await handler(task);
+    await completeTask(task.id, result);
+    console.log(`[${task.agent_id}] Task ${task.id} completed`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`[${agentId}] Task ${task.id} failed:`, message);
+    console.error(`[${task.agent_id}] Task ${task.id} failed:`, message);
     await failTask(task.id, message);
   }
 }
 
 async function pollOnce() {
-  for (const agentId of AGENTS) {
+  // Always issue at least one claim call per tick — even with zero
+  // registered agents it drives the heartbeat. If handlers grow, iterate
+  // over their keys and claim per-agent so multi-agent workers fairly
+  // round-robin.
+  const agentIds = Object.keys(agentHandlers);
+  if (agentIds.length === 0) {
+    await claimTask();
+    return;
+  }
+  for (const agentId of agentIds) {
     const task = await claimTask(agentId);
     if (task) {
       await executeTask(task);
@@ -61,8 +71,12 @@ async function pollOnce() {
 }
 
 async function main() {
+  const registered = Object.keys(agentHandlers);
   console.log(
-    `Agent worker started. Polling every ${POLL_INTERVAL_MS}ms for: ${AGENTS.join(", ")}`
+    `Agent worker started. Polling every ${POLL_INTERVAL_MS}ms. ` +
+      (registered.length === 0
+        ? "No agents registered — heartbeat only."
+        : `Agents: ${registered.join(", ")}`),
   );
 
   while (true) {

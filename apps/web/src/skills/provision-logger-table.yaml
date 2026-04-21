@@ -14,10 +14,6 @@ args:
     description: Logger table column definitions
 
 tasks:
-  - agent: kafka
-    description: "Create Kafka topic 'logger.{{table_name}}' with {{retention}} retention"
-    done_criteria: "Topic 'logger.{{table_name}}' exists with correct retention config"
-
   - agent: schema-registry
     description: "Register Protobuf payload schema for logger table '{{table_name}}'"
     done_criteria: "Schema registered for topic 'logger.{{table_name}}'"
