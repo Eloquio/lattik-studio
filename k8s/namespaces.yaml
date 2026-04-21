@@ -54,3 +54,11 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: workloads
+---
+# Long-lived worker Deployments (agent-worker pods). Kept separate from
+# `workloads` so per-worker Secrets + Deployments don't mix with the
+# short-lived Spark driver/executor pods that also live in workloads.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: workers

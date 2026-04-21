@@ -2,7 +2,48 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
-import { createRequest } from "@/lib/task-queue";
+import {
+  applySkillRecipe,
+  createRequest,
+  CapabilityNotPermittedError,
+} from "@/lib/task-queue";
+import { findSkill, loadSkills } from "@/lib/skills";
+
+/**
+ * Hardcoded event → skill mapping. Each entry describes which skill handles
+ * a given webhook scenario and how to derive the skill args from the
+ * webhook context. Returning null means "no deterministic handler" — the
+ * request falls through to today's planner-driven path.
+ *
+ * Keeping this as a plain switch avoids a `webhook_source` table until we
+ * have a second webhook provider.
+ */
+type MergedDefinition = {
+  id: string;
+  kind: string;
+  name: string;
+  spec: unknown;
+};
+
+function resolveSkillForGiteaMerge(
+  defs: MergedDefinition[],
+): { skillName: string; args: Record<string, unknown> } | null {
+  // Deterministic path fires only when a single logger_table is being
+  // provisioned. Multi-def or mixed-kind PRs fall through to the planner
+  // (which can still look at context.definitions and decide).
+  if (defs.length === 1 && defs[0].kind === "logger_table") {
+    const [def] = defs;
+    const spec = def.spec as Record<string, unknown> | null | undefined;
+    return {
+      skillName: "provision-logger-table",
+      args: {
+        table_name: def.name,
+        columns: spec?.columns,
+      },
+    };
+  }
+  return null;
+}
 
 /** Max webhook payload: 1MB */
 const MAX_PAYLOAD_SIZE = 1_048_576;
@@ -155,20 +196,76 @@ export async function POST(req: Request) {
       }))
     );
 
-    // Create an async request for provisioning infrastructure (Kafka topics,
-    // schema registration, DAG generation). The planner agent will match
-    // this to a skill and create tasks for operator agents to execute.
-    const request = await createRequest("webhook", `PR merged: ${prUrl}`, {
+    // Two paths for creating the downstream request:
+    //   1. Deterministic — a hardcoded mapping resolves this event to a
+    //      skill with known args. We insert the request at "approved" and
+    //      fan out tasks inline in one transaction; the planner never runs.
+    //   2. Fallback — no skill match. Insert a plain "pending" request and
+    //      let the planner claim + decide, matching today's behavior.
+    const mergedDefs: MergedDefinition[] = toMerge.map((d) => ({
+      id: d.id,
+      kind: d.kind,
+      name: d.name,
+      spec: d.spec,
+    }));
+    const context = {
       prUrl,
-      definitions: toMerge.map((d) => ({
-        id: d.id,
-        kind: d.kind,
-        name: d.name,
-        spec: d.spec,
-      })),
+      definitions: mergedDefs,
       receivedAt: receivedAt.toISOString(),
-    });
-    requestId = request.id;
+    };
+
+    const mapping = resolveSkillForGiteaMerge(mergedDefs);
+    const skill = mapping ? findSkill(loadSkills(), mapping.skillName) : null;
+
+    if (mapping && skill) {
+      try {
+        requestId = await db.transaction(async (tx) => {
+          const request = await createRequest(
+            "webhook",
+            `PR merged: ${prUrl}`,
+            context,
+            { skillId: skill.name, status: "approved", client: tx },
+          );
+          await applySkillRecipe(tx, request.id, skill, mapping.args);
+          return request.id;
+        });
+        console.log(
+          `[webhook] deterministic fan-out via skill "${skill.name}" → request ${requestId}`,
+        );
+      } catch (err) {
+        // Any failure (unknown agent, capability ceiling too narrow, ...)
+        // rolls the transaction back. Log loudly and fall through to the
+        // legacy planner path so the webhook doesn't drop the event.
+        if (err instanceof CapabilityNotPermittedError) {
+          console.error(
+            `[webhook] skill "${skill.name}" failed capability check: ${err.message}. Falling back to planner path.`,
+          );
+        } else {
+          console.error(
+            `[webhook] skill "${skill.name}" fan-out failed; falling back to planner:`,
+            err,
+          );
+        }
+        const fallback = await createRequest(
+          "webhook",
+          `PR merged: ${prUrl}`,
+          context,
+        );
+        requestId = fallback.id;
+      }
+    } else {
+      if (mapping && !skill) {
+        console.warn(
+          `[webhook] mapping resolved to skill "${mapping.skillName}" but no such skill is registered. Falling back to planner path.`,
+        );
+      }
+      const request = await createRequest(
+        "webhook",
+        `PR merged: ${prUrl}`,
+        context,
+      );
+      requestId = request.id;
+    }
   }
 
   return Response.json({

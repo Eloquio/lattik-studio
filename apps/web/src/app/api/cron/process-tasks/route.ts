@@ -5,6 +5,7 @@ import {
   createTask,
   autoApproveRequest,
   submitRequestForApproval,
+  resetStaleRequests,
 } from "@/lib/task-queue";
 import { loadSkills, findSkill, instantiateSkill } from "@/lib/skills";
 
@@ -34,7 +35,12 @@ export async function GET(req: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const stats = { planned: 0, executed: 0, completed: 0, failed: 0 };
+  const stats = { planned: 0, executed: 0, completed: 0, failed: 0, staleRequestsReleased: 0 };
+
+  // Phase 0: Release requests whose planning-claim has expired. Must run
+  // before the plan pass so any released row is immediately eligible to be
+  // re-claimed in this same cron tick.
+  stats.staleRequestsReleased = await resetStaleRequests();
 
   // Phase 1: Plan — claim pending requests and create tasks from skills
   const skills = loadSkills();
