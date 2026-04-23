@@ -2,13 +2,11 @@
  * Phase 3 verification — deterministic webhook path.
  *
  * Exercises:
- *   1. applySkillRecipe happy path — inserts tasks at "pending" with the
- *      correct capabilities; the enclosing transaction marks the request
- *      "approved" with skill_id set.
- *   2. applySkillRecipe rollback — a capability outside the agent's
- *      ceiling aborts the transaction, leaving zero request rows and zero
- *      task rows behind.
- *   3. applySkillRecipe rollback on unknown agent.
+ *   1. applySkillRecipe happy path — inserts tasks at "pending"; the
+ *      enclosing transaction marks the request "approved" with skill_id.
+ *   2. applySkillRecipe rollback — a skill referencing an unknown agent
+ *      aborts the transaction, leaving zero request rows and zero task
+ *      rows behind.
  *
  * Uses an in-memory Skill (not loaded from disk) so the verification
  * doesn't depend on real skill files or seeded agents.
@@ -19,11 +17,7 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "./index";
 import * as schema from "./schema";
-import {
-  applySkillRecipe,
-  CapabilityNotPermittedError,
-  createRequest,
-} from "../lib/task-queue";
+import { applySkillRecipe, createRequest } from "../lib/task-queue";
 import type { Skill } from "../lib/skills";
 
 const ALPHA_AGENT = "verify-3-alpha";
@@ -47,34 +41,11 @@ const happySkill: Skill = {
       agent: ALPHA_AGENT,
       description: "Step A for {{target}}",
       done_criteria: "A completed for {{target}}",
-      capabilities: ["kafka:read"],
     },
     {
       agent: BETA_AGENT,
       description: "Step B for {{target}}",
       done_criteria: "B completed for {{target}}",
-      capabilities: ["s3:write"],
-    },
-  ],
-};
-
-const overBroadSkill: Skill = {
-  name: "verify-3-overbroad-skill",
-  description: "Phase 3 verification — asks for a capability the agent doesn't allow",
-  auto_approve: true,
-  args: { target: { type: "string", description: "target id" } },
-  tasks: [
-    {
-      agent: ALPHA_AGENT,
-      description: "Legit step",
-      done_criteria: "done",
-      capabilities: ["kafka:read"],
-    },
-    {
-      agent: BETA_AGENT,
-      description: "Illegitimate step",
-      done_criteria: "should never be inserted",
-      capabilities: ["trino:query"], // beta's ceiling is only s3:*
     },
   ],
 };
@@ -89,7 +60,6 @@ const unknownAgentSkill: Skill = {
       agent: "does-not-exist",
       description: "Step",
       done_criteria: "done",
-      capabilities: [],
     },
   ],
 };
@@ -116,7 +86,7 @@ async function main() {
   await db.execute(sql`DELETE FROM request WHERE description LIKE 'verify-3:%'`);
   await db.execute(sql`DELETE FROM agent WHERE id IN (${ALPHA_AGENT}, ${BETA_AGENT})`);
 
-  // Seed test agents with disjoint capability ceilings.
+  // Seed two test agents (no capability ceiling anymore — just existence).
   await db.insert(schema.agents).values([
     {
       id: ALPHA_AGENT,
@@ -125,7 +95,6 @@ async function main() {
       icon: "test",
       category: "test",
       type: "first-party",
-      allowedCapabilities: ["kafka:read", "kafka:write"],
     },
     {
       id: BETA_AGENT,
@@ -134,7 +103,6 @@ async function main() {
       icon: "test",
       category: "test",
       type: "first-party",
-      allowedCapabilities: ["s3:read", "s3:write"],
     },
   ]);
 
@@ -142,11 +110,16 @@ async function main() {
   console.log("[1] applySkillRecipe happy path inside a transaction");
   const happyDesc = "verify-3: happy path";
   const happyRequestId = await db.transaction(async (tx) => {
-    const request = await createRequest("webhook", happyDesc, { source: "verify-3" }, {
-      skillId: happySkill.name,
-      status: "approved",
-      client: tx,
-    });
+    const request = await createRequest(
+      "webhook",
+      happyDesc,
+      { source: "verify-3" },
+      {
+        skillId: happySkill.name,
+        status: "approved",
+        client: tx,
+      },
+    );
     const tasks = await applySkillRecipe(tx, request.id, happySkill, {
       target: "hello",
     });
@@ -159,7 +132,10 @@ async function main() {
     .from(schema.requests)
     .where(sql`id = ${happyRequestId}`);
   assert(happyRequest!.status === "approved", "request status = 'approved'");
-  assert(happyRequest!.skillId === happySkill.name, "request.skill_id matches the skill");
+  assert(
+    happyRequest!.skillId === happySkill.name,
+    "request.skill_id matches the skill",
+  );
   assert(happyRequest!.source === "webhook", "request.source = 'webhook'");
 
   const happyTasks = await db
@@ -173,54 +149,26 @@ async function main() {
     "both tasks at status 'pending' (no human approval needed)",
   );
   assert(
-    happyTasks[0]!.capabilities.includes("kafka:read"),
-    "first task got kafka:read",
-  );
-  assert(
-    happyTasks[1]!.capabilities.includes("s3:write"),
-    "second task got s3:write",
-  );
-  assert(
     happyTasks[0]!.description.includes("hello"),
     "task description interpolation worked",
   );
 
-  // --- 2. Rollback on capability breach -----------------------------------
-  console.log("[2] over-broad capability rolls back the transaction");
-  const overbroadDesc = "verify-3: overbroad";
-  let caught: unknown = null;
-  try {
-    await db.transaction(async (tx) => {
-      await createRequest("webhook", overbroadDesc, { source: "verify-3" }, {
-        skillId: overBroadSkill.name,
-        status: "approved",
-        client: tx,
-      });
-      await applySkillRecipe(tx, "unused", overBroadSkill, { target: "x" });
-    });
-  } catch (err) {
-    caught = err;
-  }
-  assert(
-    caught instanceof CapabilityNotPermittedError,
-    "threw CapabilityNotPermittedError",
-  );
-
-  const overbroadCounts = await countRowsForDescription(overbroadDesc);
-  assert(overbroadCounts.requests === 0, "no request row persisted");
-  assert(overbroadCounts.tasks === 0, "no task rows persisted");
-
-  // --- 3. Rollback on unknown agent ---------------------------------------
-  console.log("[3] unknown agent rolls back the transaction");
+  // --- 2. Rollback on unknown agent ---------------------------------------
+  console.log("[2] unknown agent rolls back the transaction");
   const unknownDesc = "verify-3: unknown-agent";
   let unknownErr: unknown = null;
   try {
     await db.transaction(async (tx) => {
-      await createRequest("webhook", unknownDesc, { source: "verify-3" }, {
-        skillId: unknownAgentSkill.name,
-        status: "approved",
-        client: tx,
-      });
+      await createRequest(
+        "webhook",
+        unknownDesc,
+        { source: "verify-3" },
+        {
+          skillId: unknownAgentSkill.name,
+          status: "approved",
+          client: tx,
+        },
+      );
       await applySkillRecipe(tx, "unused", unknownAgentSkill, {});
     });
   } catch (err) {

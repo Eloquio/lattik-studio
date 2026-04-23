@@ -21,13 +21,6 @@ export interface SkillTaskTemplate {
   agent: string;
   description: string;
   done_criteria: string;
-  /**
-   * Capabilities granted to this task. Must be a subset of the target
-   * agent's allowed_capabilities, validated at applySkillRecipe time.
-   * Omitted means no capabilities granted — fine for tasks that only
-   * call into the LLM and don't touch external resources.
-   */
-  capabilities?: string[];
 }
 
 export interface Skill {
@@ -42,7 +35,6 @@ export interface InstantiatedTask {
   agentId: string;
   description: string;
   doneCriteria: string;
-  capabilities: string[];
 }
 
 const SKILLS_DIR = join(process.cwd(), "src/skills");
@@ -99,6 +91,5 @@ export function instantiateSkill(
     agentId: template.agent,
     description: interpolate(template.description, resolvedArgs),
     doneCriteria: interpolate(template.done_criteria, resolvedArgs),
-    capabilities: template.capabilities ?? [],
   }));
 }

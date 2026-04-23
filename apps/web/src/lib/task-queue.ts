@@ -25,25 +25,6 @@ import { instantiateSkill, type Skill } from "@/lib/skills";
  */
 type DbLike = ReturnType<typeof getDb>;
 
-/**
- * Raised when a task is requested with a capability that its target agent
- * doesn't permit. The caller (planner, skill recipe) must either reduce the
- * capability set or the agent author must widen the ceiling.
- */
-export class CapabilityNotPermittedError extends Error {
-  constructor(
-    public readonly agentId: string,
-    public readonly offending: string[],
-    public readonly allowed: string[],
-  ) {
-    super(
-      `Agent "${agentId}" does not permit capabilities [${offending.join(", ")}]. ` +
-        `Allowed: [${allowed.join(", ")}]`,
-    );
-    this.name = "CapabilityNotPermittedError";
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Request operations
 // ---------------------------------------------------------------------------
@@ -69,10 +50,9 @@ export async function createRequest(
 }
 
 /**
- * Expand a Skill into tasks, validating each task's capability grant against
- * the target agent's ceiling, and insert them at the given status. Runs
- * within whatever `client` is passed — for the webhook fan-out path, that's
- * a transaction so a failing validation rolls the whole thing back.
+ * Expand a Skill into tasks and insert them at the given status. Runs
+ * within whatever `client` is passed — for the webhook fan-out path,
+ * that's a transaction so a failing insert rolls the whole thing back.
  *
  * Returns the inserted task rows.
  */
@@ -85,33 +65,25 @@ export async function applySkillRecipe(
 ) {
   const defs = instantiateSkill(skill, args);
 
-  // Validate capability subsets BEFORE any insert so a single bad task
-  // aborts the whole fan-out cleanly (the caller's transaction will roll
-  // back the request row along with it).
+  // Sanity-check that every agent the skill references exists. Catches
+  // a skill YAML typo before we commit any task rows to the DB.
   const agentIds = Array.from(new Set(defs.map((d) => d.agentId)));
-  const agentRows =
+  const knownAgentIds =
     agentIds.length > 0
-      ? await client
-          .select({
-            id: schema.agents.id,
-            allowed: schema.agents.allowedCapabilities,
-          })
-          .from(schema.agents)
-          .where(sql`id IN (${sql.join(agentIds.map((id) => sql`${id}`), sql`, `)})`)
-      : [];
-  const allowedByAgent = new Map(agentRows.map((r) => [r.id, r.allowed]));
-
+      ? new Set(
+          (
+            await client
+              .select({ id: schema.agents.id })
+              .from(schema.agents)
+              .where(sql`id IN (${sql.join(agentIds.map((id) => sql`${id}`), sql`, `)})`)
+          ).map((r) => r.id),
+        )
+      : new Set<string>();
   for (const def of defs) {
-    const allowed = allowedByAgent.get(def.agentId);
-    if (allowed === undefined) {
+    if (!knownAgentIds.has(def.agentId)) {
       throw new Error(
         `Skill "${skill.name}" references unknown agent "${def.agentId}"`,
       );
-    }
-    const allowedSet = new Set(allowed);
-    const offending = def.capabilities.filter((c) => !allowedSet.has(c));
-    if (offending.length > 0) {
-      throw new CapabilityNotPermittedError(def.agentId, offending, allowed);
     }
   }
 
@@ -125,7 +97,6 @@ export async function applySkillRecipe(
         description: def.description,
         doneCriteria: def.doneCriteria,
         status,
-        capabilities: def.capabilities,
       })
       .returning();
     inserted.push(row);
@@ -363,35 +334,8 @@ export async function createTask(
   description: string,
   doneCriteria: string,
   status: "draft" | "pending" = "draft",
-  capabilities: string[] = [],
 ) {
   const db = getDb();
-
-  // Enforce the subset invariant: task.capabilities ⊆ agent.allowed_capabilities.
-  // Run in a read-then-write sequence rather than a CHECK constraint because
-  // the ceiling lives on a different row. The window between read and insert
-  // is acceptably narrow for local dev; for prod we'd move this into a
-  // single stored procedure or a trigger.
-  if (capabilities.length > 0) {
-    const [agentRow] = await db
-      .select({ allowed: schema.agents.allowedCapabilities })
-      .from(schema.agents)
-      .where(eq(schema.agents.id, agentId))
-      .limit(1);
-    if (!agentRow) {
-      throw new Error(`Unknown agent: ${agentId}`);
-    }
-    const allowed = new Set(agentRow.allowed);
-    const offending = capabilities.filter((c) => !allowed.has(c));
-    if (offending.length > 0) {
-      throw new CapabilityNotPermittedError(
-        agentId,
-        offending,
-        agentRow.allowed,
-      );
-    }
-  }
-
   const [row] = await db
     .insert(schema.tasks)
     .values({
@@ -400,7 +344,6 @@ export async function createTask(
       description,
       doneCriteria,
       status,
-      capabilities,
     })
     .returning();
   return row;
@@ -466,7 +409,6 @@ export async function claimTask(options: {
     claimed_at: Date | null;
     stale_at: Date | null;
     completed_at: Date | null;
-    capabilities: string[];
   }>(sql`
     UPDATE task
     SET status = 'claimed',
