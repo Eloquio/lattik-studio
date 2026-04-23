@@ -2,11 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
-import {
-  applySkillRecipe,
-  createRequest,
-  CapabilityNotPermittedError,
-} from "@/lib/task-queue";
+import { applySkillRecipe, createRequest } from "@/lib/task-queue";
 import { findSkill, loadSkills } from "@/lib/skills";
 
 /**
@@ -233,19 +229,13 @@ export async function POST(req: Request) {
           `[webhook] deterministic fan-out via skill "${skill.name}" → request ${requestId}`,
         );
       } catch (err) {
-        // Any failure (unknown agent, capability ceiling too narrow, ...)
-        // rolls the transaction back. Log loudly and fall through to the
-        // legacy planner path so the webhook doesn't drop the event.
-        if (err instanceof CapabilityNotPermittedError) {
-          console.error(
-            `[webhook] skill "${skill.name}" failed capability check: ${err.message}. Falling back to planner path.`,
-          );
-        } else {
-          console.error(
-            `[webhook] skill "${skill.name}" fan-out failed; falling back to planner:`,
-            err,
-          );
-        }
+        // Any failure (unknown agent, insert error, ...) rolls the
+        // transaction back. Log loudly and fall through to the legacy
+        // planner path so the webhook doesn't drop the event.
+        console.error(
+          `[webhook] skill "${skill.name}" fan-out failed; falling back to planner:`,
+          err,
+        );
         const fallback = await createRequest(
           "webhook",
           `PR merged: ${prUrl}`,

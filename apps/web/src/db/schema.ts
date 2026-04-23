@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   date,
   index,
   integer,
@@ -131,18 +132,6 @@ export const agents = pgTable("agent", {
    * long-running Spark jobs should set this to several hours.
    */
   staleTimeoutMs: integer("stale_timeout_ms"),
-  /**
-   * Capability ceiling for this agent. A task dispatched to this agent may
-   * only carry a subset of these — the planner / skill recipe is responsible
-   * for choosing a subset, and server-side task insertion enforces the rule.
-   *
-   * Opaque strings; the vocabulary lives in code at use sites (e.g.
-   * "kafka:read", "s3:write", "trino:query"). No central enum.
-   */
-  allowedCapabilities: text("allowed_capabilities")
-    .array()
-    .notNull()
-    .default(sql`ARRAY[]::text[]`),
   authorId: text("authorId").references(() => users.id),
   published: boolean("published").notNull().default(true),
   createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
@@ -348,7 +337,9 @@ export const requests = pgTable(
      * planner and decides which agent should handle it. A set value skips
      * planning: the claiming worker takes that agent's role directly.
      */
-    agentId: text("agent_id"),
+    agentId: text("agent_id").references(() => agents.id, {
+      onDelete: "set null",
+    }),
     /**
      * Worker id that currently holds this request. Set atomically during
      * claim (FOR UPDATE SKIP LOCKED in claimRequest). Null means the
@@ -364,12 +355,22 @@ export const requests = pgTable(
      * Uses timestamptz so JS Date values round-trip cleanly across server tz.
      */
     staleAt: timestamp("stale_at", { mode: "date", withTimezone: true }),
-    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { mode: "date", withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date", withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (t) => [
     index("idx_requests_status").on(t.status),
-    index("idx_request_stale_at").on(t.staleAt),
+    index("idx_requests_stale_at").on(t.staleAt),
+    index("idx_requests_claimed_by").on(t.claimedBy),
+    check(
+      "request_status_check",
+      sql`${t.status} IN ('pending', 'planning', 'awaiting_approval', 'approved', 'done', 'failed')`
+    ),
   ]
 );
 
@@ -389,7 +390,9 @@ export const tasks = pgTable(
     requestId: text("request_id")
       .notNull()
       .references(() => requests.id, { onDelete: "cascade" }),
-    agentId: text("agent_id").notNull(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "restrict" }),
     description: text("description").notNull(),
     doneCriteria: text("done_criteria").notNull(),
     status: text("status").$type<TaskStatus>().notNull().default("draft"),
@@ -400,16 +403,6 @@ export const tasks = pgTable(
     claimedAt: timestamp("claimed_at", { mode: "date" }),
     staleAt: timestamp("stale_at", { mode: "date", withTimezone: true }),
     completedAt: timestamp("completed_at", { mode: "date" }),
-    /**
-     * Per-task capability grant, chosen by the planner or skill recipe. Must
-     * be a subset of agent.allowed_capabilities at insertion time — enforced
-     * in createTask. The worker's agent SDK reads these via ctx.capabilities
-     * and guards resource access via ctx.requireCapability.
-     */
-    capabilities: text("capabilities")
-      .array()
-      .notNull()
-      .default(sql`ARRAY[]::text[]`),
   },
   (t) => [
     index("idx_tasks_status").on(t.status),

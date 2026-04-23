@@ -39,13 +39,6 @@ export interface Task {
   claimed_at: string | null;
   stale_at: string | null;
   completed_at: string | null;
-  /**
-   * Capability grants for this task. Agent code must gate resource access
-   * via ctx.requireCapability (see agent-context.ts). Omitted/empty means
-   * the task has no explicit capabilities — any access that calls
-   * requireCapability will throw.
-   */
-  capabilities: string[];
 }
 
 export async function claimTask(agentId?: string): Promise<Task | null> {

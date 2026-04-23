@@ -1,5 +1,7 @@
 # Plan: Worker Deployment in Kind + Task Capability Model
 
+> **2026-04-22 update:** Capabilities (per-task grants + per-agent ceilings) were dropped after this plan landed — permission now lives on the skill's `tools` list, not on a separate capability string. Heartbeat, stale-claim release, worker deployment, and the deterministic webhook path are all unchanged and still in force. Treat the capability-specific prose below as historical. See [PLAN-skill-based-worker-loop.md](PLAN-skill-based-worker-loop.md) for the current model.
+
 **Goal:** Run `apps/agent-worker` as a Deployment inside the local kind cluster, managed from the Lattik Studio UI. Each task carries a capability list assigned by its planner and enforced by the agent SDK. Webhook-initiated requests skip planning and human approval via a hardcoded skill mapping.
 
 **Scope:** Local dev. Prod-grade network isolation (NetworkPolicy + egress proxy), multi-cluster studio deployment, and public worker distribution are explicitly out of scope — noted where they'd slot in later.

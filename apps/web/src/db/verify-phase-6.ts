@@ -1,18 +1,17 @@
 /**
- * Phase 6 verification — end-to-end auth + capability over real HTTP.
+ * Phase 6 verification — end-to-end auth over real HTTP.
  *
  * This is the "wire everything together" pass. All prior phases are
  * unit-ish (DB-level helpers, or a single pod applying a manifest); here
  * we drive real HTTP endpoints with studio-minted credentials and verify
- * the authentication + capability flows behave as the plan specifies.
+ * the authentication flows behave as the plan specifies.
  *
  * Checks:
  *   1. Secret revocation: a host-mode worker's secret hits /api/tasks/claim
  *      successfully; after revokeWorker, the same secret 401s; a freshly
  *      created worker gets through with its new secret.
- *   2. Capability round-trip: task with specific capabilities → claimed
- *      over HTTP returns those capabilities → createAgentContext's
- *      requireCapability passes for granted and throws for missing.
+ *   2. Task round-trip: seed a task, claim it over HTTP, confirm the row
+ *      is delivered with the expected shape.
  *   3. Cluster worker lifecycle: create cluster worker, confirm the pod
  *      polls (heartbeat ticks), revoke, confirm Deployment+Secret+DB row
  *      all vanish and the pod stops coming back.
@@ -35,10 +34,6 @@ import {
   workerDeploymentName,
   workerSecretName,
 } from "../lib/kube";
-import {
-  createAgentContext,
-  MissingCapabilityError,
-} from "../../../agent-worker/src/agent-context";
 import type { Task } from "../../../agent-worker/src/task-client";
 
 const API_BASE = process.env.TASK_API_URL ?? "http://localhost:3737";
@@ -111,7 +106,7 @@ async function main() {
   console.log("[0] pre-flight cleanup");
   await cleanup();
 
-  // Seed a test agent with a defined ceiling used by several tests.
+  // Seed a test agent used by the task round-trip check.
   await getDb().insert(schema.agents).values({
     id: TEST_AGENT_ID,
     name: "Verify 6 Agent",
@@ -119,7 +114,6 @@ async function main() {
     icon: "test",
     category: "test",
     type: "first-party",
-    allowedCapabilities: ["kafka:read", "s3:read"],
   });
 
   // --- 1. Secret revocation over HTTP -----------------------------------
@@ -135,7 +129,6 @@ async function main() {
     res1.status === 200 || res1.status === 204,
     `fresh creds → /api/tasks/claim returned ${res1.status} (expect 2xx)`,
   );
-  // Drain the body if any, so the connection releases cleanly.
   if (res1.status === 200) await res1.json();
 
   await revokeWorkerCore(host.worker.id);
@@ -157,51 +150,25 @@ async function main() {
   );
   if (res3.status === 200) await res3.json();
 
-  // --- 2. Capability round-trip over HTTP -------------------------------
-  console.log("[2] task capability grant flows through HTTP claim");
-  const req = await createRequest("human", "verify-6: capability round-trip");
+  // --- 2. Task round-trip over HTTP --------------------------------------
+  console.log("[2] seeded task is delivered over HTTP claim with expected shape");
+  const req = await createRequest("human", "verify-6: task round-trip");
   const seededTask = await createTask(
     req.id,
     TEST_AGENT_ID,
-    "verify-6: a task with caps",
+    "verify-6: a task",
     "done",
     "pending",
-    ["kafka:read"],
   );
-  assert(seededTask !== undefined, "seeded a task with capabilities");
+  assert(seededTask !== undefined, "seeded a task");
 
-  const res4 = await claimTaskHttp(
-    host2.worker.id,
-    host2.secret!,
-    TEST_AGENT_ID,
-  );
-  assert(
-    res4.status === 200,
-    `filtered claim returned 200 (got ${res4.status})`,
-  );
+  const res4 = await claimTaskHttp(host2.worker.id, host2.secret!, TEST_AGENT_ID);
+  assert(res4.status === 200, `filtered claim returned 200 (got ${res4.status})`);
   const claimed = (await res4.json()) as Task;
   assert(claimed.id === seededTask!.id, "HTTP claim returned our seeded task");
   assert(
-    Array.isArray(claimed.capabilities) &&
-      claimed.capabilities.length === 1 &&
-      claimed.capabilities[0] === "kafka:read",
-    `capabilities round-tripped as ["kafka:read"] (got ${JSON.stringify(claimed.capabilities)})`,
-  );
-
-  // Build an agent context and assert the guard behaves both ways.
-  const ctx = createAgentContext(claimed);
-  ctx.requireCapability("kafka:read");
-  console.log("  ok: requireCapability('kafka:read') passes on claimed task");
-
-  let missing: unknown = null;
-  try {
-    ctx.requireCapability("s3:write");
-  } catch (err) {
-    missing = err;
-  }
-  assert(
-    missing instanceof MissingCapabilityError,
-    "requireCapability('s3:write') throws MissingCapabilityError",
+    claimed.agent_id === TEST_AGENT_ID,
+    `claimed.agent_id matches filter (got ${claimed.agent_id})`,
   );
 
   await revokeWorkerCore(host2.worker.id);
