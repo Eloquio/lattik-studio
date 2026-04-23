@@ -9,7 +9,7 @@ Extensions are specialized AI agents (e.g. a Root Cause Analysis Agent). Extensi
 - **Framework:** Next.js 16 (App Router) + React 19 + TypeScript
 - **Monorepo:** Turborepo + pnpm workspaces
 - **AI:** Vercel AI SDK v6 with AI Gateway (Claude Sonnet 4)
-- **Auth:** NextAuth v5 (Auth.js beta) with Google OAuth
+- **Auth:** NextAuth v5 (Auth.js beta) — Credentials provider (admin/admin) in dev, Google OAuth in production
 - **Database:** PostgreSQL (local via kind) + Drizzle ORM
 - **Local data lake:** Trino + Iceberg REST catalog + MinIO, all in kind ([`docs/local-data-lake.md`](docs/local-data-lake.md))
 - **Local compute:** Spark 4.0.2 + Iceberg 1.10.1, run as `SparkApplication`s under kubeflow's Spark Operator. Two Spark images: `lattik/spark-stitch` (self-contained, built by [`lattik-stitch`](lattik-stitch/), used by Airflow-triggered materialization jobs) and `lattik/spark-iceberg:4.0.2-1.10.1` (built from [`k8s/spark/Dockerfile`](k8s/spark/Dockerfile), used by manual test fixtures only). Driver scripts are mounted at runtime via a `spark-drivers` ConfigMap, not baked into the image.
@@ -127,7 +127,7 @@ Set in `apps/web/.env` (gitignored):
 - `DATABASE_URL` — PostgreSQL connection string (default: `postgresql://lattik:lattik-local@localhost:5432/lattik_studio`)
 - `AUTH_URL` — Must be `https://lattik-studio.dev` for local dev
 - `AUTH_SECRET` — NextAuth secret (generate with `openssl rand -base64 32`)
-- `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` — Google OAuth credentials
+- `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` — Google OAuth credentials (production only; not needed in dev where the Credentials provider is used)
 - `GITEA_URL` — Gitea HTTP URL (default: `http://localhost:3300`)
 - `GITEA_TOKEN` — Gitea API token (from `pnpm gitea:init-logs`)
 - `GITEA_WEBHOOK_SECRET` — HMAC secret for webhook verification (generate with `openssl rand -hex 32`)
@@ -289,11 +289,13 @@ pnpm kafka:cli
 
 ## Auth
 
-- Google OAuth only, configured in `src/auth/index.ts`
+- Provider gated by `NODE_ENV` in `src/auth/index.ts`:
+  - **Local dev (`NODE_ENV=development`):** Credentials provider — sign in with `admin` / `admin`. First sign-in upserts a single `admin@lattik.local` user. No Google OAuth setup required.
+  - **Production:** Google OAuth.
 - `src/proxy.ts` protects all routes; unauthenticated users redirect to `/sign-in`
 - API routes (`/api/chat`) also check auth explicitly
 - Webhook routes (`/api/webhooks/*`) excluded from middleware, verified via HMAC
-- Google Console redirect URI: `https://lattik-studio.dev/api/auth/callback/google`
+- Google Console redirect URI (prod only): `https://lattik-studio.dev/api/auth/callback/google`
 
 ## Extensions
 

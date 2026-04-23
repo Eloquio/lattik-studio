@@ -1,6 +1,6 @@
 # Lattik
 
-Open-source data platform by [Eloquio](https://github.com/Eloquio). Lattik combines an agentic analytics studio, a columnar stitch engine, and an expression language into a unified stack for building and operating data pipelines on top of S3 + Iceberg.
+Open-source data platform by [Datability LLC](https://github.com/Eloquio). Lattik combines an agentic analytics studio, a columnar stitch engine, and an expression language into a unified stack for building and operating data pipelines on top of S3 + Iceberg.
 
 **Lattik Studio** is the agentic analytics platform. Users solve analytics needs through chat-driven workflows — building data pipelines, asking business questions, root cause analysis, ML feature engineering.
 
@@ -68,6 +68,10 @@ First run takes ~15 minutes (image pulls); subsequent runs take ~2 minutes.
 | [Lattik Table Stitch](docs/lattik-table-stitch.md) | Stitch engine for Lattik Tables |
 | [Pipeline Manager](docs/pipeline-manager.md) | Pipeline management |
 
+## Contributing
+
+Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. All contributors must sign the [Contributor License Agreement](CLA.md) — the CLA bot will prompt you on your first PR.
+
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE) for details.
+Apache License 2.0 — see [LICENSE](LICENSE) for details. Copyright 2025-2026 Datability LLC.
