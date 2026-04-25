@@ -2,7 +2,7 @@
 
 - **Framework:** Next.js 16 (App Router) + React 19 + TypeScript
 - **Monorepo:** Turborepo + pnpm workspaces
-- **AI:** Vercel AI SDK v6 + AI Gateway (Claude Sonnet 4)
+- **AI:** Vercel AI SDK v6 + AI Gateway — Claude Sonnet 4.6 (chat agents) + Claude Haiku 4.5 (canvas spec stream)
 - **Auth:** NextAuth v5 (Auth.js beta) with Google provider
 - **Database:** PostgreSQL (local via kind) + Drizzle ORM
 - **Local data lake:** Trino + Iceberg REST catalog + MinIO, all in the same kind cluster

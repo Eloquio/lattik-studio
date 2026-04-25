@@ -1,8 +1,8 @@
 # Data Model: Entities, Dimensions, Metrics, Tables, and Cubes
 
-> **Status:** This doc describes the **target model**. Some parts are not yet reflected in [`schema.ts`](../apps/web/src/extensions/data-architect/schema.ts), the data-architect skill files, or the app UI. The "Schema gaps & follow-up renames" section at the end lists the concrete deltas other artifacts need to catch up to.
+> **Status:** This doc describes the **target model**. Some parts are not yet reflected in [`schema.ts`](../../apps/web/src/extensions/data-architect/schema.ts), the data-architect skill files, or the app UI. The "Schema gaps & follow-up renames" section at the end lists the concrete deltas other artifacts need to catch up to.
 
-This doc is the cross-cutting view of how the six core Lattik pipeline concepts fit together. Each individual concept has its own skill file under [`apps/web/src/extensions/data-architect/skills/`](../apps/web/src/extensions/data-architect/skills/); this doc is the place where their relationships are spelled out.
+This doc is the cross-cutting view of how the six core Lattik pipeline concepts fit together. Each individual concept has its own skill file under [`apps/web/src/extensions/data-architect/skills/`](../../apps/web/src/extensions/data-architect/skills/); this doc is the place where their relationships are spelled out.
 
 ## TL;DR
 
@@ -51,7 +51,7 @@ The diagram has two important features that the rest of the doc unpacks:
 
 ### Entity
 
-Defined in [defining-entity.md](../apps/web/src/extensions/data-architect/skills/defining-entity.md). Schema: [`entitySchema`](../apps/web/src/extensions/data-architect/schema.ts).
+Defined in [defining-entity.md](../../apps/web/src/extensions/data-architect/skills/defining-entity.md). Schema: [`entitySchema`](../../apps/web/src/extensions/data-architect/schema.ts).
 
 An **Entity** is a business concept that uniquely identifies something — `user`, `game`, `session`, `message`. It has:
 
@@ -65,17 +65,17 @@ Entities don't carry data themselves. They are the *vocabulary* the rest of the 
 
 ### Logger Table
 
-Defined in [defining-logger-table.md](../apps/web/src/extensions/data-architect/skills/defining-logger-table.md). Schema: [`loggerTableSchema`](../apps/web/src/extensions/data-architect/schema.ts).
+Defined in [defining-logger-table.md](../../apps/web/src/extensions/data-architect/skills/defining-logger-table.md). Schema: [`loggerTableSchema`](../../apps/web/src/extensions/data-architect/schema.ts).
 
 A **Logger Table** is a raw, append-only event stream — narrow rows representing event occurrences, partitioned by `ds` and `hour`, with implicit `event_id` / `event_timestamp` columns. Each user-defined column may carry one or more **semantic-equivalence tags** (currently a single field called `dimension`, see gap list) that say "this physical column carries the same meaning as this Dimension."
 
 Logger Tables are the **input** layer to the pipeline. They are not normally read directly to answer business queries — orgs typically configure cost or scan-size policies that limit ad-hoc Logger Table aggregation, and Lattik Tables / Cubes exist precisely to make those queries cheap.
 
-Applications send events to Logger Tables via `@eloquio/lattik-logger`. The SDK serializes each event into a Protobuf **Envelope** (`table`, `event_id`, `event_timestamp`, opaque `payload` bytes) and POSTs it to the ingestion service ([`apps/ingest/`](../apps/ingest/)), a Go HTTP server that deduplicates by `event_id` (in-memory TTL cache, default 1h window) and produces the envelope to the per-table Kafka topic. When a Logger Table definition is merged, the Gitea webhook automatically creates the Kafka topic and registers the per-table Protobuf payload schema in the Confluent Schema Registry.
+Applications send events to Logger Tables via `@eloquio/lattik-logger`. The SDK serializes each event into a Protobuf **Envelope** (`table`, `event_id`, `event_timestamp`, opaque `payload` bytes) and POSTs it to the ingestion service ([`apps/ingest/`](../../apps/ingest/)), a Go HTTP server that deduplicates by `event_id` (in-memory TTL cache, default 1h window) and produces the envelope to the per-table Kafka topic. When a Logger Table definition is merged, the Gitea webhook automatically creates the Kafka topic and registers the per-table Protobuf payload schema in the Confluent Schema Registry.
 
 ### Lattik Table
 
-Defined in [defining-lattik-table.md](../apps/web/src/extensions/data-architect/skills/defining-lattik-table.md). Schema: [`lattikTableSchema`](../apps/web/src/extensions/data-architect/schema.ts).
+Defined in [defining-lattik-table.md](../../apps/web/src/extensions/data-architect/skills/defining-lattik-table.md). Schema: [`lattikTableSchema`](../../apps/web/src/extensions/data-architect/schema.ts).
 
 A **Lattik Table** is a super-wide, denormalized table at a fixed granularity level. The grain is defined by its `primary_key`s, a list of `{column, dimension}` pairs where each `dimension` reference is the canonical Dimension that the corresponding PK column carries — typically the implicit id Dimension of an Entity (`user_id` from the `user` entity). The Dimension's own `entity` field carries the entity transitively, so the system can answer "what entity is this table keyed on" without the PK referencing the entity directly.
 
@@ -98,7 +98,7 @@ In ML / warehousing terms, a Lattik Table is essentially a **feature store entit
 
 ### Dimension
 
-Defined in [defining-dimension.md](../apps/web/src/extensions/data-architect/skills/defining-dimension.md). Schema: [`dimensionSchema`](../apps/web/src/extensions/data-architect/schema.ts).
+Defined in [defining-dimension.md](../../apps/web/src/extensions/data-architect/skills/defining-dimension.md). Schema: [`dimensionSchema`](../../apps/web/src/extensions/data-architect/schema.ts).
 
 A **Dimension** is a canonical name for an attribute of an Entity. The point of a Dimension is **to let users write expressions and queries that reference the attribute by name without specifying a FROM clause**. Because the name is canonical, the query planner can resolve where to read it.
 
@@ -118,7 +118,7 @@ The id-style implicit Dimension created by an Entity definition is just the spec
 
 ### Metric
 
-Defined in [defining-metric.md](../apps/web/src/extensions/data-architect/skills/defining-metric.md). Schema: [`metricSchema`](../apps/web/src/extensions/data-architect/schema.ts).
+Defined in [defining-metric.md](../../apps/web/src/extensions/data-architect/skills/defining-metric.md). Schema: [`metricSchema`](../../apps/web/src/extensions/data-architect/schema.ts).
 
 A **Metric** is a canonical name for an aggregation, designed to compose with Dimensions in queries. As with Dimensions, the point is canonical naming: users write `revenue × user_home_country` and the planner resolves both sides.
 
@@ -433,7 +433,7 @@ The closest neighbors:
 
 This doc describes the target model. Several pieces of the existing implementation need to catch up. Each gap below is a separate follow-up — I have not modified any of these files.
 
-### Schema gaps in [`schema.ts`](../apps/web/src/extensions/data-architect/schema.ts)
+### Schema gaps in [`schema.ts`](../../apps/web/src/extensions/data-architect/schema.ts)
 
 1. **Dimension single binding → multi-binding.** `dimensionSchema` currently has `source_table: string` and `source_column: string`. This needs to become `resolution_bindings: Array<{table, column}>` to support the conformed-dimension pattern.
 2. **Logger column tag rename and arity.** `loggerColumnSchema.dimension: string` should be renamed `semantic_equivalence` (or `tags`) and probably allowed to be an array — a single column may carry multiple tags.
@@ -449,12 +449,12 @@ This doc describes the target model. Several pieces of the existing implementati
 
 ### Skill doc updates
 
-12. [defining-entity.md](../apps/web/src/extensions/data-architect/skills/defining-entity.md) should mention the implicit Dimension created from `id_field`.
-13. [defining-entity.md](../apps/web/src/extensions/data-architect/skills/defining-entity.md) should also relax the `id_field` suffix rule from "must end with `_id`" to "by convention ends with `_id`, but any valid identifier is allowed." Real-world cases this unblocks: `uuid`, external-system IDs (`stripe_customer_id`, `auth0_sub`), and shops with their own naming conventions. If [validation/naming.ts](../apps/web/src/extensions/data-architect/validation/naming.ts) ever picks up this rule, it should match.
-14. [defining-dimension.md](../apps/web/src/extensions/data-architect/skills/defining-dimension.md) should be rewritten around the **two-relationships** framing — currently it conflates "dimension lives at this column" (sounds like a tag) with "dimension is read from this column" (the binding). The skill should also describe the multi-binding case and when to add a new binding vs declare a new Dimension.
-15. [defining-logger-table.md](../apps/web/src/extensions/data-architect/skills/defining-logger-table.md) should rename `dimension` (the optional column field) to `semantic_equivalence` and explain that it is a *tag*, not a query source.
-16. [defining-lattik-table.md](../apps/web/src/extensions/data-architect/skills/defining-lattik-table.md) needs three updates: (a) describe `primary_key` entries as `{column, dimension}` rather than `{column, entity}`, (b) explicitly state that PKs are entity-grain only — no `ds`/`hour`, no time-bucketed Lattik Tables — and explain that time-travel happens at query time via as-of, (c) document the new `load_cadence` field on column families.
-17. [defining-metric.md](../apps/web/src/extensions/data-architect/skills/defining-metric.md) should describe the row-level composition flavor in addition to aggregation.
+12. [defining-entity.md](../../apps/web/src/extensions/data-architect/skills/defining-entity.md) should mention the implicit Dimension created from `id_field`.
+13. [defining-entity.md](../../apps/web/src/extensions/data-architect/skills/defining-entity.md) should also relax the `id_field` suffix rule from "must end with `_id`" to "by convention ends with `_id`, but any valid identifier is allowed." Real-world cases this unblocks: `uuid`, external-system IDs (`stripe_customer_id`, `auth0_sub`), and shops with their own naming conventions. If [validation/naming.ts](../../apps/web/src/extensions/data-architect/validation/naming.ts) ever picks up this rule, it should match.
+14. [defining-dimension.md](../../apps/web/src/extensions/data-architect/skills/defining-dimension.md) should be rewritten around the **two-relationships** framing — currently it conflates "dimension lives at this column" (sounds like a tag) with "dimension is read from this column" (the binding). The skill should also describe the multi-binding case and when to add a new binding vs declare a new Dimension.
+15. [defining-logger-table.md](../../apps/web/src/extensions/data-architect/skills/defining-logger-table.md) should rename `dimension` (the optional column field) to `semantic_equivalence` and explain that it is a *tag*, not a query source.
+16. [defining-lattik-table.md](../../apps/web/src/extensions/data-architect/skills/defining-lattik-table.md) needs three updates: (a) describe `primary_key` entries as `{column, dimension}` rather than `{column, entity}`, (b) explicitly state that PKs are entity-grain only — no `ds`/`hour`, no time-bucketed Lattik Tables — and explain that time-travel happens at query time via as-of, (c) document the new `load_cadence` field on column families.
+17. [defining-metric.md](../../apps/web/src/extensions/data-architect/skills/defining-metric.md) should describe the row-level composition flavor in addition to aggregation.
 18. A new `defining-cube.md` skill needs to be authored.
 
 ### App UI updates
@@ -469,12 +469,12 @@ This doc describes the target model. Several pieces of the existing implementati
 
 ## See also
 
-- [defining-entity.md](../apps/web/src/extensions/data-architect/skills/defining-entity.md)
-- [defining-dimension.md](../apps/web/src/extensions/data-architect/skills/defining-dimension.md)
-- [defining-logger-table.md](../apps/web/src/extensions/data-architect/skills/defining-logger-table.md)
-- [defining-lattik-table.md](../apps/web/src/extensions/data-architect/skills/defining-lattik-table.md)
-- [defining-metric.md](../apps/web/src/extensions/data-architect/skills/defining-metric.md)
-- [Data Architect extension README](../apps/web/src/extensions/data-architect/README.md)
+- [defining-entity.md](../../apps/web/src/extensions/data-architect/skills/defining-entity.md)
+- [defining-dimension.md](../../apps/web/src/extensions/data-architect/skills/defining-dimension.md)
+- [defining-logger-table.md](../../apps/web/src/extensions/data-architect/skills/defining-logger-table.md)
+- [defining-lattik-table.md](../../apps/web/src/extensions/data-architect/skills/defining-lattik-table.md)
+- [defining-metric.md](../../apps/web/src/extensions/data-architect/skills/defining-metric.md)
+- [Data Architect extension README](../../apps/web/src/extensions/data-architect/README.md)
 - Cube.dev docs: <https://cube.dev/docs/>
 - dbt Semantic Layer / MetricFlow docs: <https://docs.getdbt.com/docs/build/about-metricflow>
 - LookML reference: <https://cloud.google.com/looker/docs/lookml-quick-reference>

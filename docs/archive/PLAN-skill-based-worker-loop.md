@@ -6,7 +6,7 @@
 
 **Update:** Capabilities (per-task grants + per-agent ceilings) were dropped before this plan landed. Permission now lives on the skill via its `tools` list — a skill can call only the tools it declared. When network-layer enforcement or per-task scope narrowing is needed, reintroduce under a cleaner name.
 
-**2026-04-24 update:** This plan is amended by [concepts.md](concepts.md), which consolidates agents across runtimes. On the worker node (the runtime; renamed from "worker" to avoid the collision with the Executor Agent concept), the loop no longer calls `runSkill(id)` directly. It dispatches one of exactly two fixed agents based on request state: the **Planner Agent** (unplanned request) or the **Executor Agent** (planned, pending tasks). The Executor Agent calls `loadSkill(task.skill_id)` to pull in instructions + tool grants + done checks. Skills are resources agents load, not the agent itself. Phase structure below still applies; loop pseudocode, Planning section, and Phase C have been updated inline.
+**2026-04-24 update:** This plan is amended by [concepts.md](../architecture/concepts.md), which consolidates agents across runtimes. On the worker node (the runtime; renamed from "worker" to avoid the collision with the Executor Agent concept), the loop no longer calls `runSkill(id)` directly. It dispatches one of exactly two fixed agents based on request state: the **Planner Agent** (unplanned request) or the **Executor Agent** (planned, pending tasks). The Executor Agent calls `loadSkill(task.skill_id)` to pull in instructions + tool grants + done checks. Skills are resources agents load, not the agent itself. Phase structure below still applies; loop pseudocode, Planning section, and Phase C have been updated inline.
 
 ---
 
@@ -233,7 +233,7 @@ The skill's declared `tools:` are added per-task at agent construction. Real wor
 ### Phase D — Planner cron removal ✅ shipped (2026-04-24)
 1. ✅ Plan pass removed from `/api/cron/process-tasks` (Phase A) — only the stale-claim reset remains.
 2. ✅ Webhook handler simplified (Phase A) — always creates a `pending` request; the Worker Node's Planner Agent picks it up. The deterministic-recipe path was dropped since its referenced agents (schema-registry, dag) didn't exist in the seed and it was always falling through to the planner anyway.
-3. ✅ Loop validated end-to-end by [verify-phase-c.ts](../apps/web/src/db/verify-phase-c.ts): pending request → Planner emits tasks → Executor runs them → request rolls up to `done`.
+3. ✅ Loop validated end-to-end by [verify-phase-c.ts](../../apps/web/src/db/verify-phase-c.ts): pending request → Planner emits tasks → Executor runs them → request rolls up to `done`.
 
 The "webhook" source field doesn't change loop semantics, so a separate verify-phase-d wasn't authored — the Phase C verification covers both the human and webhook paths.
 
@@ -253,15 +253,15 @@ Each phase ships independently, but B is load-bearing for C and D.
 
 - **Data Architect domain skills → SKILL.md migration.** The chat-side data-architect's `apps/web/src/extensions/data-architect/skills/*.md` files (entity, dimension, logger-table, lattik-table, metric) still ship as prose markdown baked into the agent's system prompt. Migration to the new SKILL.md frontmatter format (`owners: [DataArchitect]` + `tools` + `args` + `done`) was deferred from Phase B; revisit after Phase C lands chat-side `loadSkill`.
 
-- **Deterministic webhook fan-out.** Phase A removed the YAML-recipe deterministic path; today every webhook event produces a plain `pending` request that the Planner Agent plans from scratch. When a webhook event becomes high-throughput enough that the planner LLM's latency / cost matters, reintroduce a TS dispatcher in [apps/web/src/app/api/webhooks/gitea/route.ts](../apps/web/src/app/api/webhooks/gitea/route.ts) that emits N tasks pointing at runbook skills inline (skipping the planner). The skills already exist (`register-protobuf-schema`, `regenerate-airflow-dag`); just call `createTask` once per task in a transaction and land the request at `approved`.
+- **Deterministic webhook fan-out.** Phase A removed the YAML-recipe deterministic path; today every webhook event produces a plain `pending` request that the Planner Agent plans from scratch. When a webhook event becomes high-throughput enough that the planner LLM's latency / cost matters, reintroduce a TS dispatcher in [apps/web/src/app/api/webhooks/gitea/route.ts](../../apps/web/src/app/api/webhooks/gitea/route.ts) that emits N tasks pointing at runbook skills inline (skipping the planner). The skills already exist (`register-protobuf-schema`, `regenerate-airflow-dag`); just call `createTask` once per task in a transaction and land the request at `approved`.
 
-- **Per-skill `stale_timeout_ms` in SKILL.md frontmatter.** Phase B collapsed the per-agent stale timeout to a single `DEFAULT_STALE_TIMEOUT_MS = 5 min` constant. Add `stale_timeout_ms?: number` to the schema and read it in [task-queue.ts](../apps/web/src/lib/task-queue.ts) `claimTask`/`claimTaskForRequest` once a real skill needs longer (Spark backfills, S3 syncs).
+- **Per-skill `stale_timeout_ms` in SKILL.md frontmatter.** Phase B collapsed the per-agent stale timeout to a single `DEFAULT_STALE_TIMEOUT_MS = 5 min` constant. Add `stale_timeout_ms?: number` to the schema and read it in [task-queue.ts](../../apps/web/src/lib/task-queue.ts) `claimTask`/`claimTaskForRequest` once a real skill needs longer (Spark backfills, S3 syncs).
 
 - **Legacy `TASK_AGENT_SECRET` / `requireTaskAuth`.** Several human/UI-facing endpoints (`/api/tasks/requests/*`, `/api/tasks/requests/[id]/messages|submit|approve|complete`) still use the legacy single-key shared secret. Phase C migrated only the worker-called endpoints to per-worker `requireWorkerAuth`. Audit the remaining `requireTaskAuth` callers and either move them to `requireWorkerAuth` (if the worker is a legitimate caller) or to `requireUser` (if they're chat/UI-only).
 
 - **`loadSkill` as an LLM tool.** Phase C.3 deferred this — every task has exactly one skill, so the runtime pre-loads from `task.skill_id` and skips the LLM roundtrip. Reintroduce when sub-skill loading mid-execution becomes a real need; the docs describe how this would slot in.
 
-- **Node TLS + portless `https://lattik-studio.dev` from agent-worker.** Node's fetch under tsx couldn't validate the portless self-signed cert even with `--use-system-ca`. Phase D worked around it by defaulting [agent-worker/.env](../apps/agent-worker/.env) to `http://localhost:3737`. Real fix: import the portless root CA into the Node trust store, or have portless emit a public-CA-signed cert for `.dev` domains.
+- **Node TLS + portless `https://lattik-studio.dev` from agent-worker.** Node's fetch under tsx couldn't validate the portless self-signed cert even with `--use-system-ca`. Phase D worked around it by defaulting [agent-worker/.env](../../apps/agent-worker/.env) to `http://localhost:3737`. Real fix: import the portless root CA into the Node trust store, or have portless emit a public-CA-signed cert for `.dev` domains.
 
 ---
 

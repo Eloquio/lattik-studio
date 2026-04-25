@@ -31,11 +31,11 @@ Each service lives in its own namespace so PVCs, secrets, and pods stay isolated
 | `workloads` | `SparkApplication`s + driver/executor pods + `spark-driver` ServiceAccount + local copy of MinIO credentials |
 | `airflow` | Airflow control plane + worker pods (see [`local-airflow.md`](local-airflow.md)) |
 
-[`k8s/namespaces.yaml`](../k8s/namespaces.yaml) declares all of these and is applied by `pnpm cluster:up` before any other manifest, so per-service scripts can assume their namespace exists.
+[`k8s/namespaces.yaml`](../../k8s/namespaces.yaml) declares all of these and is applied by `pnpm cluster:up` before any other manifest, so per-service scripts can assume their namespace exists.
 
 **Cross-namespace DNS:** services reference each other by `<service>.<namespace>.svc.cluster.local` (or just `<service>.<namespace>` — the `.svc.cluster.local` suffix is added by the cluster's search path). Example: Trino's iceberg catalog talks to iceberg-rest at `http://iceberg-rest.iceberg:8181`, and the iceberg connector's S3 endpoint is `http://minio.minio:9000`. SparkApplications use the FQDN form (`http://iceberg-rest.iceberg.svc.cluster.local:8181`) explicitly because the spark Pod's DNS search path may not include other namespaces by default.
 
-**Cross-namespace secrets:** Kubernetes Secrets are namespace-scoped, so any service that needs to authenticate to MinIO from a different namespace gets its own local copy of the credentials. Currently iceberg-rest and Spark drivers each have a `minio-credentials` Secret in their namespace. Keep the values in lockstep with [`k8s/minio.yaml`](../k8s/minio.yaml).
+**Cross-namespace secrets:** Kubernetes Secrets are namespace-scoped, so any service that needs to authenticate to MinIO from a different namespace gets its own local copy of the credentials. Currently iceberg-rest and Spark drivers each have a `minio-credentials` Secret in their namespace. Keep the values in lockstep with [`k8s/minio.yaml`](../../k8s/minio.yaml).
 
 ## Architecture
 
@@ -64,7 +64,7 @@ Each service lives in its own namespace so PVCs, secrets, and pods stay isolated
 - **iceberg-rest** keeps the catalog state (which tables exist, where their current metadata is) in a local SQLite file on the `iceberg-data` PVC. When Trino or Spark commits a write, iceberg-rest also writes new metadata files to MinIO via its own S3 client.
 - **MinIO** is the only place real bytes live. The `warehouse` bucket is created on first startup by a one-shot `minio-init` job.
 
-The two ports exposed to your laptop are `8080` (Trino UI / API) and `9001` (MinIO web console). Both are mapped via `extraPortMappings` in [`k8s/kind-config.yaml`](../k8s/kind-config.yaml). The S3 API on `9000` is also mapped, so you can run `mc` or `aws s3` commands against `http://localhost:9000` from your laptop if you want.
+The two ports exposed to your laptop are `8080` (Trino UI / API) and `9001` (MinIO web console). Both are mapped via `extraPortMappings` in [`k8s/kind-config.yaml`](../../k8s/kind-config.yaml). The S3 API on `9000` is also mapped, so you can run `mc` or `aws s3` commands against `http://localhost:9000` from your laptop if you want.
 
 ## Bringing it up
 
@@ -129,11 +129,11 @@ Spark is the second engine in the data lake. It reads and writes the same Iceber
 
 ### How it's wired
 
-[Kubeflow's Spark Operator](https://github.com/kubeflow/spark-operator) is helm-installed in the `spark-operator` namespace and configured (via [`k8s/spark/operator-values.yaml`](../k8s/spark/operator-values.yaml)) to watch the `workloads` namespace for `SparkApplication` CRDs. When you submit a `SparkApplication`, the operator creates a driver pod, the driver pod creates executor pods, the job runs to completion, and the operator marks the CRD `COMPLETED`.
+[Kubeflow's Spark Operator](https://github.com/kubeflow/spark-operator) is helm-installed in the `spark-operator` namespace and configured (via [`k8s/spark/operator-values.yaml`](../../k8s/spark/operator-values.yaml)) to watch the `workloads` namespace for `SparkApplication` CRDs. When you submit a `SparkApplication`, the operator creates a driver pod, the driver pod creates executor pods, the job runs to completion, and the operator marks the CRD `COMPLETED`.
 
 ### The custom image
 
-The official `apache/spark:4.0.2` image doesn't include the Iceberg runtime or the AWS SDK, so it can't talk to either the REST catalog or MinIO out of the box. We bake the missing pieces in via [`k8s/spark/Dockerfile`](../k8s/spark/Dockerfile):
+The official `apache/spark:4.0.2` image doesn't include the Iceberg runtime or the AWS SDK, so it can't talk to either the REST catalog or MinIO out of the box. We bake the missing pieces in via [`k8s/spark/Dockerfile`](../../k8s/spark/Dockerfile):
 
 - **`iceberg-spark-runtime-4.0_2.13:1.10.1`** — the Iceberg connector + Iceberg core for Spark 4.0.x. This is what makes `CREATE TABLE ... USING iceberg` and `df.writeTo("iceberg.db.t")` work.
 - **`iceberg-aws-bundle:1.10.1`** — Iceberg's S3FileIO + a bundled AWS SDK v2. This is what writes parquet files to MinIO via the S3 protocol. (We don't need `hadoop-aws` because we're not using `s3a://` paths — the iceberg-aws-bundle is self-contained.)
@@ -154,7 +154,7 @@ pnpm spark:start
 pnpm spark:submit-example
 ```
 
-[`k8s/spark-example.yaml`](../k8s/spark-example.yaml) is a self-contained example: a `ConfigMap` holding a small PySpark script (creates `iceberg.spark_demo.events`, inserts three rows, reads them back) plus a `SparkApplication` that mounts the script and runs it. After it completes, you can verify cross-engine visibility from Trino:
+[`k8s/spark-example.yaml`](../../k8s/spark-example.yaml) is a self-contained example: a `ConfigMap` holding a small PySpark script (creates `iceberg.spark_demo.events`, inserts three rows, reads them back) plus a `SparkApplication` that mounts the script and runs it. After it completes, you can verify cross-engine visibility from Trino:
 
 ```bash
 pnpm trino:cli
@@ -172,7 +172,7 @@ kubectl -n workloads logs <driver-pod-name>
 
 ### Required SparkConf for Iceberg
 
-Every SparkApplication that wants to talk to the iceberg-rest catalog needs the same set of `spark.sql.catalog.iceberg.*` properties. The canonical set lives in [`k8s/spark-example.yaml`](../k8s/spark-example.yaml) — copy them verbatim into your own jobs:
+Every SparkApplication that wants to talk to the iceberg-rest catalog needs the same set of `spark.sql.catalog.iceberg.*` properties. The canonical set lives in [`k8s/spark-example.yaml`](../../k8s/spark-example.yaml) — copy them verbatim into your own jobs:
 
 ```yaml
 spark.sql.extensions: "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
@@ -231,7 +231,7 @@ kubectl exec deploy/minio -- mc cp -r local/warehouse/ /tmp/warehouse/
 kubectl cp default/minio-<podid>:/tmp/warehouse ./warehouse-snapshot
 ```
 
-This was a deliberate trade-off — host bind mounts on macOS+kind hit a wall with file-sharing-layer chmod restrictions (postgres can't chmod its data dir to `0700`, iceberg-rest's non-root user can't write the catalog sqlite db without an `initContainer` hack). We picked PVCs and accepted cluster-scoped persistence as the cleaner story. The sibling [`projects/testenv`](../../testenv) project does the same.
+This was a deliberate trade-off — host bind mounts on macOS+kind hit a wall with file-sharing-layer chmod restrictions (postgres can't chmod its data dir to `0700`, iceberg-rest's non-root user can't write the catalog sqlite db without an `initContainer` hack). We picked PVCs and accepted cluster-scoped persistence as the cleaner story. The sibling [`projects/testenv`](../../../testenv) project does the same.
 
 ## Image management
 
@@ -260,7 +260,7 @@ kubectl -n minio delete pod -l app=minio
 
 A fully cold-cached `pnpm trino:start` takes ~3–4 minutes the first time (image pulls dominate). Subsequent starts after the host has the images cached are ~60–90 seconds (mostly Trino's JVM startup).
 
-The custom Spark image is built locally rather than pulled — `pnpm spark:image-build` runs `docker build` against [`k8s/spark/Dockerfile`](../k8s/spark/Dockerfile), then `kind load`s the result. The first build is dominated by the `apache/spark:4.0.2` base layer pull (~700 MB) and the two Iceberg jar downloads from Maven Central (~80 MB). Subsequent rebuilds after editing the Dockerfile are seconds. The Spark Operator's own image is pulled by helm during `pnpm spark:start` from Docker Hub — small (~100 MB) and rarely flakes.
+The custom Spark image is built locally rather than pulled — `pnpm spark:image-build` runs `docker build` against [`k8s/spark/Dockerfile`](../../k8s/spark/Dockerfile), then `kind load`s the result. The first build is dominated by the `apache/spark:4.0.2` base layer pull (~700 MB) and the two Iceberg jar downloads from Maven Central (~80 MB). Subsequent rebuilds after editing the Dockerfile are seconds. The Spark Operator's own image is pulled by helm during `pnpm spark:start` from Docker Hub — small (~100 MB) and rarely flakes.
 
 ## Troubleshooting
 
@@ -271,46 +271,46 @@ Network issue pulling the image. See [Image management](#image-management) above
 Almost always a PVC binding issue. Check `kubectl get pvc` — if any PVC is `Pending`, the StorageClass isn't provisioning. Verify with `kubectl get storageclass` that `standard (default)` exists. If it doesn't, the cluster wasn't created cleanly — `pnpm dev:down && pnpm cluster:up` to recreate.
 
 **`iceberg-rest` crash-loops with `Permission denied` opening `/data/iceberg_rest.db`**
-Should not happen with PVCs — this was the old bug from when we used host bind mounts. If it does come back, you're probably on a fork that reverted [`k8s/iceberg-rest.yaml`](../k8s/iceberg-rest.yaml) to use a `hostPath` volume. The fix is to use a PVC instead.
+Should not happen with PVCs — this was the old bug from when we used host bind mounts. If it does come back, you're probably on a fork that reverted [`k8s/iceberg-rest.yaml`](../../k8s/iceberg-rest.yaml) to use a `hostPath` volume. The fix is to use a PVC instead.
 
 **Trino starts but every query fails with `EXCEEDED_LOCAL_MEMORY_LIMIT`**
-The conservative memory limits in [`k8s/trino.yaml`](../k8s/trino.yaml) are sized for laptop comfort, not heavy workloads. Bump `query.max-memory-per-node` in the `trino-config` ConfigMap and the container `resources.limits.memory` if you're running real-data-sized queries.
+The conservative memory limits in [`k8s/trino.yaml`](../../k8s/trino.yaml) are sized for laptop comfort, not heavy workloads. Bump `query.max-memory-per-node` in the `trino-config` ConfigMap and the container `resources.limits.memory` if you're running real-data-sized queries.
 
 **`SELECT` works but `INSERT` fails with `Access Denied` to MinIO**
-Check that the `s3.aws-access-key`/`s3.aws-secret-key` in [`k8s/trino.yaml`](../k8s/trino.yaml)'s iceberg catalog config match the `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` in [`k8s/minio.yaml`](../k8s/minio.yaml)'s secret. They both default to `lattik` / `lattik-local`; if you've changed one, change the other.
+Check that the `s3.aws-access-key`/`s3.aws-secret-key` in [`k8s/trino.yaml`](../../k8s/trino.yaml)'s iceberg catalog config match the `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` in [`k8s/minio.yaml`](../../k8s/minio.yaml)'s secret. They both default to `lattik` / `lattik-local`; if you've changed one, change the other.
 
 **`pnpm trino:cli` hangs forever**
 The Trino pod is probably still starting up. JVM cold start takes 30–60s after the container is `Ready`. `kubectl logs -l app=trino` and look for `SERVER STARTED` near the end.
 
 **MinIO console at `localhost:9001` won't connect**
-The port mapping only takes effect if the cluster was created with the current [`k8s/kind-config.yaml`](../k8s/kind-config.yaml). If you're on an older cluster, `pnpm dev:down && pnpm dev:up` to recreate. As a workaround without recreating, `kubectl -n minio port-forward svc/minio 9001:9001`.
+The port mapping only takes effect if the cluster was created with the current [`k8s/kind-config.yaml`](../../k8s/kind-config.yaml). If you're on an older cluster, `pnpm dev:down && pnpm dev:up` to recreate. As a workaround without recreating, `kubectl -n minio port-forward svc/minio 9001:9001`.
 
 **Spark job fails with `Unable to load region from any of the providers in the chain`**
-The AWS SDK v2 (which `iceberg-aws-bundle` ships) requires a region even when talking to a non-AWS S3 endpoint. The catalog client picks up `spark.sql.catalog.iceberg.s3.region` from sparkConf, but the parquet writer code path on executors uses the SDK's default credentials/region chain, which doesn't see sparkConf. Fix: set `AWS_REGION` as an env var on **both** the driver and executor pods (not just in sparkConf). [`k8s/spark-example.yaml`](../k8s/spark-example.yaml) shows the canonical pattern.
+The AWS SDK v2 (which `iceberg-aws-bundle` ships) requires a region even when talking to a non-AWS S3 endpoint. The catalog client picks up `spark.sql.catalog.iceberg.s3.region` from sparkConf, but the parquet writer code path on executors uses the SDK's default credentials/region chain, which doesn't see sparkConf. Fix: set `AWS_REGION` as an env var on **both** the driver and executor pods (not just in sparkConf). [`k8s/spark-example.yaml`](../../k8s/spark-example.yaml) shows the canonical pattern.
 
 **Spark job's data writes succeed but the SparkApplication is marked `FAILED` with `cannot deletecollection resource`**
-The driver's shutdown hook tries to clean up its dynamic PVCs/configmaps via `deletecollection`, which is a separate RBAC verb from `delete`. [`k8s/spark-rbac.yaml`](../k8s/spark-rbac.yaml) grants both. If you've forked the RBAC to be more restrictive, make sure `deletecollection` is included on `pods`, `services`, `configmaps`, and `persistentvolumeclaims`.
+The driver's shutdown hook tries to clean up its dynamic PVCs/configmaps via `deletecollection`, which is a separate RBAC verb from `delete`. [`k8s/spark-rbac.yaml`](../../k8s/spark-rbac.yaml) grants both. If you've forked the RBAC to be more restrictive, make sure `deletecollection` is included on `pods`, `services`, `configmaps`, and `persistentvolumeclaims`.
 
 **`pnpm spark:start` fails with `helm: command not found`**
 Install Helm: `brew install helm` on macOS, or see <https://helm.sh/docs/intro/install/>.
 
 **SparkApplication stuck in `SUBMITTED` or `PENDING` forever, no driver pod appears**
-The Spark Operator probably isn't watching the right namespace. Check `helm get values spark-operator -n spark-operator` — it should show `spark.jobNamespaces: [workloads]`. If it doesn't, `pnpm spark:stop && pnpm spark:start` to re-install with the correct values from [`k8s/spark/operator-values.yaml`](../k8s/spark/operator-values.yaml).
+The Spark Operator probably isn't watching the right namespace. Check `helm get values spark-operator -n spark-operator` — it should show `spark.jobNamespaces: [workloads]`. If it doesn't, `pnpm spark:stop && pnpm spark:start` to re-install with the correct values from [`k8s/spark/operator-values.yaml`](../../k8s/spark/operator-values.yaml).
 
 **Driver pod starts but immediately fails with `Forbidden: pods is forbidden`**
 The driver pod is using the default ServiceAccount in `workloads` (which has no RBAC) instead of `spark-driver`. Make sure your `SparkApplication` spec sets `driver.serviceAccount: spark-driver`. The example does — copy it.
 
 ## See also
 
-- [`k8s/namespaces.yaml`](../k8s/namespaces.yaml) — all namespaces
-- [`k8s/trino.yaml`](../k8s/trino.yaml), [`k8s/iceberg-rest.yaml`](../k8s/iceberg-rest.yaml), [`k8s/minio.yaml`](../k8s/minio.yaml) — the storage and SQL stack
-- [`k8s/spark/Dockerfile`](../k8s/spark/Dockerfile), [`k8s/spark/operator-values.yaml`](../k8s/spark/operator-values.yaml), [`k8s/spark-rbac.yaml`](../k8s/spark-rbac.yaml), [`k8s/spark-example.yaml`](../k8s/spark-example.yaml) — the Spark stack
-- [`k8s/kafka.yaml`](../k8s/kafka.yaml) — Kafka KRaft broker
-- [`k8s/schema-registry.yaml`](../k8s/schema-registry.yaml) — Confluent Schema Registry
-- [`k8s/ingest.yaml`](../k8s/ingest.yaml) — Go ingestion service (Protobuf envelope → Kafka)
-- [`k8s/kind-config.yaml`](../k8s/kind-config.yaml) — port mappings
+- [`k8s/namespaces.yaml`](../../k8s/namespaces.yaml) — all namespaces
+- [`k8s/trino.yaml`](../../k8s/trino.yaml), [`k8s/iceberg-rest.yaml`](../../k8s/iceberg-rest.yaml), [`k8s/minio.yaml`](../../k8s/minio.yaml) — the storage and SQL stack
+- [`k8s/spark/Dockerfile`](../../k8s/spark/Dockerfile), [`k8s/spark/operator-values.yaml`](../../k8s/spark/operator-values.yaml), [`k8s/spark-rbac.yaml`](../../k8s/spark-rbac.yaml), [`k8s/spark-example.yaml`](../../k8s/spark-example.yaml) — the Spark stack
+- [`k8s/kafka.yaml`](../../k8s/kafka.yaml) — Kafka KRaft broker
+- [`k8s/schema-registry.yaml`](../../k8s/schema-registry.yaml) — Confluent Schema Registry
+- [`k8s/ingest.yaml`](../../k8s/ingest.yaml) — Go ingestion service (Protobuf envelope → Kafka)
+- [`k8s/kind-config.yaml`](../../k8s/kind-config.yaml) — port mappings
 - [Trino docs](https://trino.io/docs/current/) — query language and connector reference
 - [Iceberg REST spec](https://github.com/apache/iceberg/blob/main/open-api/rest-catalog-open-api.yaml) — what `iceberg-rest` actually implements
 - [Iceberg Spark configuration](https://iceberg.apache.org/docs/latest/spark-configuration/) — exhaustive list of `spark.sql.catalog.*` knobs
 - [Spark Operator docs](https://www.kubeflow.org/docs/components/spark-operator/) — `SparkApplication` CRD reference
-- [`projects/testenv`](../../testenv) — sibling project that uses the same Spark Operator pattern (without Iceberg)
+- [`projects/testenv`](../../../testenv) — sibling project that uses the same Spark Operator pattern (without Iceberg)

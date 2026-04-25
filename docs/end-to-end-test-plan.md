@@ -17,7 +17,7 @@ Domain: an e-commerce site tracking user behavior. The test defines three Logger
 
 Before running the plan, confirm these are in place. Each is a known source of confusion if assumed.
 
-- **Stitcher status.** [`lattik-table-stitch.md`](lattik-table-stitch.md) is marked draft. If the read-side resolver in [`lattik-stitch/`](../lattik-stitch/) is stubbed or partially implemented, phases 6 and 7 cannot succeed as written — the queries will either hit a missing catalog or get a schema mismatch. Check before starting.
+- **Stitcher status.** [`lattik-table-stitch.md`](infra/lattik-table-stitch.md) is marked draft. If the read-side resolver in [`lattik-stitch/`](../lattik-stitch/) is stubbed or partially implemented, phases 6 and 7 cannot succeed as written — the queries will either hit a missing catalog or get a schema mismatch. Check before starting.
 - **Kafka → Iceberg ingestion pipeline.** Raw events land in Iceberg via a Spark batch job that drains each per-table Kafka topic. If that job is not yet implemented, phase 3 will stall. Substitute a one-off Spark job or stop at phase 2.
 - **Host prerequisites.** Docker, kubectl, kind, helm, pnpm, portless. Memory: at least 16 GB recommended; the full stack runs postgres, gitea, minio, iceberg-rest, trino, kafka, schema-registry, ingest, spark-operator, and airflow simultaneously.
 
