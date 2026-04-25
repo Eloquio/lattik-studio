@@ -34,10 +34,26 @@ import {
   workerDeploymentName,
   workerSecretName,
 } from "../lib/kube";
-import type { Task } from "../../../agent-worker/src/task-client";
+// Inline shape — the agent-worker no longer exports a Task type after the
+// Phase C.3 rewrite. The fields below match what /api/tasks/claim returns.
+interface Task {
+  id: string;
+  request_id: string;
+  skill_id: string;
+  description: string;
+  done_criteria: string;
+  status: string;
+  claimed_by: string | null;
+  result: unknown;
+  error: string | null;
+  created_at: string;
+  claimed_at: string | null;
+  stale_at: string | null;
+  completed_at: string | null;
+}
 
 const API_BASE = process.env.TASK_API_URL ?? "http://localhost:3737";
-const TEST_AGENT_ID = "verify-6-agent";
+const TEST_SKILL_ID = "verify-6-skill";
 
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) {
@@ -59,7 +75,7 @@ function kubectlExists(kind: string, name: string, ns: string): boolean {
 async function claimTaskHttp(
   workerId: string,
   secret: string,
-  agentId?: string,
+  skillId?: string,
 ) {
   const res = await fetch(`${API_BASE}/api/tasks/claim`, {
     method: "POST",
@@ -67,7 +83,7 @@ async function claimTaskHttp(
       "Content-Type": "application/json",
       Authorization: `Bearer ${workerId}:${secret}`,
     },
-    body: JSON.stringify(agentId ? { agentId } : {}),
+    body: JSON.stringify(skillId ? { skillId } : {}),
   });
   return res;
 }
@@ -92,29 +108,18 @@ async function cleanup() {
     "--field-selector=metadata.name!=agent-worker-DO-NOT-MATCH",
     "--ignore-not-found",
   ]);
-  // Drop leftover tasks/requests/agents.
+  // Drop leftover tasks/requests.
   await db.execute(
     sql`DELETE FROM task WHERE description LIKE 'verify-6:%'`,
   );
   await db.execute(
     sql`DELETE FROM request WHERE description LIKE 'verify-6:%'`,
   );
-  await db.execute(sql`DELETE FROM agent WHERE id = ${TEST_AGENT_ID}`);
 }
 
 async function main() {
   console.log("[0] pre-flight cleanup");
   await cleanup();
-
-  // Seed a test agent used by the task round-trip check.
-  await getDb().insert(schema.agents).values({
-    id: TEST_AGENT_ID,
-    name: "Verify 6 Agent",
-    description: "Test agent for Phase 6 verification",
-    icon: "test",
-    category: "test",
-    type: "first-party",
-  });
 
   // --- 1. Secret revocation over HTTP -----------------------------------
   console.log("[1] host worker → HTTP 2xx → revoke → HTTP 401 → new creds 2xx");
@@ -155,20 +160,20 @@ async function main() {
   const req = await createRequest("human", "verify-6: task round-trip");
   const seededTask = await createTask(
     req.id,
-    TEST_AGENT_ID,
+    TEST_SKILL_ID,
     "verify-6: a task",
     "done",
     "pending",
   );
   assert(seededTask !== undefined, "seeded a task");
 
-  const res4 = await claimTaskHttp(host2.worker.id, host2.secret!, TEST_AGENT_ID);
+  const res4 = await claimTaskHttp(host2.worker.id, host2.secret!, TEST_SKILL_ID);
   assert(res4.status === 200, `filtered claim returned 200 (got ${res4.status})`);
   const claimed = (await res4.json()) as Task;
   assert(claimed.id === seededTask!.id, "HTTP claim returned our seeded task");
   assert(
-    claimed.agent_id === TEST_AGENT_ID,
-    `claimed.agent_id matches filter (got ${claimed.agent_id})`,
+    claimed.skill_id === TEST_SKILL_ID,
+    `claimed.skill_id matches filter (got ${claimed.skill_id})`,
   );
 
   await revokeWorkerCore(host2.worker.id);

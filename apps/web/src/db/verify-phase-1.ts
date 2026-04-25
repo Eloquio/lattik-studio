@@ -93,12 +93,13 @@ async function main() {
   // forever, starving our row). Release them at the end.
   const req = await createRequest("human", "verify-phase-1: claimed");
   const holdPinned: string[] = [];
-  let claimedMine: { id: string; stale_at: Date | null; status: string } | null = null;
+  type ClaimedRequest = { id: string; stale_at: Date | null; status: string };
+  let claimedMine: ClaimedRequest | null = null;
   for (let i = 0; i < 50; i++) {
     const row = await claimRequest(TEST_WORKER_ID);
     if (!row) break;
     if (row.id === req.id) {
-      claimedMine = row as typeof claimedMine;
+      claimedMine = row as ClaimedRequest;
       break;
     }
     holdPinned.push(row.id);

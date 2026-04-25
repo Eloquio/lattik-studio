@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { requireTaskAuth } from "@/lib/bearer-auth";
+import { requireWorkerAuth } from "@/lib/bearer-auth";
 import { failRequest } from "@/lib/task-queue";
 import { parseJsonBody } from "@/lib/api-validation";
 
@@ -11,8 +11,8 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const authError = requireTaskAuth(req);
-  if (authError) return authError;
+  const auth = await requireWorkerAuth(req);
+  if (auth instanceof Response) return auth;
 
   const { id } = await params;
   const body = await parseJsonBody(req, failBodySchema);

@@ -45,33 +45,9 @@ async function globalSetup() {
     expires,
   });
 
-  // Seed the data-architect agent
-  await db
-    .insert(schema.agents)
-    .values({
-      id: "data-architect",
-      name: "Data Architect",
-      description:
-        "Design pipeline architectures: Logger Tables, Lattik Tables, and Canonical Dimensions.",
-      icon: "blocks",
-      category: "Data Architecture",
-      type: "first-party",
-      published: true,
-    })
-    .onConflictDoUpdate({
-      target: schema.agents.id,
-      set: {
-        name: "Data Architect",
-        description:
-          "Design pipeline architectures: Logger Tables, Lattik Tables, and Canonical Dimensions.",
-      },
-    });
-
-  // Enable data-architect for the test user
-  await db
-    .insert(schema.userAgents)
-    .values({ userId: TEST_USER_ID, agentId: "data-architect" })
-    .onConflictDoNothing();
+  // Chat specialists (data-architect, etc.) are now registered in the TS
+  // extensions registry rather than seeded as DB rows. No agent table to
+  // seed against.
 
   // Write state to file so fixtures can read it (cross-process)
   writeFileSync(STATE_FILE, JSON.stringify({ sessionToken: TEST_SESSION_TOKEN }));

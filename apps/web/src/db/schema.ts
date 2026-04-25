@@ -1,6 +1,5 @@
 import { sql } from "drizzle-orm";
 import {
-  boolean,
   check,
   date,
   index,
@@ -113,37 +112,12 @@ export const definitions = pgTable(
   ]
 );
 
-export const agents = pgTable("agent", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  description: text("description").notNull(),
-  icon: text("icon").notNull(),
-  category: text("category").notNull(),
-  type: text("type").$type<"first-party" | "third-party">().notNull(),
-  config: jsonb("config").$type<{
-    system_prompt?: string;
-    knowledge?: string[];
-    tools?: string[];
-  }>(),
-  /**
-   * Per-agent stale-claim timeout in milliseconds. Tasks claimed by an agent
-   * revert to `pending` if not completed within this window. Null/unset means
-   * fall back to DEFAULT_STALE_TIMEOUT_MS (5 minutes). Agents that drive
-   * long-running Spark jobs should set this to several hours.
-   */
-  staleTimeoutMs: integer("stale_timeout_ms"),
-  authorId: text("authorId").references(() => users.id),
-  published: boolean("published").notNull().default(true),
-  createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
-  updatedAt: timestamp("updatedAt", { mode: "date" }).notNull().defaultNow(),
-});
-
 /**
- * Workers are fungible processes that execute tasks. The agent a task should
- * run under is stored on the task itself; when a worker claims a task it
- * instantiates that agent role and runs it. Each worker has its own bearer
- * secret so a compromised process can be revoked without disturbing the
- * fleet, and ownership of in-flight claims is tracked via `task.claimed_by`.
+ * Workers are fungible processes that execute tasks. Each task carries a
+ * `skill_id`; the worker loads that skill (instructions + tool grants) and
+ * follows it. Each worker has its own bearer secret so a compromised process
+ * can be revoked without disturbing the fleet, and ownership of in-flight
+ * claims is tracked via `task.claimed_by`.
  *
  * Auth: workers present `Authorization: Bearer <workerId>:<secret>`; the
  * server looks up the row and compares sha256(secret) to `tokenHash`.
@@ -167,22 +141,6 @@ export const workers = pgTable(
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
   },
   (t) => [index("idx_worker_last_seen_at").on(t.lastSeenAt)],
-);
-
-export const userAgents = pgTable(
-  "user_agent",
-  {
-    userId: text("userId")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    agentId: text("agentId")
-      .notNull()
-      .references(() => agents.id, { onDelete: "cascade" }),
-    enabledAt: timestamp("enabledAt", { mode: "date" }).notNull().defaultNow(),
-  },
-  (ua) => [
-    primaryKey({ columns: [ua.userId, ua.agentId] }),
-  ]
 );
 
 /**
@@ -312,10 +270,10 @@ export type RequestStatus =
   | "failed";
 
 /**
- * Raw work orders from webhooks or humans. The planner agent claims a request,
- * optionally converses with the human for clarification, then breaks it into
- * tasks. Human approval is required before agents begin (unless the matched
- * skill has auto_approve enabled).
+ * Raw work orders from webhooks or humans. The Worker Node's Planner Agent
+ * claims a pending request, decides which skills to schedule, and emits one
+ * task per skill. Human approval is required before the Executor begins
+ * (unless the matched skill has auto_approve enabled).
  */
 export const requests = pgTable(
   "request",
@@ -331,15 +289,6 @@ export const requests = pgTable(
       .notNull()
       .default([]),
     skillId: text("skill_id"),
-    /**
-     * Agent this request is pre-assigned to, if any. Null means "no agent
-     * decided yet" — whichever worker claims this request becomes the
-     * planner and decides which agent should handle it. A set value skips
-     * planning: the claiming worker takes that agent's role directly.
-     */
-    agentId: text("agent_id").references(() => agents.id, {
-      onDelete: "set null",
-    }),
     /**
      * Worker id that currently holds this request. Set atomically during
      * claim (FOR UPDATE SKIP LOCKED in claimRequest). Null means the
@@ -377,9 +326,10 @@ export const requests = pgTable(
 export type TaskStatus = "draft" | "pending" | "claimed" | "done" | "failed";
 
 /**
- * Units of work broken down by the planner agent. Each task is assigned to a
- * specific agent and includes verifiable done criteria. Tasks start as "draft"
- * until the human approves the request's plan.
+ * Units of work emitted by the Planner Agent. Each task carries a `skill_id`
+ * pointing at a runbook the Executor Agent loads when it claims the task,
+ * plus verifiable done criteria. Tasks start as "draft" until the human
+ * approves the request's plan (or "pending" directly when auto_approve).
  */
 export const tasks = pgTable(
   "task",
@@ -390,9 +340,7 @@ export const tasks = pgTable(
     requestId: text("request_id")
       .notNull()
       .references(() => requests.id, { onDelete: "cascade" }),
-    agentId: text("agent_id")
-      .notNull()
-      .references(() => agents.id, { onDelete: "restrict" }),
+    skillId: text("skill_id").notNull(),
     description: text("description").notNull(),
     doneCriteria: text("done_criteria").notNull(),
     status: text("status").$type<TaskStatus>().notNull().default("draft"),
@@ -406,7 +354,7 @@ export const tasks = pgTable(
   },
   (t) => [
     index("idx_tasks_status").on(t.status),
-    index("idx_tasks_agent_status").on(t.agentId, t.status),
+    index("idx_tasks_skill_status").on(t.skillId, t.status),
     index("idx_tasks_stale_at").on(t.staleAt),
     index("idx_tasks_request_id").on(t.requestId),
   ]

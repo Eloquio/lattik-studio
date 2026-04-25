@@ -4,9 +4,8 @@ import { touchWorkerHeartbeat } from "@/lib/worker-tokens";
 
 /**
  * Atomically lock the oldest pending request to the authenticated worker.
- * The returned row's `agent_id` tells the caller what to do next:
- *   - null  → act as planner and decide which agent should work on it
- *   - set   → take that agent's role and execute the request directly
+ * The Worker Node inspects the request's tasks state and dispatches its
+ * Planner Agent (no tasks yet) or Executor Agent (planned, pending tasks).
  */
 export async function POST(req: Request) {
   const auth = await requireWorkerAuth(req);

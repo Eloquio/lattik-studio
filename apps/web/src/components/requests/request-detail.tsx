@@ -94,7 +94,7 @@ export function RequestDetail({
                         {task.description}
                       </span>
                       <span className="text-[10px] text-white/40">
-                        {task.agentId}
+                        {task.skillId}
                       </span>
                       <span
                         className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${TASK_STATUS_COLOR[task.status]}`}
