@@ -54,19 +54,22 @@ First run takes ~15 minutes (image pulls); subsequent runs take ~2 minutes.
 
 ## Documentation
 
+See [docs/README.md](docs/README.md) for the full index. Highlights:
+
 | Doc | Description |
 |-----|-------------|
 | [Features](docs/features.md) | Feature overview |
 | [Tech Stack](docs/tech-stack.md) | Full technology stack |
-| [Data Model](docs/data-model.md) | Core data model and schema |
-| [Local Data Lake](docs/local-data-lake.md) | Trino + Iceberg + MinIO + Spark setup |
-| [Local Airflow](docs/local-airflow.md) | Airflow 3.x orchestration |
-| [Canvas Rendering](docs/canvas-rendering.md) | json-render streaming canvas |
-| [Canvas Design Principles](docs/canvas-design-principles.md) | Canvas UX guidelines |
-| [Progressive Disclosure](docs/progressive-disclosure.md) | Progressive disclosure patterns |
-| [Agent Handoff](docs/agent-handoff.md) | Multi-agent handoff protocol |
-| [Lattik Table Stitch](docs/lattik-table-stitch.md) | Stitch engine for Lattik Tables |
-| [Pipeline Manager](docs/pipeline-manager.md) | Pipeline management |
+| [Concepts](docs/architecture/concepts.md) | Core concepts: agents, skills, tools, runtimes |
+| [Data Model](docs/architecture/data-model.md) | Entities, dimensions, logger/lattik tables, metrics |
+| [Agent Handoff](docs/architecture/agent-handoff.md) | Multi-agent handoff protocol |
+| [Canvas Rendering](docs/canvas/canvas-rendering.md) | json-render streaming canvas |
+| [Canvas Design Principles](docs/canvas/canvas-design-principles.md) | Canvas UX guidelines |
+| [Local Data Lake](docs/infra/local-data-lake.md) | Trino + Iceberg + MinIO + Spark setup |
+| [Local Airflow](docs/infra/local-airflow.md) | Airflow 3.x orchestration |
+| [Lattik Table Stitch](docs/infra/lattik-table-stitch.md) | Stitch engine for Lattik Tables |
+| [Data Analyst extension](docs/extensions/data-analyst.md) | SQL exploration + charts |
+| [Pipeline Manager extension](docs/extensions/pipeline-manager.md) | Airflow DAG monitoring + troubleshooting |
 
 ## Contributing
 

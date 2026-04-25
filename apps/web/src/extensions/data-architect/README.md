@@ -5,7 +5,7 @@ The Data Architect is a specialist agent in Lattik Studio that helps users defin
 ## Architecture
 
 ```
-User ←→ Chat ←→ Agent (Claude Haiku 4.5) ←→ Tools ←→ Canvas / DB / Gitea
+User ←→ Chat ←→ Agent (Claude Sonnet 4.6) ←→ Tools ←→ Canvas / DB / Gitea
 ```
 
 The agent is a `ToolLoopAgent` (Vercel AI SDK v6) with a max of 10 tool steps per turn. It receives system instructions listing the available skills, and is told to always load the skill document first before starting any workflow.

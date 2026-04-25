@@ -8,12 +8,12 @@ Extensions are specialized AI agents (e.g. a Root Cause Analysis Agent). Extensi
 
 - **Framework:** Next.js 16 (App Router) + React 19 + TypeScript
 - **Monorepo:** Turborepo + pnpm workspaces
-- **AI:** Vercel AI SDK v6 with AI Gateway (Claude Sonnet 4)
+- **AI:** Vercel AI SDK v6 with AI Gateway. Claude Sonnet 4.6 powers the chat agents (data-architect, data-analyst, pipeline-manager); Claude Haiku 4.5 powers the canvas spec stream
 - **Auth:** NextAuth v5 (Auth.js beta) — Credentials provider (admin/admin) in dev, Google OAuth in production
 - **Database:** PostgreSQL (local via kind) + Drizzle ORM
-- **Local data lake:** Trino + Iceberg REST catalog + MinIO, all in kind ([`docs/local-data-lake.md`](docs/local-data-lake.md))
+- **Local data lake:** Trino + Iceberg REST catalog + MinIO, all in kind ([`docs/infra/local-data-lake.md`](docs/infra/local-data-lake.md))
 - **Local compute:** Spark 4.0.2 + Iceberg 1.10.1, run as `SparkApplication`s under kubeflow's Spark Operator. Two Spark images: `lattik/spark-stitch` (self-contained, built by [`lattik-stitch`](lattik-stitch/), used by Airflow-triggered materialization jobs) and `lattik/spark-iceberg:4.0.2-1.10.1` (built from [`k8s/spark/Dockerfile`](k8s/spark/Dockerfile), used by manual test fixtures only). Driver scripts are mounted at runtime via a `spark-drivers` ConfigMap, not baked into the image.
-- **Orchestration (local dev):** Airflow 3.2.0 with KubernetesExecutor in the same kind cluster, sharing the postgres metadata DB ([`docs/local-airflow.md`](docs/local-airflow.md))
+- **Orchestration (local dev):** Airflow 3.2.0 with KubernetesExecutor in the same kind cluster, sharing the postgres metadata DB ([`docs/infra/local-airflow.md`](docs/infra/local-airflow.md))
 - **Messaging (local dev):** Apache Kafka 3.9.0 in KRaft mode (no ZooKeeper), single-node broker in the kind cluster
 - **Schema Registry (local dev):** Confluent Schema Registry 7.7.0 for Protobuf payload schemas, backed by Kafka
 - **Ingestion (local dev):** `lattik/ingest` — Go HTTP service that accepts Protobuf envelopes and produces to per-table Kafka topics
@@ -34,15 +34,25 @@ apps/web/              Next.js app
   src/components/      UI components (chat, canvas, layout, ui)
   src/db/              Drizzle schema and connection
   src/extensions/      Extension framework and agents
-    data-architect/    Data Architect extension (see README.md inside)
+    agents/            Shared agent definitions (e.g. handback)
+    registry.ts        Extension registry — registers data-architect, data-analyst, pipeline-manager
+    data-architect/    Data Architect extension — defines entities/dimensions/logger+lattik tables/metrics (see README.md inside)
       canvas/          Canvas components + json-render system
-      skills/          Skill markdown docs (entity, dimension, logger table, lattik table, metric)
-      tools/           Agent tools (getSkill, renderCanvas, staticCheck, submitPR, etc.)
+      skills/          Skill markdown docs (entity, dimension, logger table, lattik table, metric, reviewing-definitions)
+      tools/           Agent tools (getSkill, readCanvasState, reviewDefinition, staticCheck, updateDefinition, submitPR, etc.)
       validation/      Naming, referential, and expression validation
+    data-analyst/      Data Analyst extension — explores data via SQL + charts (see README.md inside)
+      canvas/          Chart + SQL editor canvas components
+      skills/          Skill markdown docs (exploring-data)
+      tools/           Agent tools (listTables, describeTable, runQuery, renderChart, renderSqlEditor, updateLayout)
+    pipeline-manager/  Pipeline Manager extension — monitors and troubleshoots Airflow DAGs (see README.md inside)
+      canvas/          DAG overview + run detail canvas components
+      skills/          Skill markdown docs (monitoring-dags, triggering-runs, troubleshooting-failures)
+      tools/           Agent tools (listDags, getDagDetail, listDagRuns, getTaskInstances, getTaskLogs, renderDagOverview, renderDagRunDetail)
   src/hooks/           React hooks
   src/lib/             Server actions and utilities
   src/proxy.ts         Auth middleware (protects all routes except /sign-in, /api/auth, /api/webhooks)
-docs/                  Architecture docs (agent-handoff, canvas-rendering, progressive-disclosure, data-model, local-data-lake, local-airflow)
+docs/                  Architecture and operational docs — see docs/README.md for the full index
 k8s/                   Kubernetes manifests
   namespaces.yaml      All namespaces (postgres, gitea, minio, iceberg, trino, spark-operator, kafka, schema-registry, workloads)
   postgres.yaml        Postgres in `postgres` ns
@@ -115,7 +125,7 @@ Each service lives in its own namespace so PVCs, secrets, and pods stay isolated
 | `kafka` | Kafka KRaft broker deployment, PVC, service |
 | `schema-registry` | Confluent Schema Registry deployment, service `sr` (stateless — data in Kafka). Service named `sr` to avoid Kubernetes env var conflict with `SCHEMA_REGISTRY_*` |
 | `workloads` | Spark `SparkApplication`s and the driver/executor pods they spawn, plus the `spark-driver` ServiceAccount |
-| `airflow` | Airflow api-server, scheduler, dag-processor, init Job (see [`docs/local-airflow.md`](docs/local-airflow.md)) |
+| `airflow` | Airflow api-server, scheduler, dag-processor, init Job (see [`docs/infra/local-airflow.md`](docs/infra/local-airflow.md)) |
 
 Kubernetes Secrets are namespace-scoped, so any service that needs to authenticate to MinIO from a different namespace gets its own local copy of the credentials (currently iceberg-rest and Spark drivers). Keep the values in lockstep with [`k8s/minio.yaml`](k8s/minio.yaml).
 
@@ -176,7 +186,7 @@ kubectl get pods -n postgres -l app=postgres
 
 ## Local data lake
 
-A local mirror of the production data lake (S3 + Iceberg) running in the same kind cluster, with [Trino](https://trino.io) as the query engine. Used for developing and testing anything that touches Iceberg tables without hitting real S3. See [`docs/local-data-lake.md`](docs/local-data-lake.md) for the full architecture, query examples, image-pull workarounds, and troubleshooting.
+A local mirror of the production data lake (S3 + Iceberg) running in the same kind cluster, with [Trino](https://trino.io) as the query engine. Used for developing and testing anything that touches Iceberg tables without hitting real S3. See [`docs/infra/local-data-lake.md`](docs/infra/local-data-lake.md) for the full architecture, query examples, image-pull workarounds, and troubleshooting.
 
 ```bash
 # Start the data lake stack (assumes the cluster is already up)
@@ -201,7 +211,7 @@ pnpm trino:stop
 
 ## Local compute (Spark)
 
-Apache Spark 4.0.2 with the Iceberg 1.10.1 runtime, run as `SparkApplication` resources under [kubeflow's Spark Operator](https://github.com/kubeflow/spark-operator). Used for batch jobs that read or write Iceberg tables — the same tables Trino can query. The custom image bakes the Iceberg Spark runtime + iceberg-aws-bundle into `apache/spark:4.0.2`. See [`docs/local-data-lake.md`](docs/local-data-lake.md) for the architecture diagram and an end-to-end example.
+Apache Spark 4.0.2 with the Iceberg 1.10.1 runtime, run as `SparkApplication` resources under [kubeflow's Spark Operator](https://github.com/kubeflow/spark-operator). Used for batch jobs that read or write Iceberg tables — the same tables Trino can query. The custom image bakes the Iceberg Spark runtime + iceberg-aws-bundle into `apache/spark:4.0.2`. See [`docs/infra/local-data-lake.md`](docs/infra/local-data-lake.md) for the architecture diagram and an end-to-end example.
 
 ```bash
 # One-time (and after editing k8s/spark/Dockerfile): build + kind load
@@ -233,7 +243,7 @@ pnpm spark:stop
 
 ## Local orchestration (Airflow)
 
-Apache Airflow 3.2.0 runs in the same kind cluster, with `KubernetesExecutor` so each task spawns its own pod. The metadata DB is the existing `postgres` Service (a separate `airflow` database, created idempotently by an init Job). DAGs come from a hostPath mount — drop a `.py` file in `/var/lib/lattik/airflow-dags/` (or symlink the repo's `airflow/dags/` into it) and the DAG processor picks it up on its next scan, no restart needed. See [`docs/local-airflow.md`](docs/local-airflow.md) for the full architecture, DAG authoring workflow, providers / custom-image pattern, upgrade procedure, and troubleshooting.
+Apache Airflow 3.2.0 runs in the same kind cluster, with `KubernetesExecutor` so each task spawns its own pod. The metadata DB is the existing `postgres` Service (a separate `airflow` database, created idempotently by an init Job). DAGs come from a hostPath mount — drop a `.py` file in `/var/lib/lattik/airflow-dags/` (or symlink the repo's `airflow/dags/` into it) and the DAG processor picks it up on its next scan, no restart needed. See [`docs/infra/local-airflow.md`](docs/infra/local-airflow.md) for the full architecture, DAG authoring workflow, providers / custom-image pattern, upgrade procedure, and troubleshooting.
 
 ```bash
 # Start Airflow (assumes cluster + postgres are already up)

@@ -53,7 +53,7 @@ When an agent calls `loadSkill(id)`, the runtime:
 
 Skills aren't agents — they're payloads. They're runtime-neutral; the runtime they execute in is whichever agent loaded them.
 
-See: [PLAN-skill-based-worker-loop.md](PLAN-skill-based-worker-loop.md) for the SKILL.md schema and loader.
+See: [PLAN-skill-based-worker-loop.md](../archive/PLAN-skill-based-worker-loop.md) for the SKILL.md schema and loader.
 
 ---
 
@@ -82,7 +82,7 @@ A Worker Node is identified by `worker.id` (UUID) + a bearer secret. Liveness is
 
 Worker Nodes have no business logic of their own — they're a runtime. All behavior lives in the two agents and the skills they load.
 
-See: [PLAN-worker-deployment-and-capabilities.md](PLAN-worker-deployment-and-capabilities.md) for deployment and identity.
+See: [PLAN-worker-deployment-and-capabilities.md](../archive/PLAN-worker-deployment-and-capabilities.md) for deployment and identity.
 
 ---
 
