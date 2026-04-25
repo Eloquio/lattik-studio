@@ -11,8 +11,7 @@ import {
 import { z } from "zod";
 import { pipeJsonRender } from "@json-render/core";
 import { getExtensionAgent } from "@/extensions/agents";
-import { getExtension } from "@/extensions/registry";
-import { listEnabledAgents } from "@/lib/actions/agents";
+import { getAllExtensions, getExtension } from "@/extensions/registry";
 import { rateLimit } from "@/lib/rate-limit";
 import "@/extensions";
 
@@ -38,7 +37,7 @@ function buildAssistantPrompt(
   const agentList =
     agents.length > 0
       ? agents.map((a) => `- **${a.name}** (id: "${a.id}"): ${a.description}`).join("\n")
-      : "No agents enabled. Suggest the user visit the Agent Marketplace to enable specialized agents.";
+      : "No specialist agents are registered.";
 
   // Only include paused-task context if the stacked extensionId is a known
   // extension — prevents a malicious client from smuggling arbitrary strings
@@ -66,7 +65,7 @@ ${agentList}
 ## When to hand off
 - If the user's request clearly matches an available agent's specialty → hand off
 - For general questions, greetings, or tasks that don't match any agent → handle them yourself
-- If no agents are enabled, let the user know they can enable agents in the Marketplace
+- If no specialists are registered, handle the request yourself
 
 ## Routing rules (apply before asking the user)
 - **Any delete / drop / remove request** targeting a table, definition, entity, dimension, logger table, lattik table, or metric → hand off to the **Data Architect** agent (id: \`data-architect\`) without asking. The Data Architect owns all deletion flows; the Data Analyst is not allowed to delete. Do not present the user with a menu of agents for deletion requests.
@@ -184,7 +183,7 @@ export async function POST(req: Request) {
   }
 
   // Default assistant with handoff
-  const enabledAgents = await listEnabledAgents();
+  const enabledAgents = getAllExtensions();
   const assistantAgent = new ToolLoopAgent({
     model: gateway("anthropic/claude-haiku-4.5"),
     instructions: buildAssistantPrompt(enabledAgents, taskStack),

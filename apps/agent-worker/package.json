@@ -10,9 +10,11 @@
   "dependencies": {
     "ai": "^6.0.141",
     "@ai-sdk/gateway": "^3.0.83",
+    "@eloquio/lattik-skills": "workspace:*",
     "zod": "^3.25.67"
   },
   "devDependencies": {
+    "@types/node": "^20",
     "tsx": "^4.19.4",
     "typescript": "^5"
   }

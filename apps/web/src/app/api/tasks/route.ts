@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { requireTaskAuth } from "@/lib/bearer-auth";
+import { requireTaskAuth, requireWorkerAuth } from "@/lib/bearer-auth";
 import { createTask, listTasks } from "@/lib/task-queue";
 import {
   MAX_LIMIT,
@@ -9,7 +9,7 @@ import {
 
 const createTaskBodySchema = z.object({
   requestId: z.string().min(1),
-  agentId: z.string().min(1),
+  skillId: z.string().min(1),
   description: z.string().min(1).max(4000),
   doneCriteria: z.string().min(1).max(4000),
   status: z.enum(["draft", "pending"]).optional(),
@@ -21,7 +21,7 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const requestId = url.searchParams.get("requestId") ?? undefined;
-  const agentId = url.searchParams.get("agentId") ?? undefined;
+  const skillId = url.searchParams.get("skillId") ?? undefined;
   const statusParam = url.searchParams.get("status");
   const limitParam = url.searchParams.get("limit");
 
@@ -46,7 +46,7 @@ export async function GET(req: Request) {
 
   const rows = await listTasks({
     requestId,
-    agentId,
+    skillId,
     status: statusParsed?.data,
     limit,
   });
@@ -54,15 +54,17 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const authError = requireTaskAuth(req);
-  if (authError) return authError;
+  // POST is the worker-side path used by emit-task. Authenticate as a
+  // worker (per-worker bearer) rather than the legacy single-key task agent.
+  const auth = await requireWorkerAuth(req);
+  if (auth instanceof Response) return auth;
 
   const body = await parseJsonBody(req, createTaskBodySchema);
   if (body instanceof Response) return body;
 
   const row = await createTask(
     body.requestId,
-    body.agentId,
+    body.skillId,
     body.description,
     body.doneCriteria,
     body.status,

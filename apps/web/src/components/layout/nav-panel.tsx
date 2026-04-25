@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { GitBranch, Inbox, LogOut, MessageSquare, Store } from "lucide-react";
+import { GitBranch, Inbox, LogOut, MessageSquare } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -18,7 +18,6 @@ export function NavPanel({ historyOpen = false, onChatClick }: NavPanelProps) {
   const router = useRouter();
   const pathname = usePathname();
   const onRequests = pathname.startsWith("/requests");
-  const onMarketplace = pathname.startsWith("/marketplace");
   const onHome = pathname === "/";
 
   const handleChatClick = () => {
@@ -54,20 +53,6 @@ export function NavPanel({ historyOpen = false, onChatClick }: NavPanelProps) {
           <Inbox className="h-5 w-5" />
         </TooltipTrigger>
         <TooltipContent side="right">Requests</TooltipContent>
-      </Tooltip>
-
-      <Tooltip>
-        <TooltipTrigger
-          className={`flex h-10 w-10 items-center justify-center rounded-md transition-colors ${
-            onMarketplace
-              ? "bg-white/15 text-[#e0a96e]"
-              : "text-white/70 hover:bg-white/10 hover:text-white"
-          }`}
-          onClick={() => router.push("/marketplace")}
-        >
-          <Store className="h-5 w-5" />
-        </TooltipTrigger>
-        <TooltipContent side="right">Marketplace</TooltipContent>
       </Tooltip>
 
       <Tooltip>

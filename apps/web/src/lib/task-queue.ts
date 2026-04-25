@@ -15,13 +15,13 @@ import type {
   RequestStatus,
   TaskStatus,
 } from "@/db/schema";
-import { instantiateSkill, type Skill } from "@/lib/skills";
 
 /**
- * Minimum surface of a drizzle client needed by applySkillRecipe — satisfied
- * by both the top-level db returned from getDb() and by the tx object passed
- * into db.transaction(). Typed as a utility rather than importing drizzle's
- * PgTransaction so we don't couple the helper to a specific driver.
+ * Minimum surface of a drizzle client needed by createRequest's transactional
+ * caller — satisfied by both the top-level db returned from getDb() and by the
+ * tx object passed into db.transaction(). Typed as a utility rather than
+ * importing drizzle's PgTransaction so we don't couple the helper to a
+ * specific driver.
  */
 type DbLike = ReturnType<typeof getDb>;
 
@@ -50,61 +50,6 @@ export async function createRequest(
 }
 
 /**
- * Expand a Skill into tasks and insert them at the given status. Runs
- * within whatever `client` is passed — for the webhook fan-out path,
- * that's a transaction so a failing insert rolls the whole thing back.
- *
- * Returns the inserted task rows.
- */
-export async function applySkillRecipe(
-  client: DbLike,
-  requestId: string,
-  skill: Skill,
-  args: Record<string, unknown>,
-  status: "draft" | "pending" = "pending",
-) {
-  const defs = instantiateSkill(skill, args);
-
-  // Sanity-check that every agent the skill references exists. Catches
-  // a skill YAML typo before we commit any task rows to the DB.
-  const agentIds = Array.from(new Set(defs.map((d) => d.agentId)));
-  const knownAgentIds =
-    agentIds.length > 0
-      ? new Set(
-          (
-            await client
-              .select({ id: schema.agents.id })
-              .from(schema.agents)
-              .where(sql`id IN (${sql.join(agentIds.map((id) => sql`${id}`), sql`, `)})`)
-          ).map((r) => r.id),
-        )
-      : new Set<string>();
-  for (const def of defs) {
-    if (!knownAgentIds.has(def.agentId)) {
-      throw new Error(
-        `Skill "${skill.name}" references unknown agent "${def.agentId}"`,
-      );
-    }
-  }
-
-  const inserted: typeof schema.tasks.$inferSelect[] = [];
-  for (const def of defs) {
-    const [row] = await client
-      .insert(schema.tasks)
-      .values({
-        requestId,
-        agentId: def.agentId,
-        description: def.description,
-        doneCriteria: def.doneCriteria,
-        status,
-      })
-      .returning();
-    inserted.push(row);
-  }
-  return inserted;
-}
-
-/**
  * How long a worker is expected to hold a claim on a request before it is
  * considered stuck. Matches the cron-driven stale-reset pass.
  */
@@ -116,11 +61,9 @@ export async function claimRequest(claimedBy: string, timeoutMs: number = REQUES
 
   // Atomic claim: pick the oldest pending request, move it to "planning",
   // and lock it to this claimer. FOR UPDATE SKIP LOCKED lets concurrent
-  // workers claim different requests without contending.
-  //
-  // The row's `agent_id` dictates what the claimer does next:
-  //   - null  → worker acts as planner (decomposes, skill-matches, etc.)
-  //   - set   → worker takes that agent's role and executes directly
+  // workers claim different requests without contending. The Worker Node
+  // dispatches Planner or Executor based on the request's tasks state, not
+  // a pre-assigned agent column.
   const result = await db.execute<{
     id: string;
     source: RequestSource;
@@ -128,7 +71,6 @@ export async function claimRequest(claimedBy: string, timeoutMs: number = REQUES
     context: unknown;
     messages: { role: "planner" | "human"; content: string; timestamp: string }[];
     skill_id: string | null;
-    agent_id: string | null;
     claimed_by: string | null;
     status: RequestStatus;
     stale_at: Date | null;
@@ -330,7 +272,7 @@ export async function listRequests(options?: {
 
 export async function createTask(
   requestId: string,
-  agentId: string,
+  skillId: string,
   description: string,
   doneCriteria: string,
   status: "draft" | "pending" = "draft",
@@ -340,7 +282,7 @@ export async function createTask(
     .insert(schema.tasks)
     .values({
       requestId,
-      agentId,
+      skillId,
       description,
       doneCriteria,
       status,
@@ -349,41 +291,26 @@ export async function createTask(
   return row;
 }
 
+/**
+ * Stale-claim timeout for any task. A claim that hasn't completed within this
+ * window is released back to `pending` for another worker. Per-skill overrides
+ * (via SKILL.md frontmatter) are intentionally deferred — revisit when a real
+ * skill needs longer than 5 minutes.
+ */
 const DEFAULT_STALE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
-/**
- * Resolve the stale-claim timeout for an agent. Precedence:
- *   1. Explicit `timeoutMs` argument (caller override)
- *   2. `agent.staleTimeoutMs` column (per-agent default)
- *   3. `DEFAULT_STALE_TIMEOUT_MS` (global fallback)
- */
-async function resolveTimeoutMs(
-  agentId: string | undefined,
-  explicitTimeoutMs: number | undefined,
-): Promise<number> {
-  if (explicitTimeoutMs !== undefined) return explicitTimeoutMs;
-  if (!agentId) return DEFAULT_STALE_TIMEOUT_MS;
-  const db = getDb();
-  const [row] = await db
-    .select({ staleTimeoutMs: schema.agents.staleTimeoutMs })
-    .from(schema.agents)
-    .where(eq(schema.agents.id, agentId))
-    .limit(1);
-  return row?.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS;
-}
-
 export async function claimTask(options: {
-  agentId?: string;
+  skillId?: string;
   claimedBy: string;
   timeoutMs?: number;
 }) {
   const db = getDb();
-  const timeoutMs = await resolveTimeoutMs(options.agentId, options.timeoutMs);
+  const timeoutMs = options.timeoutMs ?? DEFAULT_STALE_TIMEOUT_MS;
   const staleAt = new Date(Date.now() + timeoutMs).toISOString();
 
-  // Build the agent filter clause
-  const agentFilter = options.agentId
-    ? sql`AND agent_id = ${options.agentId}`
+  // Build the skill filter clause
+  const skillFilter = options.skillId
+    ? sql`AND skill_id = ${options.skillId}`
     : sql``;
 
   // Two-step atomic operation:
@@ -398,7 +325,7 @@ export async function claimTask(options: {
   const result = await db.execute<{
     id: string;
     request_id: string;
-    agent_id: string;
+    skill_id: string;
     description: string;
     done_criteria: string;
     status: TaskStatus;
@@ -417,7 +344,64 @@ export async function claimTask(options: {
         stale_at = ${staleAt}::timestamptz
     WHERE id = (
       SELECT id FROM task
-      WHERE status = 'pending' ${agentFilter}
+      WHERE status = 'pending' ${skillFilter}
+      ORDER BY created_at ASC
+      LIMIT 1
+      FOR UPDATE SKIP LOCKED
+    )
+    RETURNING *
+  `);
+
+  return result[0] ?? null;
+}
+
+/**
+ * Claim one pending task that belongs to a specific request. Used by the
+ * Worker Node after it has claimed a Request and wants to pick exactly one
+ * of that request's planned tasks. Distinct from claimTask, which selects
+ * across all requests and is used by older worker shapes.
+ */
+export async function claimTaskForRequest(options: {
+  requestId: string;
+  claimedBy: string;
+  timeoutMs?: number;
+}) {
+  const db = getDb();
+  const timeoutMs = options.timeoutMs ?? DEFAULT_STALE_TIMEOUT_MS;
+  const staleAt = new Date(Date.now() + timeoutMs).toISOString();
+
+  // Two-step atomic operation:
+  // 1. Reset any stale claimed tasks back to pending (same as claimTask).
+  // 2. Claim the oldest pending task scoped to this request.
+  await db.execute(sql`
+    UPDATE task
+    SET status = 'pending', claimed_by = NULL, claimed_at = NULL, stale_at = NULL
+    WHERE status = 'claimed' AND stale_at < now()
+  `);
+
+  const result = await db.execute<{
+    id: string;
+    request_id: string;
+    skill_id: string;
+    description: string;
+    done_criteria: string;
+    status: TaskStatus;
+    claimed_by: string | null;
+    result: unknown;
+    error: string | null;
+    created_at: Date;
+    claimed_at: Date | null;
+    stale_at: Date | null;
+    completed_at: Date | null;
+  }>(sql`
+    UPDATE task
+    SET status = 'claimed',
+        claimed_by = ${options.claimedBy},
+        claimed_at = now(),
+        stale_at = ${staleAt}::timestamptz
+    WHERE id = (
+      SELECT id FROM task
+      WHERE status = 'pending' AND request_id = ${options.requestId}
       ORDER BY created_at ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED
@@ -489,7 +473,7 @@ export async function getTask(id: string) {
 
 export async function listTasks(options?: {
   requestId?: string;
-  agentId?: string;
+  skillId?: string;
   status?: TaskStatus;
   limit?: number;
 }) {
@@ -498,8 +482,8 @@ export async function listTasks(options?: {
   if (options?.requestId) {
     conditions.push(eq(schema.tasks.requestId, options.requestId));
   }
-  if (options?.agentId) {
-    conditions.push(eq(schema.tasks.agentId, options.agentId));
+  if (options?.skillId) {
+    conditions.push(eq(schema.tasks.skillId, options.skillId));
   }
   if (options?.status) {
     conditions.push(eq(schema.tasks.status, options.status));

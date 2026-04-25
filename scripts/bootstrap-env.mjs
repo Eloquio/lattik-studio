@@ -62,9 +62,14 @@ writeFileSync(ENV_PATH, env);
 // scripts/bootstrap.sh. This step only lays down the API URL so the file
 // exists when the token-bootstrap step appends to it.
 if (!existsSync(AGENT_WORKER_ENV_PATH)) {
+  // Use plain http://localhost:3737 — Node's fetch under tsx has trouble
+  // trusting the portless self-signed cert on https://lattik-studio.dev,
+  // even with `--use-system-ca`. localhost is the same web dev server,
+  // just bypassing TLS. In-cluster workers use host.docker.internal:3737
+  // (set by lib/kube.ts when the pod manifest is generated).
   writeFileSync(
     AGENT_WORKER_ENV_PATH,
-    `TASK_API_URL=https://lattik-studio.dev\n`,
+    `TASK_API_URL=http://localhost:3737\n`,
   );
 }
 
