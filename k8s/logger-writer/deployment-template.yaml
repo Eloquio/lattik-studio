@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logger-writer-{{TABLE_NAME_SAFE}}
+  namespace: workloads
+  labels:
+    app: logger-writer
+    lattik.io/logger-table: "{{TABLE_NAME}}"
+spec:
+  # Replicas equal the topic partition count — the worker tool queries
+  # Kafka admin and substitutes that value when applying.
+  replicas: {{REPLICAS}}
+  selector:
+    matchLabels:
+      app: logger-writer
+      lattik.io/logger-table: "{{TABLE_NAME}}"
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: logger-writer
+        lattik.io/logger-table: "{{TABLE_NAME}}"
+    spec:
+      restartPolicy: Always
+      containers:
+        - name: writer
+          image: lattik/logger-writer:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: LOGGER_TABLE
+              value: "{{TABLE_NAME}}"
+            - name: KAFKA_BROKERS
+              value: "kafka.kafka:9092"
+            - name: SCHEMA_REGISTRY_URL
+              value: "http://sr.schema-registry:8081"
+            - name: ICEBERG_REST_URL
+              value: "http://iceberg-rest.iceberg:8181"
+            - name: S3_ENDPOINT
+              value: "http://minio.minio:9000"
+            - name: S3_ACCESS_KEY_ID
+              value: "lattik"
+            - name: S3_SECRET_ACCESS_KEY
+              value: "lattik-local"
+            - name: LATTIK_WAREHOUSE_PATH
+              value: "s3://warehouse"
+            - name: RUST_LOG
+              value: "info,logger_writer=debug,rdkafka=info"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

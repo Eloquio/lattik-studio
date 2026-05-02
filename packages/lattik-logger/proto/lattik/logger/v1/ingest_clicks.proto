@@ -1,0 +1,12 @@
+// Generated from Logger Table "ingest.clicks"
+// Do not edit — regenerate from the table definition.
+syntax = "proto3";
+
+package lattik.logger.v1;
+
+message IngestClicks {
+  // The ID of the user who performed the click.
+  optional int64 user_id = 1;
+  // The URL of the page that was clicked.
+  optional string page_url = 2;
+}

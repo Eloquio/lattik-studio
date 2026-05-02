@@ -1,0 +1,54 @@
+[package]
+name = "logger-writer"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Per-table Kafka -> Iceberg consumer for Lattik Logger Tables."
+
+[[bin]]
+name = "logger-writer"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime + ergonomics
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Kafka client (librdkafka-based)
+rdkafka = { version = "0.36", features = ["cmake-build", "ssl-vendored"] }
+
+# Schema Registry + Protobuf payload decoding (per-table schemas fetched at startup)
+schema_registry_converter = { version = "4", features = ["proto_decoder", "blocking"] }
+
+# Static envelope proto compiled with prost (lattik.logger.v1.Envelope)
+prost = "0.13"
+prost-types = "0.13"
+
+# Dynamic decode of per-table payloads using a descriptor fetched from SR.
+prost-reflect = "0.14"
+protobuf-parse = "3.7"
+protobuf = "3.7"
+tempfile = "3"
+urlencoding = "2"
+uuid = { version = "1", features = ["v7"] }
+
+# Iceberg + Arrow (write path: build RecordBatch, append via REST catalog)
+iceberg = "0.9"
+iceberg-catalog-rest = "0.9"
+iceberg-storage-opendal = "0.9"
+arrow = "57"
+arrow-array = "57"
+arrow-schema = "57"
+parquet = "57"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+# Time helpers for ds/hour partition derivation
+chrono = { version = "0.4", features = ["serde"] }
+
+[build-dependencies]
+prost-build = "0.13"

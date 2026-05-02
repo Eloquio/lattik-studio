@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package lattik.logger.v1;
+
+// The wire format for all logger events. The ingestion service
+// deserializes only this outer message to read `table` for Kafka
+// topic routing. The `payload` bytes are forwarded as-is and
+// deserialized downstream by the table-specific consumer.
+message Envelope {
+  // Fully qualified table name, e.g. "ingest.click_events".
+  string table = 1;
+  // UUID v4 for deduplication within the dedup window.
+  string event_id = 2;
+  // ISO 8601 timestamp of when the event occurred.
+  string event_timestamp = 3;
+  // Serialized table-specific payload (opaque to ingestion).
+  bytes payload = 4;
+}
