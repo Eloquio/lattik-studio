@@ -53,12 +53,12 @@ spec:
               cpu: "500m"
           readinessProbe:
             exec:
-              command: ["pg_isready", "-U", "lattik"]
+              command: ["pg_isready", "-U", "lattik", "-d", "lattik_studio"]
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             exec:
-              command: ["pg_isready", "-U", "lattik"]
+              command: ["pg_isready", "-U", "lattik", "-d", "lattik_studio"]
             initialDelaySeconds: 15
             periodSeconds: 20
           volumeMounts:

@@ -7,4 +7,9 @@ async function seed() {
   console.log(`Seeded dev admin user (${DEV_ADMIN_USER_ID}).`);
 }
 
-seed().catch(console.error);
+seed()
+  .then(() => process.exit(0))
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
