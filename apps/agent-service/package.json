@@ -1,0 +1,25 @@
+{
+  "name": "agent-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nitropack dev",
+    "build": "nitropack build",
+    "prepare": "nitropack prepare",
+    "preview": "node .output/server/index.mjs",
+    "typecheck": "nitropack prepare && tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/gateway": "^3.0.83",
+    "@eloquio/agent-harness": "workspace:*",
+    "ai": "^6.0.141",
+    "h3": "^1.15.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "nitropack": "^2.13.4",
+    "typescript": "^5"
+  }
+}
