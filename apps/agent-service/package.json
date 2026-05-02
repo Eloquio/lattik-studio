@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "agents:manifest": "node scripts/generate-agent-manifest.mjs",
+    "predev": "pnpm agents:manifest",
+    "prebuild": "pnpm agents:manifest",
+    "preprepare": "pnpm agents:manifest",
+    "pretypecheck": "pnpm agents:manifest",
     "dev": "nitropack dev",
     "build": "nitropack build",
     "prepare": "nitropack prepare",
