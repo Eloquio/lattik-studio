@@ -13,7 +13,6 @@
  * worker.last_seen_at server-side. Empty polls (204) still count.
  */
 
-import { getSkill } from "@eloquio/agent-harness";
 import { apiFetch } from "./runtime.js";
 import { buildPlannerAgent } from "./agents/planner.js";
 import { buildExecutorAgent } from "./agents/executor.js";

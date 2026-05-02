@@ -1,18 +1,15 @@
 /**
- * `buildAgent` — turn a loaded AGENT.md into a runnable ToolLoopAgent.
+ * Helpers for instantiating an agent from a loaded AGENT.md.
  *
- * Encapsulates the boilerplate that every chat-side `agent.ts` and worker
- * `planner.ts` writes today: substitute the body's template seams, resolve
- * the frontmatter's `base_tools` against a runtime-provided registry,
- * configure the gateway model + step cap, hand back a `ToolLoopAgent`.
- *
- * Consumers construct the tool registry themselves — tools have
- * runtime-bound closures (db handles, request ids, render-intent emitters)
- * that the harness has no business knowing about. The harness's only job
- * is to wire what's given.
+ * Consumers construct the `ToolLoopAgent` themselves — passing the tool
+ * literal directly to its constructor lets TypeScript bind the constructor's
+ * generic `TOOLS` parameter to the inferred record type. Wrapping the
+ * constructor in a non-generic factory forces TS to widen each tool's type
+ * to fit `ToolSet`'s union, which causes exponential type instantiation in
+ * the consumer (`tsc --noEmit` OOMs at 4 GB). Workaround: keep the
+ * substitution helper here, let the consumer call `new ToolLoopAgent`.
  */
 
-import { ToolLoopAgent, gateway, stepCountIs, type Tool } from "ai";
 import { type Agent } from "./agent-schema.js";
 
 /** Replace the deliberately-capped template seams in an AGENT.md body. */
@@ -29,66 +26,28 @@ export function renderInstructions(
 }
 
 /**
- * Resolve every name in `base_tools` against the provided registry. Throws
- * with the full list of unknowns and what was actually available — the
- * preflight equivalent of TS-level checking now that AGENT.md isn't typed.
+ * Verify that every name in `base_tools` is present in the provided tool
+ * name set. Throws listing any unknowns plus what was available.
+ *
+ * Takes just the **names** (not the actual ToolSet) deliberately: the
+ * caller's tool literal must be passed directly to `new ToolLoopAgent`
+ * without first being widened to `ToolSet` — that widening triggers
+ * exponential type instantiation (`tsc --noEmit` OOMs at 4 GB). Naming the
+ * tools redundantly here is the cheap workaround.
  */
-export function resolveBaseTools(
+export function assertBaseToolsResolve(
   agent: Agent,
-  tools: Record<string, Tool>,
-): Record<string, Tool> {
-  const resolved: Record<string, Tool> = {};
+  toolNames: ReadonlySet<string> | readonly string[],
+): void {
+  const names = toolNames instanceof Set ? toolNames : new Set(toolNames);
   const missing: string[] = [];
   for (const name of agent.frontmatter.base_tools) {
-    const t = tools[name];
-    if (t) {
-      resolved[name] = t;
-    } else {
-      missing.push(name);
-    }
+    if (!names.has(name)) missing.push(name);
   }
   if (missing.length > 0) {
-    const available = Object.keys(tools).sort().join(", ") || "(none)";
+    const available = [...names].sort().join(", ") || "(none)";
     throw new Error(
       `Agent "${agent.frontmatter.id}" references unknown tools: ${missing.join(", ")}. Available: ${available}`,
     );
   }
-  return resolved;
-}
-
-export interface BuildAgentOptions {
-  agent: Agent;
-  /**
-   * Tools the runtime has constructed for this agent invocation. Must be a
-   * superset of `agent.frontmatter.base_tools` — extras are ignored, missing
-   * ones throw at construction time.
-   */
-  tools: Record<string, Tool>;
-  /**
-   * Optional template substitutions for the body. Only `{{skills}}` and
-   * `{{resumeContext}}` are recognized — anything else stays literal.
-   */
-  templateVars?: { skills?: string; resumeContext?: string };
-}
-
-/**
- * Build a `ToolLoopAgent` from a loaded AGENT.md and a tool registry. The
- * agent's instructions are the substituted body, model + step cap come from
- * frontmatter, and tools are the resolved subset.
- */
-export function buildAgent(
-  opts: BuildAgentOptions,
-): ToolLoopAgent<never, Record<string, Tool>> {
-  const tools = resolveBaseTools(opts.agent, opts.tools);
-  const instructions = renderInstructions(
-    opts.agent.body,
-    opts.templateVars ?? {},
-  );
-  return new ToolLoopAgent({
-    id: opts.agent.frontmatter.id,
-    model: gateway(opts.agent.frontmatter.model),
-    instructions,
-    tools,
-    stopWhen: stepCountIs(opts.agent.frontmatter.max_steps),
-  });
 }

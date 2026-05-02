@@ -55,8 +55,6 @@ export {
 } from "./tools/list-skills.js";
 
 export {
-  buildAgent,
   renderInstructions,
-  resolveBaseTools,
-  type BuildAgentOptions,
+  assertBaseToolsResolve,
 } from "./build-agent.js";
