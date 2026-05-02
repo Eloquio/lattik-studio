@@ -20,6 +20,7 @@ Cross-cutting concepts and the data model. Read these to understand how the agen
 | [data-model.md](architecture/data-model.md) | Entities, dimensions, logger tables, lattik tables, metrics |
 | [agent-handoff.md](architecture/agent-handoff.md) | Assistant ↔ Specialist handoff protocol with depth-1 task stack |
 | [progressive-disclosure.md](architecture/progressive-disclosure.md) | Progressive-disclosure patterns used across the canvas UI |
+| [PLAN-multi-client-agent-service.md](architecture/PLAN-multi-client-agent-service.md) | Forward-looking plan: extract chat agents into a Nitro service for multi-client (web, Slack, …) reuse |
 
 ## canvas/
 
