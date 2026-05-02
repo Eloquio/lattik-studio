@@ -5,30 +5,35 @@
  * emits runs, then closes planning. Has no `loadSkill` tool — it cannot
  * execute work itself, only schedule it.
  *
- * Skill bodies aren't visible here; `list_skills` returns only frontmatter
- * (name, description, args, auto_approve). The Executor reads the body
- * later when it loads the skill to execute a run.
+ * The system prompt and frontmatter (model, step cap, base_tools) live in
+ * `PlannerAgent/AGENT.md`; this file wires the runtime-bound tools and
+ * passes them to `new ToolLoopAgent` directly. The literal must stay
+ * inline at the constructor call so the constructor's generic
+ * `TOOLS extends ToolSet` parameter binds without widening — assigning
+ * the literal to a `const` first triggers a `ToolSet` constraint check
+ * that explodes into exponential type instantiation (`tsc --noEmit` OOMs).
  */
 
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { ToolLoopAgent, gateway, stepCountIs } from "ai";
+import {
+  assertBaseToolsResolve,
+  getAgent,
+  renderInstructions,
+} from "@eloquio/agent-harness";
 import { listSkillsTool } from "../tools/list-skills.js";
 import { createEmitRunTool } from "../tools/emit-run.js";
 import { createFinishPlanningTool } from "../tools/finish-planning.js";
 
-const INSTRUCTIONS = `You are the Planner Agent on the Worker Node. You receive one Request at a time and decide which skills the Executor Agent should run for it.
+const AGENTS_DIR = dirname(fileURLToPath(import.meta.url));
+const PLANNER_DEF = getAgent("PlannerAgent", { agentsDir: AGENTS_DIR });
+const PLANNER_INSTRUCTIONS = renderInstructions(PLANNER_DEF.body, {});
 
-Process:
-1. Read the request description and context carefully.
-2. Call list_skills() to see what's available. Each skill has a name, description, and arg schema.
-3. For each part of the request that maps to a skill, call emit_run({ skill_id, description, done_criteria }).
-   - description: a short human-readable label for this run instance (e.g. "Register schema for table user_events")
-   - done_criteria: a verifiable description of what completion looks like for this instance
-4. When you've emitted all the runs needed, call finish_planning({ outcome: "completed" }).
-5. If no skill matches, call finish_planning({ outcome: "failed", reason: "..." }) with a clear explanation. Don't emit guesses.
-
-Be conservative — only emit runs for skills that clearly match. The user (or auto-approve) will gate execution; your job is to produce a faithful plan, not to maximize work.
-
-Always call finish_planning exactly once at the end, even if you emit zero runs.`;
+// Names-only preflight — confirms AGENT.md base_tools match the registered
+// names below without ever widening the typed tool literal.
+const REGISTERED_TOOL_NAMES = ["list_skills", "emit_run", "finish_planning"];
+assertBaseToolsResolve(PLANNER_DEF, REGISTERED_TOOL_NAMES);
 
 export interface PlannerContext {
   requestId: string;
@@ -36,14 +41,14 @@ export interface PlannerContext {
 
 export function buildPlannerAgent(ctx: PlannerContext) {
   return new ToolLoopAgent({
-    id: "PlannerAgent",
-    model: gateway("anthropic/claude-sonnet-4.6"),
-    instructions: INSTRUCTIONS,
+    id: PLANNER_DEF.frontmatter.id,
+    model: gateway(PLANNER_DEF.frontmatter.model),
+    instructions: PLANNER_INSTRUCTIONS,
     tools: {
       list_skills: listSkillsTool,
       emit_run: createEmitRunTool({ requestId: ctx.requestId }),
       finish_planning: createFinishPlanningTool({ requestId: ctx.requestId }),
     },
-    stopWhen: stepCountIs(20),
+    stopWhen: stepCountIs(PLANNER_DEF.frontmatter.max_steps),
   });
 }

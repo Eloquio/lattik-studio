@@ -1,14 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { tool, zodSchema, type Tool } from "ai";
-import { z } from "zod";
 import {
   renderInstructions,
-  resolveBaseTools,
-  buildAgent,
+  assertBaseToolsResolve,
 } from "../src/build-agent.js";
 import type { Agent } from "../src/agent-schema.js";
 
-function makeAgent(overrides: Partial<Agent["frontmatter"]> = {}, body = "Body"): Agent {
+function makeAgent(
+  overrides: Partial<Agent["frontmatter"]> = {},
+  body = "Body",
+): Agent {
   return {
     frontmatter: {
       id: "PipelineManager",
@@ -22,14 +22,6 @@ function makeAgent(overrides: Partial<Agent["frontmatter"]> = {}, body = "Body")
     body,
     path: "/tmp/AGENT.md",
   };
-}
-
-function makeTool(name: string): Tool {
-  return tool({
-    description: `${name} tool`,
-    inputSchema: zodSchema(z.object({})),
-    execute: async () => ({ ok: true }),
-  });
 }
 
 describe("renderInstructions", () => {
@@ -63,40 +55,30 @@ describe("renderInstructions", () => {
   });
 });
 
-describe("resolveBaseTools", () => {
-  it("returns the subset named in base_tools", () => {
+describe("assertBaseToolsResolve", () => {
+  it("returns silently when every base_tool is in the name set", () => {
     const agent = makeAgent({ base_tools: ["alpha", "beta"] });
-    const registry = { alpha: makeTool("alpha"), beta: makeTool("beta"), extra: makeTool("extra") };
-    const resolved = resolveBaseTools(agent, registry);
-    expect(Object.keys(resolved).sort()).toEqual(["alpha", "beta"]);
+    expect(() =>
+      assertBaseToolsResolve(agent, ["alpha", "beta", "extra"]),
+    ).not.toThrow();
+  });
+
+  it("accepts a ReadonlySet as well as an array", () => {
+    const agent = makeAgent({ base_tools: ["alpha"] });
+    expect(() =>
+      assertBaseToolsResolve(agent, new Set(["alpha", "beta"])),
+    ).not.toThrow();
   });
 
   it("throws listing every unknown name and what was available", () => {
     const agent = makeAgent({ base_tools: ["alpha", "beta", "gamma"] });
-    const registry = { alpha: makeTool("alpha") };
-    expect(() => resolveBaseTools(agent, registry)).toThrow(
-      /unknown tools: beta, gamma\. Available: alpha/,
-    );
-  });
-});
-
-describe("buildAgent", () => {
-  it("produces a ToolLoopAgent with the agent's id, model, and step cap", () => {
-    const agent = makeAgent({ max_steps: 7 });
-    const built = buildAgent({
-      agent,
-      tools: { alpha: makeTool("alpha") },
-    });
-    // Smoke-test the wrapper — id and the shape of the return value. We
-    // can't easily exercise generate() without a real provider, but
-    // construction failures (unknown tool, bad model id format) would
-    // throw here.
-    expect(built).toBeDefined();
-    expect((built as unknown as { id: string }).id).toBe("PipelineManager");
+    expect(() =>
+      assertBaseToolsResolve(agent, ["alpha"]),
+    ).toThrow(/unknown tools: beta, gamma\. Available: alpha/);
   });
 
-  it("propagates resolveBaseTools errors", () => {
-    const agent = makeAgent({ base_tools: ["missing"] });
-    expect(() => buildAgent({ agent, tools: {} })).toThrow(/unknown tools: missing/);
+  it("includes the agent id in the error message", () => {
+    const agent = makeAgent({ id: "DataAnalyst", base_tools: ["missing"] });
+    expect(() => assertBaseToolsResolve(agent, [])).toThrow(/Agent "DataAnalyst"/);
   });
 });
