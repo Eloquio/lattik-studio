@@ -4,12 +4,14 @@ import { getDb } from "@/db";
 import * as schema from "@/db/schema";
 import { createRequest } from "@/lib/run-queue";
 
-type MergedDefinition = {
+const WORKFLOW_SKILL_ID = "post-pipeline-pr-merge";
+
+interface MergedDefinition {
   id: string;
   kind: string;
   name: string;
   spec: unknown;
-};
+}
 
 /** Max webhook payload: 1MB */
 const MAX_PAYLOAD_SIZE = 1_048_576;
@@ -162,29 +164,42 @@ export async function POST(req: Request) {
       }))
     );
 
-    // Always insert a `pending` request; the worker's Planner Agent picks
-    // it up and emits tasks. The previous deterministic-recipe path went
-    // away with the YAML skill loader — once skills + the Planner Agent
-    // land, deterministic fan-out comes back as a TS dispatcher that
-    // emits tasks pointing at runbook skills directly.
+    // Webhook fan-out: register one request + one run pointing at the
+    // `post-pipeline-pr-merge` workflow skill. The Executor Agent reads
+    // the merged definitions from args and branches per kind in its
+    // runbook. The request lands at `approved` and the run at `pending`
+    // in one transaction so the Executor picks it up directly — no LLM
+    // Planner hop.
     const mergedDefs: MergedDefinition[] = toMerge.map((d) => ({
       id: d.id,
       kind: d.kind,
       name: d.name,
       spec: d.spec,
     }));
+
     const context = {
       prUrl,
       definitions: mergedDefs,
       receivedAt: receivedAt.toISOString(),
     };
 
-    const request = await createRequest(
-      "webhook",
-      `PR merged: ${prUrl}`,
-      context,
-    );
-    requestId = request.id;
+    requestId = await db.transaction(async (tx) => {
+      const request = await createRequest(
+        "webhook",
+        `PR merged: ${prUrl}`,
+        context,
+        { status: "approved", skillId: WORKFLOW_SKILL_ID, client: tx },
+      );
+      await tx.insert(schema.runs).values({
+        requestId: request.id,
+        skillId: WORKFLOW_SKILL_ID,
+        description: `Post-merge actions for ${prUrl}`,
+        doneCriteria: "All matched per-kind actions completed for the merged definitions.",
+        args: { pr_url: prUrl, definitions: mergedDefs },
+        status: "pending" as const,
+      });
+      return request.id;
+    });
   }
 
   return Response.json({
