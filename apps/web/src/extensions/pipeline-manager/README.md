@@ -1,6 +1,11 @@
 # Pipeline Manager Agent
 
-The Pipeline Manager is a specialist agent in Lattik Studio that monitors, triggers, and troubleshoots the Airflow DAGs generated from merged Lattik Table definitions. It picks up where the Data Architect leaves off: the architect defines pipelines, the manager operates them.
+The Pipeline Manager is the **data-ecosystem reliability specialist** in Lattik Studio. It monitors, troubleshoots, and operates the two surfaces that move data through the platform:
+
+- **Logger Tables** — event ingestion through Kafka into Iceberg, written by the logger-writer pipeline.
+- **Airflow DAGs** — materialization of Lattik Tables on top of Logger Tables (and on top of other Lattik Tables).
+
+It picks up where the Data Architect leaves off: the architect defines what the data ecosystem looks like, the manager keeps it running.
 
 ## Architecture
 
@@ -11,11 +16,13 @@ User ←→ Chat ←→ Agent (Claude Sonnet 4.6) ←→ Tools ←→ Canvas / A
 The agent is a `ToolLoopAgent` (Vercel AI SDK v6) with a max of 10 tool steps per turn. It loads a skill markdown doc via `getSkill` before starting work — the skill is the source of truth for the workflow, not memory.
 
 ### Key Behavior
-- **Skill-driven:** Every workflow starts with `getSkill`. Three skills today: `monitoring-dags`, `triggering-runs`, `troubleshooting-failures`.
-- **Canvas-first:** On any monitoring or overview request, the first tool call after `getSkill` is `renderDagOverview`. Detail views go through `renderDagRunDetail`. The canvas IS the starting point — no clarifying questions before rendering.
+- **Skill-driven:** Every workflow starts with `getSkill`. Three DAG skills ship today: `monitoring-dags`, `triggering-runs`, `troubleshooting-failures`. Logger Table skills are the next deliverable.
+- **Canvas-first (DAG side):** On any DAG monitoring or overview request, the first tool call after `getSkill` is `renderDagOverview`. Detail views go through `renderDagRunDetail`. The canvas IS the starting point — no clarifying questions before rendering.
 - **Render-tool-only:** No `spec` code fences or raw JSONL patches. All canvas rendering goes through the dedicated render tools.
-- **Lattik-only scope:** Only DAGs tagged `lattik` are in scope. Unrelated DAGs that share the cluster are out of scope.
-- **Read + control, not edit:** The agent can trigger runs, retry tasks, pause/unpause schedules — but it does NOT modify DAG structure. Definition changes go back through the Data Architect.
+- **Lattik-only scope:** Only Lattik-managed surfaces are in scope — DAGs tagged `lattik` and Logger Tables registered through the platform. Unrelated DAGs or external data systems are out of scope.
+- **Read + control, not edit:** The agent can trigger runs, retry tasks, pause/unpause schedules — but it does NOT modify DAG structure or Logger Table definitions. Definition changes go back through the Data Architect.
+
+> **Status:** The agent's identity and prompt cover both Logger Tables and Airflow DAGs, but the **tools, skills, and canvas components for Logger Table monitoring are not yet implemented** — only the DAG side ships today. See [`docs/extensions/pipeline-manager.md`](../../../../../docs/extensions/pipeline-manager.md) for the planned shape.
 
 ## Tools
 

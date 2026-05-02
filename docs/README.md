@@ -37,7 +37,7 @@ Per-extension architecture and workflows. Each extension also has a `README.md` 
 | Doc | Description |
 |-----|-------------|
 | [data-analyst.md](extensions/data-analyst.md) | Data Analyst — SQL exploration + charts |
-| [pipeline-manager.md](extensions/pipeline-manager.md) | Pipeline Manager — Airflow DAG monitoring + troubleshooting |
+| [pipeline-manager.md](extensions/pipeline-manager.md) | Pipeline Manager — data ecosystem reliability (Logger Tables + Airflow DAGs) |
 
 ## infra/
 
