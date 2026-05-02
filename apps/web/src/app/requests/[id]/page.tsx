@@ -11,5 +11,5 @@ export default async function RequestDetailPage({
   const detail = await getRequestDetail(id);
   if (!detail) notFound();
 
-  return <RequestDetail request={detail.request} tasks={detail.tasks} />;
+  return <RequestDetail request={detail.request} runs={detail.runs} />;
 }

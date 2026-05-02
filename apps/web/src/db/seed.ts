@@ -1,15 +1,10 @@
-/**
- * Database seed.
- *
- * Currently a no-op. The previous first-party agent seeding went away with
- * the agent table — chat specialists are now registered in code under
- * `apps/web/src/extensions/`, and the worker side dispatches Planner /
- * Executor agents that load skills from `apps/web/src/skills/`. Re-add seed
- * data here if/when something durable needs it.
- */
+import { getDb } from "./index";
+import { upsertDevAdmin, DEV_ADMIN_USER_ID } from "./dev-user";
 
 async function seed() {
-  console.log("Nothing to seed.");
+  const db = getDb();
+  await upsertDevAdmin(db);
+  console.log(`Seeded dev admin user (${DEV_ADMIN_USER_ID}).`);
 }
 
 seed().catch(console.error);

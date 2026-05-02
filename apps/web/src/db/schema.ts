@@ -323,16 +323,16 @@ export const requests = pgTable(
   ]
 );
 
-export type TaskStatus = "draft" | "pending" | "claimed" | "done" | "failed";
+export type RunStatus = "draft" | "pending" | "claimed" | "done" | "failed";
 
 /**
- * Units of work emitted by the Planner Agent. Each task carries a `skill_id`
- * pointing at a runbook the Executor Agent loads when it claims the task,
- * plus verifiable done criteria. Tasks start as "draft" until the human
- * approves the request's plan (or "pending" directly when auto_approve).
+ * Units of work emitted by a Request. Each run carries a `skill_id` pointing
+ * at a runbook the Executor Agent loads when it claims the run, plus
+ * verifiable done criteria. Runs start as "draft" until the human approves
+ * the request's plan (or "pending" directly when auto_approve).
  */
-export const tasks = pgTable(
-  "task",
+export const runs = pgTable(
+  "run",
   {
     id: text("id")
       .primaryKey()
@@ -343,20 +343,67 @@ export const tasks = pgTable(
     skillId: text("skill_id").notNull(),
     description: text("description").notNull(),
     doneCriteria: text("done_criteria").notNull(),
-    status: text("status").$type<TaskStatus>().notNull().default("draft"),
+    status: text("status").$type<RunStatus>().notNull().default("draft"),
+    args: jsonb("args").$type<Record<string, unknown>>(),
     claimedBy: text("claimed_by"),
     result: jsonb("result").$type<unknown>(),
     error: text("error"),
+    // Per-run metrics (filled by the worker on completion). Aggregated from
+    // the step-event stream so per-run summaries are queryable without
+    // scanning every step row.
+    model: text("model"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    toolCallCount: integer("tool_call_count"),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
     claimedAt: timestamp("claimed_at", { mode: "date" }),
     staleAt: timestamp("stale_at", { mode: "date", withTimezone: true }),
     completedAt: timestamp("completed_at", { mode: "date" }),
   },
   (t) => [
-    index("idx_tasks_status").on(t.status),
-    index("idx_tasks_skill_status").on(t.skillId, t.status),
-    index("idx_tasks_stale_at").on(t.staleAt),
-    index("idx_tasks_request_id").on(t.requestId),
+    index("idx_runs_status").on(t.status),
+    index("idx_runs_skill_status").on(t.skillId, t.status),
+    index("idx_runs_stale_at").on(t.staleAt),
+    index("idx_runs_request_id").on(t.requestId),
+  ]
+);
+
+export type StepKind =
+  | "text"
+  | "reasoning"
+  | "tool_call"
+  | "tool_result"
+  | "finish"
+  | "error";
+
+/**
+ * Per-step events captured from the Executor Agent's LLM iterations.
+ * Each `onStepFinish` (one per LLM call) writes one or more rows here:
+ *   - one `text` / `reasoning` row per emitted block,
+ *   - one `tool_call` row per tool invocation,
+ *   - one `tool_result` row per tool result,
+ *   - finally a `finish` row carrying the step's usage and finishReason.
+ *
+ * Sequence is monotonic per run, assigned by the worker. Used for the
+ * flowchart UI in the run detail and for SSE live-streaming.
+ */
+export const steps = pgTable(
+  "run_step",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    runId: text("run_id")
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" }),
+    sequence: integer("sequence").notNull(),
+    kind: text("kind").$type<StepKind>().notNull(),
+    payload: jsonb("payload").$type<unknown>(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("idx_run_step_run_seq").on(t.runId, t.sequence),
+    unique("uq_run_step_run_seq").on(t.runId, t.sequence),
   ]
 );
 

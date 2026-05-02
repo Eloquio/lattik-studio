@@ -1,19 +1,19 @@
 /**
- * Worker Node main loop — Planner + Executor branches (Phase C.3).
+ * Worker Node main loop — Planner + Executor branches.
  *
  * Each tick:
  *   1. Try claimRequest (pending → planning). If got one → run Planner.
- *   2. Otherwise try claimTask (any pending task globally). If got one → run Executor.
+ *   2. Otherwise try claimRun (any pending run globally). If got one → run Executor.
  *   3. Sleep, repeat.
  *
- * The plan's "one Request per worker" rule was relaxed for the Executor
- * branch — workers claim tasks globally rather than locking parent requests,
- * which lets multiple workers parallelize across an approved request's tasks.
+ * Workers claim runs globally rather than locking parent requests, which lets
+ * multiple workers parallelize across an approved request's runs.
  *
  * Heartbeat: every poll touches an authenticated endpoint, which updates
  * worker.last_seen_at server-side. Empty polls (204) still count.
  */
 
+import { getSkill } from "@eloquio/lattik-skills";
 import { apiFetch } from "./runtime.js";
 import { buildPlannerAgent } from "./agents/planner.js";
 import { buildExecutorAgent } from "./agents/executor.js";
@@ -37,13 +37,14 @@ interface ClaimedRequest {
   updated_at: string;
 }
 
-interface ClaimedTask {
+interface ClaimedRun {
   id: string;
   request_id: string;
   skill_id: string;
   description: string;
   done_criteria: string;
   status: string;
+  args: Record<string, unknown> | null;
   claimed_by: string | null;
   result: unknown;
   error: string | null;
@@ -54,14 +55,14 @@ interface ClaimedTask {
 }
 
 async function claimRequest(): Promise<ClaimedRequest | null> {
-  return apiFetch<ClaimedRequest | null>("/api/tasks/requests/claim", {
+  return apiFetch<ClaimedRequest | null>("/api/runs/requests/claim", {
     method: "POST",
     body: {},
   });
 }
 
-async function claimAnyTask(): Promise<ClaimedTask | null> {
-  return apiFetch<ClaimedTask | null>("/api/tasks/claim", {
+async function claimAnyRun(): Promise<ClaimedRun | null> {
+  return apiFetch<ClaimedRun | null>("/api/runs/claim", {
     method: "POST",
     body: {},
   });
@@ -69,7 +70,7 @@ async function claimAnyTask(): Promise<ClaimedTask | null> {
 
 async function failRequest(id: string, reason: string): Promise<void> {
   try {
-    await apiFetch(`/api/tasks/requests/${id}/fail`, {
+    await apiFetch(`/api/runs/requests/${id}/fail`, {
       method: "POST",
       body: { error: reason },
     });
@@ -79,15 +80,92 @@ async function failRequest(id: string, reason: string): Promise<void> {
   }
 }
 
-async function failTask(id: string, error: string): Promise<void> {
+interface StepEvent {
+  kind: "text" | "reasoning" | "tool_call" | "tool_result" | "finish" | "error";
+  payload?: unknown;
+}
+
+async function postStepEvents(runId: string, events: StepEvent[]): Promise<void> {
+  if (events.length === 0) return;
   try {
-    await apiFetch(`/api/tasks/${id}/fail`, {
+    await apiFetch(`/api/runs/${runId}/steps`, {
+      method: "POST",
+      body: { events },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[executor] could not post steps for run ${runId}: ${msg}`);
+  }
+}
+
+async function postRunMetrics(
+  runId: string,
+  metrics: {
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+    toolCallCount: number;
+  },
+): Promise<void> {
+  try {
+    await apiFetch(`/api/runs/${runId}/metrics`, {
+      method: "POST",
+      body: {
+        model: metrics.model,
+        input_tokens: metrics.inputTokens,
+        output_tokens: metrics.outputTokens,
+        tool_call_count: metrics.toolCallCount,
+      },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[executor] could not post metrics for run ${runId}: ${msg}`);
+  }
+}
+
+// Convert a single AI-SDK step into 1+ persisted step events. Each text /
+// reasoning block + tool call + tool result becomes its own row so the UI
+// flowchart can render them as separate nodes.
+function explodeStep(step: { content?: unknown[]; toolCalls?: unknown[]; toolResults?: unknown[]; finishReason?: string; usage?: unknown }): StepEvent[] {
+  const events: StepEvent[] = [];
+  for (const block of step.content ?? []) {
+    const b = block as { type?: string; text?: string; reasoning?: string };
+    if (b.type === "text" && b.text) {
+      events.push({ kind: "text", payload: { text: b.text } });
+    } else if (b.type === "reasoning" && b.reasoning) {
+      events.push({ kind: "reasoning", payload: { text: b.reasoning } });
+    }
+  }
+  for (const call of step.toolCalls ?? []) {
+    const c = call as { toolCallId?: string; toolName?: string; input?: unknown };
+    events.push({
+      kind: "tool_call",
+      payload: { toolCallId: c.toolCallId, toolName: c.toolName, input: c.input },
+    });
+  }
+  for (const res of step.toolResults ?? []) {
+    const r = res as { toolCallId?: string; toolName?: string; output?: unknown };
+    events.push({
+      kind: "tool_result",
+      payload: { toolCallId: r.toolCallId, toolName: r.toolName, output: r.output },
+    });
+  }
+  events.push({
+    kind: "finish",
+    payload: { finishReason: step.finishReason, usage: step.usage },
+  });
+  return events;
+}
+
+async function failRun(id: string, error: string): Promise<void> {
+  try {
+    await apiFetch(`/api/runs/${id}/fail`, {
       method: "POST",
       body: { error },
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[executor] could not mark task ${id} failed: ${msg}`);
+    console.error(`[executor] could not mark run ${id} failed: ${msg}`);
   }
 }
 
@@ -125,34 +203,42 @@ async function runPlannerFor(request: ClaimedRequest): Promise<void> {
   }
 }
 
-async function runExecutorFor(task: ClaimedTask): Promise<void> {
+async function runExecutorFor(run: ClaimedRun): Promise<void> {
   console.log(
-    `[executor] claimed task ${task.id} (skill: ${task.skill_id})`,
+    `[executor] claimed run ${run.id} (skill: ${run.skill_id})`,
   );
+
   let built;
   try {
     built = buildExecutorAgent({
-      taskId: task.id,
-      skillId: task.skill_id,
-      description: task.description,
-      doneCriteria: task.done_criteria,
+      runId: run.id,
+      skillId: run.skill_id,
+      description: run.description,
+      doneCriteria: run.done_criteria,
+      args: run.args,
+      onStep: async (step) => {
+        await postStepEvents(run.id, explodeStep(step));
+      },
+      onFinish: async (_event, metrics) => {
+        await postRunMetrics(run.id, metrics);
+      },
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[executor] task ${task.id} build failed: ${msg}`);
-    await failTask(task.id, `build failed: ${msg}`);
+    console.error(`[executor] run ${run.id} build failed: ${msg}`);
+    await failRun(run.id, `build failed: ${msg}`);
     return;
   }
 
   try {
     const result = await runAgent(built.agent, { prompt: built.prompt });
     console.log(
-      `[executor] task ${task.id} ran in ${result.steps} steps (finish: ${result.finishReason})`,
+      `[executor] run ${run.id} ran in ${result.steps} steps (finish: ${result.finishReason}, model: ${built.model})`,
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[executor] task ${task.id} crashed: ${msg}`);
-    await failTask(task.id, `executor crashed: ${msg}`);
+    console.error(`[executor] run ${run.id} crashed: ${msg}`);
+    await failRun(run.id, `executor crashed: ${msg}`);
   }
 }
 
@@ -162,9 +248,9 @@ async function pollOnce() {
     await runPlannerFor(request);
     return;
   }
-  const task = await claimAnyTask();
-  if (task) {
-    await runExecutorFor(task);
+  const run = await claimAnyRun();
+  if (run) {
+    await runExecutorFor(run);
   }
 }
 

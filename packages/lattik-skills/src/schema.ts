@@ -54,6 +54,13 @@ export const skillFrontmatterSchema = z.object({
   args: z.record(z.string(), skillArgSchema).optional().default({}),
   done: z.array(doneCheckSchema).optional().default([]),
   auto_approve: z.boolean().optional().default(false),
+  /**
+   * Gateway-style model id used by the Executor Agent for this skill.
+   * Cheap default — these runbooks tend to be step-following, not open-ended
+   * reasoning. Override to Sonnet (or larger) for skills that genuinely
+   * need more judgment.
+   */
+  model: z.string().min(1).optional().default("anthropic/claude-haiku-4.5"),
   when: z
     .object({
       triggers: z.array(z.string()).optional().default([]),

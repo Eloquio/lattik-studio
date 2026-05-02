@@ -18,7 +18,7 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "./index";
 import * as schema from "./schema";
-import { createRequest } from "../lib/task-queue";
+import { createRequest } from "../lib/run-queue";
 
 const POLL_INTERVAL_MS = 2_000;
 const TIMEOUT_MS = 90_000;
@@ -91,7 +91,7 @@ async function main(): Promise<void> {
 
   const tasks = await db
     .select()
-    .from(schema.tasks)
+    .from(schema.runs)
     .where(sql`request_id = ${req.id}`);
   assert(tasks.length > 0, `planner emitted at least one task (got ${tasks.length})`);
   const taskSkillIds = Array.from(new Set(tasks.map((t) => t.skillId)));
@@ -104,8 +104,8 @@ async function main(): Promise<void> {
   await pollUntil(
     async () => {
       const rows = await db
-        .select({ status: schema.tasks.status })
-        .from(schema.tasks)
+        .select({ status: schema.runs.status })
+        .from(schema.runs)
         .where(sql`request_id = ${req.id}`);
       return rows;
     },
@@ -115,7 +115,7 @@ async function main(): Promise<void> {
 
   const finalTasks = await db
     .select()
-    .from(schema.tasks)
+    .from(schema.runs)
     .where(sql`request_id = ${req.id}`);
   for (const t of finalTasks) {
     assert(

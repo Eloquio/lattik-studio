@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { claimTask, resetStaleRequests } from "@/lib/task-queue";
+import { claimRun, resetStaleRequests } from "@/lib/run-queue";
 
 /**
  * Cron-triggered cleanup. Runs every minute.
@@ -29,10 +29,10 @@ export async function GET(req: Request) {
   // Release requests whose planning-claim has expired.
   const staleRequestsReleased = await resetStaleRequests();
 
-  // Trigger task-level stale-reset. claimTask runs the reset SQL on every
+  // Trigger task-level stale-reset. claimRun runs the reset SQL on every
   // call; passing a no-op claimer is the cheapest way to invoke it without
   // taking on a real task.
-  await claimTask({ claimedBy: "cron-stale-reset" });
+  await claimRun({ claimedBy: "cron-stale-reset" });
 
   return Response.json({ status: "ok", staleRequestsReleased });
 }

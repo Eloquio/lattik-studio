@@ -1,5 +1,5 @@
 /**
- * Shared zod helpers for task queue + lattik API route handlers.
+ * Shared zod helpers for run queue + lattik API route handlers.
  *
  * `parseJsonBody` does the two things every route needs: read JSON from the
  * Request (returning a 400 if the body isn't valid JSON), and validate it
@@ -12,7 +12,7 @@ import { z } from "zod";
 
 export const MAX_LIMIT = 500;
 
-export const taskStatusSchema = z.enum([
+export const runStatusSchema = z.enum([
   "draft",
   "pending",
   "claimed",

@@ -36,11 +36,11 @@ export async function getRequestDetail(id: string) {
 
   if (!request) return null;
 
-  const tasks = await db
+  const runs = await db
     .select()
-    .from(schema.tasks)
-    .where(eq(schema.tasks.requestId, id))
-    .orderBy(asc(schema.tasks.createdAt));
+    .from(schema.runs)
+    .where(eq(schema.runs.requestId, id))
+    .orderBy(asc(schema.runs.createdAt));
 
-  return { request, tasks };
+  return { request, runs };
 }

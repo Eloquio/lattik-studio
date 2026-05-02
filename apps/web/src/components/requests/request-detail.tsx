@@ -1,27 +1,16 @@
 import { Bot, User } from "lucide-react";
-import type {
-  RequestStatus,
-  TaskStatus,
-  requests,
-  tasks,
-} from "@/db/schema";
+import type { RequestStatus, requests, runs } from "@/db/schema";
+import { CollapsibleContext } from "./collapsible-context";
+import { RunCard } from "./run-card";
 
 type RequestRow = typeof requests.$inferSelect;
-type TaskRow = typeof tasks.$inferSelect;
+type RunRow = typeof runs.$inferSelect;
 
 const STATUS_COLOR: Record<RequestStatus, string> = {
   pending: "bg-white/10 text-white/60",
   planning: "bg-sky-400/15 text-sky-300",
   awaiting_approval: "bg-amber-400/15 text-amber-300",
   approved: "bg-emerald-400/10 text-emerald-300/80",
-  done: "bg-emerald-500/15 text-emerald-300",
-  failed: "bg-red-500/15 text-red-300",
-};
-
-const TASK_STATUS_COLOR: Record<TaskStatus, string> = {
-  draft: "bg-white/5 text-white/50",
-  pending: "bg-white/10 text-white/60",
-  claimed: "bg-sky-400/15 text-sky-300",
   done: "bg-emerald-500/15 text-emerald-300",
   failed: "bg-red-500/15 text-red-300",
 };
@@ -33,10 +22,10 @@ function formatDateTime(date: Date | string | null | undefined) {
 
 export function RequestDetail({
   request,
-  tasks,
+  runs,
 }: {
   request: RequestRow;
-  tasks: TaskRow[];
+  runs: RunRow[];
 }) {
   const SourceIcon = request.source === "webhook" ? Bot : User;
   const messages = (request.messages ?? []) as {
@@ -44,6 +33,15 @@ export function RequestDetail({
     content: string;
     timestamp: string;
   }[];
+
+  const totalIn = runs.reduce((n, r) => n + (r.inputTokens ?? 0), 0);
+  const totalOut = runs.reduce((n, r) => n + (r.outputTokens ?? 0), 0);
+  const totalTools = runs.reduce((n, r) => n + (r.toolCallCount ?? 0), 0);
+  const runsLabel = runs.length === 0
+    ? "Runs (0)"
+    : totalIn + totalOut === 0
+    ? `Runs (${runs.length})`
+    : `Runs (${runs.length}) · ${totalIn.toLocaleString()} in / ${totalOut.toLocaleString()} out tokens${totalTools > 0 ? ` · ${totalTools} tool ${totalTools === 1 ? "call" : "calls"}` : ""}`;
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
@@ -72,79 +70,61 @@ export function RequestDetail({
           </Section>
 
           {request.context !== null && request.context !== undefined && (
-            <Section title="Context">
-              <pre className="overflow-x-auto rounded-md border border-white/10 bg-black/30 p-3 text-[11px] text-white/70">
-                {JSON.stringify(request.context, null, 2)}
-              </pre>
-            </Section>
+            <CollapsibleContext context={request.context} />
           )}
 
-          <Section title={`Tasks (${tasks.length})`}>
-            {tasks.length === 0 ? (
-              <p className="text-xs text-white/40">No tasks created yet.</p>
+          <Section title={runsLabel}>
+            {runs.length === 0 ? (
+              <p className="text-xs text-white/40">No runs created yet.</p>
             ) : (
               <div className="flex flex-col gap-2">
-                {tasks.map((task) => (
-                  <div
-                    key={task.id}
-                    className="rounded-md border border-white/10 bg-white/[0.02] p-3"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="flex-1 truncate text-xs text-white/80">
-                        {task.description}
-                      </span>
-                      <span className="text-[10px] text-white/40">
-                        {task.skillId}
-                      </span>
-                      <span
-                        className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${TASK_STATUS_COLOR[task.status]}`}
-                      >
-                        {task.status}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-[11px] text-white/50">
-                      Done when: {task.doneCriteria}
-                    </p>
-                    {task.error && (
-                      <p className="mt-1 text-[11px] text-red-300/80">
-                        {task.error}
-                      </p>
-                    )}
-                  </div>
+                {runs.map((run) => (
+                  <RunCard key={run.id} run={run} />
                 ))}
               </div>
             )}
           </Section>
 
-          <Section title={`Conversation (${messages.length})`}>
+          <Section title={`Activity (${messages.length})`}>
             {messages.length === 0 ? (
-              <p className="text-xs text-white/40">No messages yet.</p>
+              <p className="text-xs text-white/40">No activity yet.</p>
             ) : (
               <div className="flex flex-col gap-2">
-                {messages.map((msg, idx) => (
-                  <div
-                    key={idx}
-                    className="rounded-md border border-white/10 bg-white/[0.02] p-3"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`text-[10px] font-medium uppercase tracking-wider ${
-                          msg.role === "planner"
-                            ? "text-[#e0a96e]"
-                            : "text-sky-300"
-                        }`}
-                      >
-                        {msg.role}
-                      </span>
-                      <span className="text-[10px] text-white/30">
-                        {formatDateTime(msg.timestamp)}
-                      </span>
+                {messages.map((msg, idx) => {
+                  const isSystem = msg.role === "planner";
+                  const label = isSystem ? "System" : "You";
+                  const isError = isSystem && msg.content.startsWith("Error:");
+                  return (
+                    <div
+                      key={idx}
+                      className={`rounded-md border p-3 ${
+                        isError
+                          ? "border-red-400/30 bg-red-500/5"
+                          : "border-white/10 bg-white/[0.02]"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`text-[10px] font-medium uppercase tracking-wider ${
+                            isError
+                              ? "text-red-300"
+                              : isSystem
+                              ? "text-white/50"
+                              : "text-sky-300"
+                          }`}
+                        >
+                          {label}
+                        </span>
+                        <span className="text-[10px] text-white/30">
+                          {formatDateTime(msg.timestamp)}
+                        </span>
+                      </div>
+                      <p className="mt-1 whitespace-pre-wrap text-xs text-white/80">
+                        {msg.content}
+                      </p>
                     </div>
-                    <p className="mt-1 whitespace-pre-wrap text-xs text-white/80">
-                      {msg.content}
-                    </p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </Section>

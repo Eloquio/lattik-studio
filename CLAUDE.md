@@ -82,11 +82,15 @@ packages/              Shared packages
 # Start portless proxy with .dev TLD (required for Google OAuth)
 portless proxy start --tld dev
 
-# Full setup — bootstrap + services + dev server
+# First-time setup (or after `pnpm dev:down`): bootstrap, then start.
+# `dev:up` does NOT run bootstrap — run it explicitly first.
+pnpm dev:bootstrap   # Preflight + .env + cluster + Postgres + schema + seed + worker creds
+pnpm dev:up          # Background services (`dev:services`) + dev server (`dev:web`)
+
+# Day-to-day, when the cluster is already bootstrapped:
 pnpm dev:up
 
-# Or run steps separately:
-pnpm dev:bootstrap   # Preflight + .env + cluster + Postgres + schema + seed
+# Run service infra without the dev server:
 pnpm dev:services    # Build images, start Gitea, Trino, Kafka, Spark, Airflow
 
 # Build

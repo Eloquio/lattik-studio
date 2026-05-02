@@ -55,6 +55,29 @@ export async function listWorkers(): Promise<WorkerSummary[]> {
   return listWorkersCore();
 }
 
+export async function getWorker(id: string): Promise<WorkerSummary | null> {
+  await requireUser();
+  const db = getDb();
+  const [row] = await db
+    .select({
+      id: schema.workers.id,
+      name: schema.workers.name,
+      mode: schema.workers.mode,
+      lastSeenAt: schema.workers.lastSeenAt,
+      createdAt: schema.workers.createdAt,
+      updatedAt: schema.workers.updatedAt,
+    })
+    .from(schema.workers)
+    .where(eq(schema.workers.id, id))
+    .limit(1);
+  if (!row) return null;
+  const livenessThreshold = Date.now() - WORKER_LIVENESS_WINDOW_MS;
+  return {
+    ...row,
+    isLive: row.lastSeenAt ? row.lastSeenAt.getTime() > livenessThreshold : false,
+  };
+}
+
 /**
  * Auth-less version of listWorkers for verification scripts. Callers that
  * should never reach a user (cron, tests, bootstrap scripts) use this.

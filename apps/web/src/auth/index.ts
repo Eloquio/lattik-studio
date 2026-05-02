@@ -2,10 +2,10 @@ import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import Credentials from "next-auth/providers/credentials";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
-import { eq } from "drizzle-orm";
 
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
+import { upsertDevAdmin } from "@/db/dev-user";
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -21,21 +21,7 @@ function devProvider() {
       if (credentials.username !== "admin" || credentials.password !== "admin") {
         return null;
       }
-
-      const db = getDb();
-      const email = "admin@lattik.local";
-      const existing = await db
-        .select()
-        .from(schema.users)
-        .where(eq(schema.users.email, email));
-
-      if (existing.length > 0) return existing[0];
-
-      const [user] = await db
-        .insert(schema.users)
-        .values({ email, name: "Lattik Admin" })
-        .returning();
-      return user;
+      return upsertDevAdmin(getDb());
     },
   });
 }

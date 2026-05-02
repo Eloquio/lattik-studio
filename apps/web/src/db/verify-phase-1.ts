@@ -6,7 +6,7 @@
  *   2. countActiveWorkers reflects the 30s window.
  *   3. claimRequest sets stale_at.
  *   4. resetStaleRequests flips expired 'planning' rows back to 'pending'.
- *   5. POST /api/tasks/claim over HTTP updates last_seen_at (end-to-end).
+ *   5. POST /api/runs/claim over HTTP updates last_seen_at (end-to-end).
  *
  * Throwaway — delete once the studio UI lands in Phase 5 and covers the
  * same ground via real user flows.
@@ -27,7 +27,7 @@ import {
   createRequest,
   claimRequest,
   resetStaleRequests,
-} from "../lib/task-queue";
+} from "../lib/run-queue";
 
 const TEST_WORKER_ID = "verify-phase-1-worker";
 const TEST_WORKER_NAME = "Phase 1 Verification";
@@ -140,14 +140,14 @@ async function main() {
   assert(afterReset!.staleAt === null, "stale_at cleared");
 
   // --- 5. Heartbeat via HTTP ----------------------------------------------
-  console.log("[5] HTTP /api/tasks/claim updates last_seen_at");
+  console.log("[5] HTTP /api/runs/claim updates last_seen_at");
   // Force last_seen_at stale so we can verify the update path lights it up.
   await db
     .update(schema.workers)
     .set({ lastSeenAt: new Date(Date.now() - 5 * 60_000) })
     .where(sql`id = ${TEST_WORKER_ID}`);
 
-  const res = await fetch(`${API_BASE}/api/tasks/claim`, {
+  const res = await fetch(`${API_BASE}/api/runs/claim`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -157,7 +157,7 @@ async function main() {
   });
   assert(
     res.status === 200 || res.status === 204,
-    `/api/tasks/claim returned 2xx (got ${res.status})`,
+    `/api/runs/claim returned 2xx (got ${res.status})`,
   );
 
   const [postHttp] = await db

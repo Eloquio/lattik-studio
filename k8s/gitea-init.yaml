@@ -38,21 +38,21 @@ spec:
               # Create admin user (ignore error if already exists)
               curl -sf -X POST "$GITEA_URL/api/v1/admin/users" \
                 -H "Content-Type: application/json" \
-                -u "lattik-admin:lattik-local" \
+                -u "gitea-admin:admin" \
                 -d '{
-                  "username": "lattik-admin",
-                  "password": "lattik-local",
+                  "username": "gitea-admin",
+                  "password": "admin",
                   "email": "admin@lattik.local",
                   "must_change_password": false
                 }' || echo "Admin user may already exist, continuing..."
 
               # Create API token (delete existing first)
-              curl -sf -X DELETE "$GITEA_URL/api/v1/users/lattik-admin/tokens/lattik-api" \
-                -u "lattik-admin:lattik-local" || true
+              curl -sf -X DELETE "$GITEA_URL/api/v1/users/gitea-admin/tokens/lattik-api" \
+                -u "gitea-admin:admin" || true
 
-              TOKEN_RESPONSE=$(curl -sf -X POST "$GITEA_URL/api/v1/users/lattik-admin/tokens" \
+              TOKEN_RESPONSE=$(curl -sf -X POST "$GITEA_URL/api/v1/users/gitea-admin/tokens" \
                 -H "Content-Type: application/json" \
-                -u "lattik-admin:lattik-local" \
+                -u "gitea-admin:admin" \
                 -d '{"name": "lattik-api", "scopes": ["all"]}') || TOKEN_RESPONSE=""
               echo "Token response: $TOKEN_RESPONSE"
 
@@ -76,14 +76,14 @@ spec:
               # Create org (ignore if exists)
               curl -sf -X POST "$GITEA_URL/api/v1/orgs" \
                 -H "Content-Type: application/json" \
-                -u "lattik-admin:lattik-local" \
+                -u "gitea-admin:admin" \
                 -d '{"username": "lattik", "visibility": "private"}' \
                 || echo "Org may already exist, continuing..."
 
               # Create pipelines repo (ignore if exists)
               curl -sf -X POST "$GITEA_URL/api/v1/orgs/lattik/repos" \
                 -H "Content-Type: application/json" \
-                -u "lattik-admin:lattik-local" \
+                -u "gitea-admin:admin" \
                 -d '{
                   "name": "pipelines",
                   "description": "Lattik pipeline definitions",
@@ -106,18 +106,18 @@ spec:
               else
                 # Delete any existing hooks so re-running the init job
                 # doesn't stack up duplicates pointing at the same URL.
-                EXISTING=$(curl -sf -u "lattik-admin:lattik-local" \
+                EXISTING=$(curl -sf -u "gitea-admin:admin" \
                   "$GITEA_URL/api/v1/repos/lattik/pipelines/hooks" || echo "[]")
                 echo "$EXISTING" \
                   | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' \
                   | while read -r ID; do
-                      [ -n "$ID" ] && curl -sf -X DELETE -u "lattik-admin:lattik-local" \
+                      [ -n "$ID" ] && curl -sf -X DELETE -u "gitea-admin:admin" \
                         "$GITEA_URL/api/v1/repos/lattik/pipelines/hooks/$ID" || true
                     done
 
                 curl -sf -X POST "$GITEA_URL/api/v1/repos/lattik/pipelines/hooks" \
                   -H "Content-Type: application/json" \
-                  -u "lattik-admin:lattik-local" \
+                  -u "gitea-admin:admin" \
                   -d "{
                     \"type\": \"gitea\",
                     \"active\": true,
@@ -133,4 +133,4 @@ spec:
 
               echo "Gitea initialization complete."
               echo "Access Gitea at: http://localhost:3300"
-              echo "Credentials: lattik-admin / lattik-local"
+              echo "Credentials: gitea-admin / admin"

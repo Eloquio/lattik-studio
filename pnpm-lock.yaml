@@ -26,12 +26,18 @@ importers:
       '@ai-sdk/gateway':
         specifier: ^3.0.83
         version: 3.0.84(zod@3.25.76)
+      '@eloquio/lattik-logger':
+        specifier: workspace:*
+        version: link:../../packages/lattik-logger
       '@eloquio/lattik-skills':
         specifier: workspace:*
         version: link:../../packages/lattik-skills
       ai:
         specifier: ^6.0.141
         version: 6.0.142(zod@3.25.76)
+      kafkajs:
+        specifier: ^2.2.4
+        version: 2.2.4
       zod:
         specifier: ^3.25.67
         version: 3.25.76
