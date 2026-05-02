@@ -6,7 +6,7 @@ import {
   MAX_LIMIT,
   parseJsonBody,
   requestStatusSchema,
-  taskStatusSchema,
+  runStatusSchema,
 } from "./api-validation";
 
 function jsonRequest(body: unknown): Request {
@@ -63,15 +63,15 @@ describe("parseJsonBody", () => {
 });
 
 describe("status enum schemas", () => {
-  it("taskStatusSchema accepts all canonical statuses", () => {
+  it("runStatusSchema accepts all canonical statuses", () => {
     for (const s of ["draft", "pending", "claimed", "done", "failed"]) {
-      assert.ok(taskStatusSchema.safeParse(s).success, `should accept ${s}`);
+      assert.ok(runStatusSchema.safeParse(s).success, `should accept ${s}`);
     }
   });
 
-  it("taskStatusSchema rejects arbitrary strings", () => {
-    assert.strictEqual(taskStatusSchema.safeParse("in_progress").success, false);
-    assert.strictEqual(taskStatusSchema.safeParse("").success, false);
+  it("runStatusSchema rejects arbitrary strings", () => {
+    assert.strictEqual(runStatusSchema.safeParse("in_progress").success, false);
+    assert.strictEqual(runStatusSchema.safeParse("").success, false);
   });
 
   it("requestStatusSchema accepts all canonical statuses", () => {

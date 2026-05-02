@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
-import { createRequest } from "@/lib/task-queue";
+import { createRequest } from "@/lib/run-queue";
 
 type MergedDefinition = {
   id: string;

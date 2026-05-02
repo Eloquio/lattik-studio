@@ -10,7 +10,9 @@
   "dependencies": {
     "ai": "^6.0.141",
     "@ai-sdk/gateway": "^3.0.83",
+    "@eloquio/lattik-logger": "workspace:*",
     "@eloquio/lattik-skills": "workspace:*",
+    "kafkajs": "^2.2.4",
     "zod": "^3.25.67"
   },
   "devDependencies": {

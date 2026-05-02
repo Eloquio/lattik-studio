@@ -1,7 +1,7 @@
 /**
  * `finish_planning` — close out the planning step for a request.
  *
- * Default outcome is "completed" — the endpoint inspects the inserted task
+ * Default outcome is "completed" — the endpoint inspects the inserted run
  * statuses to decide between auto-approve and human-approval. Pass
  * `outcome: "failed"` (with a reason) when no skill matches the request and
  * the planner gives up.
@@ -18,7 +18,7 @@ export interface FinishPlanningContext {
 export function createFinishPlanningTool(ctx: FinishPlanningContext) {
   return tool({
     description:
-      "Close planning for the current request. Use 'completed' (default) after emitting at least one task; the runtime auto-approves or routes to human approval based on the emitted skills' auto_approve flags. Use 'failed' with a reason when no skill matches.",
+      "Close planning for the current request. Use 'completed' (default) after emitting at least one run; the runtime auto-approves or routes to human approval based on the emitted skills' auto_approve flags. Use 'failed' with a reason when no skill matches.",
     inputSchema: zodSchema(
       z.object({
         outcome: z
@@ -38,7 +38,7 @@ export function createFinishPlanningTool(ctx: FinishPlanningContext) {
     }) => {
       try {
         const result = await apiFetch<{ status: string }>(
-          `/api/tasks/requests/${ctx.requestId}/finish-planning`,
+          `/api/runs/requests/${ctx.requestId}/finish-planning`,
           {
             method: "POST",
             body: {

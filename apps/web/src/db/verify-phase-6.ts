@@ -7,7 +7,7 @@
  * the authentication flows behave as the plan specifies.
  *
  * Checks:
- *   1. Secret revocation: a host-mode worker's secret hits /api/tasks/claim
+ *   1. Secret revocation: a host-mode worker's secret hits /api/runs/claim
  *      successfully; after revokeWorker, the same secret 401s; a freshly
  *      created worker gets through with its new secret.
  *   2. Task round-trip: seed a task, claim it over HTTP, confirm the row
@@ -28,14 +28,14 @@ import {
   listWorkersCore,
   revokeWorkerCore,
 } from "../lib/actions/workers";
-import { createRequest, createTask } from "../lib/task-queue";
+import { createRequest, createRun } from "../lib/run-queue";
 import {
   WORKERS_NAMESPACE,
   workerDeploymentName,
   workerSecretName,
 } from "../lib/kube";
 // Inline shape — the agent-worker no longer exports a Task type after the
-// Phase C.3 rewrite. The fields below match what /api/tasks/claim returns.
+// Phase C.3 rewrite. The fields below match what /api/runs/claim returns.
 interface Task {
   id: string;
   request_id: string;
@@ -72,12 +72,12 @@ function kubectlExists(kind: string, name: string, ns: string): boolean {
   return res.status === 0;
 }
 
-async function claimTaskHttp(
+async function claimRunHttp(
   workerId: string,
   secret: string,
   skillId?: string,
 ) {
-  const res = await fetch(`${API_BASE}/api/tasks/claim`, {
+  const res = await fetch(`${API_BASE}/api/runs/claim`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -129,36 +129,36 @@ async function main() {
   });
   assert(host.secret !== null, "host-mode create returned a secret");
 
-  const res1 = await claimTaskHttp(host.worker.id, host.secret!);
+  const res1 = await claimRunHttp(host.worker.id, host.secret!);
   assert(
     res1.status === 200 || res1.status === 204,
-    `fresh creds → /api/tasks/claim returned ${res1.status} (expect 2xx)`,
+    `fresh creds → /api/runs/claim returned ${res1.status} (expect 2xx)`,
   );
   if (res1.status === 200) await res1.json();
 
   await revokeWorkerCore(host.worker.id);
 
-  const res2 = await claimTaskHttp(host.worker.id, host.secret!);
+  const res2 = await claimRunHttp(host.worker.id, host.secret!);
   assert(
     res2.status === 401,
-    `revoked creds → /api/tasks/claim returned ${res2.status} (expect 401)`,
+    `revoked creds → /api/runs/claim returned ${res2.status} (expect 401)`,
   );
 
   const host2 = await createWorkerCore({
     name: "verify-6: host-2",
     mode: "host",
   });
-  const res3 = await claimTaskHttp(host2.worker.id, host2.secret!);
+  const res3 = await claimRunHttp(host2.worker.id, host2.secret!);
   assert(
     res3.status === 200 || res3.status === 204,
-    `recreated creds → /api/tasks/claim returned ${res3.status} (expect 2xx)`,
+    `recreated creds → /api/runs/claim returned ${res3.status} (expect 2xx)`,
   );
   if (res3.status === 200) await res3.json();
 
   // --- 2. Task round-trip over HTTP --------------------------------------
   console.log("[2] seeded task is delivered over HTTP claim with expected shape");
   const req = await createRequest("human", "verify-6: task round-trip");
-  const seededTask = await createTask(
+  const seededTask = await createRun(
     req.id,
     TEST_SKILL_ID,
     "verify-6: a task",
@@ -167,7 +167,7 @@ async function main() {
   );
   assert(seededTask !== undefined, "seeded a task");
 
-  const res4 = await claimTaskHttp(host2.worker.id, host2.secret!, TEST_SKILL_ID);
+  const res4 = await claimRunHttp(host2.worker.id, host2.secret!, TEST_SKILL_ID);
   assert(res4.status === 200, `filtered claim returned 200 (got ${res4.status})`);
   const claimed = (await res4.json()) as Task;
   assert(claimed.id === seededTask!.id, "HTTP claim returned our seeded task");
