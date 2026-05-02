@@ -41,6 +41,7 @@ export {
 export {
   listAgents,
   getAgent,
+  parseAgents,
   resetAgentCacheForTests,
 } from "./agent-loader.js";
 

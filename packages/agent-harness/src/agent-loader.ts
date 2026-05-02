@@ -112,3 +112,40 @@ export function getAgent(
   }
   return agent;
 }
+
+/**
+ * Parse a list of pre-loaded AGENT.md entries into the agent map. Used by
+ * runtimes that don't have filesystem access at runtime (e.g. a Nitro
+ * production bundle), where AGENT.md content is pulled in at build time
+ * and embedded in a generated manifest module.
+ *
+ * Same validation rules as the directory-walking loader: zod-checked
+ * frontmatter, no duplicate ids, body trimmed.
+ */
+export function parseAgents(
+  entries: ReadonlyArray<{ path: string; content: string }>,
+): Map<AgentId, Agent> {
+  const agents = new Map<AgentId, Agent>();
+  for (const entry of entries) {
+    const parsed = matter(entry.content);
+    const result = agentFrontmatterSchema.safeParse(parsed.data);
+    if (!result.success) {
+      throw new Error(
+        `Invalid AGENT.md frontmatter at ${entry.path}: ${result.error.message}`,
+      );
+    }
+    const frontmatter = result.data;
+    if (agents.has(frontmatter.id)) {
+      const prior = agents.get(frontmatter.id)!;
+      throw new Error(
+        `Duplicate agent id "${frontmatter.id}" — defined at both ${prior.path} and ${entry.path}`,
+      );
+    }
+    agents.set(frontmatter.id, {
+      frontmatter,
+      body: parsed.content.trim(),
+      path: entry.path,
+    });
+  }
+  return agents;
+}

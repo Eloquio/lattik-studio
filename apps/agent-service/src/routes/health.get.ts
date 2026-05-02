@@ -1,26 +1,23 @@
-import { resolve } from "node:path";
 import { defineEventHandler } from "h3";
-import { listAgents } from "@eloquio/agent-harness";
+import { parseAgents } from "@eloquio/agent-harness";
+import { AGENT_MANIFEST } from "../agents/agents.generated.js";
 
-// Resolve the agents directory from the dev server's cwd. `nitropack dev`
-// runs from `apps/agent-service/`, so `src/agents` is reachable. This works
-// for local dev — production deployment will need a different strategy
-// (Nitro `serverAssets` storage API, or a bundled-at-build-time manifest)
-// once `/chat` lands and actually consumes AGENT.md content at runtime.
-const AGENTS_DIR = resolve(process.cwd(), "src/agents");
+// Parse the build-time-generated AGENT.md manifest at module load. Errors
+// (invalid frontmatter, duplicate ids) crash startup, which is what we want —
+// the service shouldn't accept traffic with a broken agent registry.
+const AGENTS = parseAgents(AGENT_MANIFEST);
 
 /**
- * Health probe — returns service status plus the agents the harness can
- * discover under `<src>/agents/`. Doubles as a smoke test that AGENT.md
- * files are readable in this runtime.
+ * Health probe — returns service status plus the agents loaded from the
+ * generated manifest. Doubles as a smoke test that the manifest is valid
+ * and the harness parses it cleanly.
  */
 export default defineEventHandler(() => {
-  const agents = listAgents({ agentsDir: AGENTS_DIR });
   return {
     status: "ok",
     service: "agent-service",
     phase: "scaffolding",
-    agents: agents.map((a) => ({
+    agents: [...AGENTS.values()].map((a) => ({
       id: a.frontmatter.id,
       name: a.frontmatter.name,
       model: a.frontmatter.model,

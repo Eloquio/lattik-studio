@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   listAgents,
   getAgent,
+  parseAgents,
   resetAgentCacheForTests,
 } from "../src/agent-loader.js";
 
@@ -156,5 +157,45 @@ describe("duplicate ids", () => {
     expect(() => listAgents({ agentsDir: tmp })).toThrow(
       /Duplicate agent id "PipelineManager"/,
     );
+  });
+});
+
+describe("parseAgents", () => {
+  function entry(id: string, body = "Body"): { path: string; content: string } {
+    return {
+      path: `${id}/AGENT.md`,
+      content: `---\n${validFrontmatter(id)}\n---\n\n${body}\n`,
+    };
+  }
+
+  it("parses a list of pre-loaded entries into the agent map", () => {
+    const map = parseAgents([
+      entry("PipelineManager", "Pipeline body."),
+      entry("DataArchitect", "Architect body."),
+    ]);
+    expect([...map.keys()].sort()).toEqual(["DataArchitect", "PipelineManager"]);
+    expect(map.get("PipelineManager")?.body).toBe("Pipeline body.");
+    expect(map.get("DataArchitect")?.frontmatter.id).toBe("DataArchitect");
+  });
+
+  it("returns an empty map for an empty entry list", () => {
+    expect(parseAgents([]).size).toBe(0);
+  });
+
+  it("rejects invalid frontmatter with the entry path in the error", () => {
+    expect(() =>
+      parseAgents([
+        {
+          path: "Bogus/AGENT.md",
+          content: `---\nid: NotAnAgent\nname: x\ndescription: x\nmodel: x\nmax_steps: 1\nbase_tools: [getSkill]\n---\n\nBody`,
+        },
+      ]),
+    ).toThrow(/Invalid AGENT.md frontmatter at Bogus\/AGENT.md/);
+  });
+
+  it("throws on duplicate ids and names both source paths", () => {
+    expect(() =>
+      parseAgents([entry("PipelineManager"), entry("PipelineManager")]),
+    ).toThrow(/Duplicate agent id "PipelineManager"/);
   });
 });
