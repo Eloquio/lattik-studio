@@ -32,6 +32,13 @@ fi
 # a stable host.docker.internal:3737 (see k8s/gitea-init.yaml).
 if command -v portless >/dev/null 2>&1; then
   step "portless-alias" portless alias lattik-studio 3737 --force
+  log "portless-tld-check"
+  if ! portless list 2>>"$LOG" | grep -q "https://lattik-studio.dev "; then
+    echo "  failed — https://lattik-studio.dev is not registered."
+    echo "  The proxy must be running with --tld dev. Start it with:"
+    echo "    sudo portless proxy start --tld dev"
+    exit 1
+  fi
 fi
 
 step "cluster" pnpm --silent cluster:up
