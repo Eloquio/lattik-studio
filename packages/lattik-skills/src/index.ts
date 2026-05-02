@@ -31,3 +31,15 @@ export {
   resetSkillCacheForTests,
   type PreflightIssue,
 } from "./loader.js";
+
+export {
+  agentFrontmatterSchema,
+  type Agent,
+  type AgentFrontmatter,
+} from "./agent-schema.js";
+
+export {
+  listAgents,
+  getAgent,
+  resetAgentCacheForTests,
+} from "./agent-loader.js";
