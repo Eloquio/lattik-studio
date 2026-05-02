@@ -5,7 +5,7 @@ registerExtension({
   id: "pipeline-manager",
   name: "Pipeline Manager",
   description:
-    "Monitor, trigger, and troubleshoot Airflow DAGs for Lattik Tables",
+    "Monitor and operate the data ecosystem — Logger Tables and Airflow DAGs",
   icon: "workflow",
   agent: pipelineManagerAgent,
 });
