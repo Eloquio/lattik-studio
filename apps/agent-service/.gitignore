@@ -1,0 +1,3 @@
+# Nitro build outputs and prepared types — regenerated on every dev/build/prepare.
+.output/
+.nitro/
