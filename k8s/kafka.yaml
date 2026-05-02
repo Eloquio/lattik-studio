@@ -75,6 +75,12 @@ spec:
               value: "1"
             - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
               value: "true"
+            # Use broker-assigned timestamps (LogAppendTime) instead of the
+            # producer-set CreateTime. Logger-writer derives ds/hour from
+            # this timestamp, so we want a single, monotonic clock — the
+            # broker's — and immunity to producer-side clock skew.
+            - name: KAFKA_LOG_MESSAGE_TIMESTAMP_TYPE
+              value: "LogAppendTime"
             # Fixed cluster ID for reproducible local dev
             - name: CLUSTER_ID
               value: "MkU3OEVBNTcwNTJENDM2Qk"
