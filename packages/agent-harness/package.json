@@ -29,8 +29,12 @@
     "gray-matter": "^4.0.3",
     "zod": "^4.3.6"
   },
+  "peerDependencies": {
+    "ai": "^6.0.0"
+  },
   "devDependencies": {
     "@types/node": "^20",
+    "ai": "^6.0.141",
     "typescript": "^5",
     "vitest": "^3"
   }

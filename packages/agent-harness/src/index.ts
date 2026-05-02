@@ -43,3 +43,13 @@ export {
   getAgent,
   resetAgentCacheForTests,
 } from "./agent-loader.js";
+
+export {
+  createGetSkillTool,
+  type CreateGetSkillToolOptions,
+} from "./tools/get-skill.js";
+
+export {
+  createListSkillsTool,
+  type CreateListSkillsToolOptions,
+} from "./tools/list-skills.js";
