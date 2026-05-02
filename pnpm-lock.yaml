@@ -26,12 +26,12 @@ importers:
       '@ai-sdk/gateway':
         specifier: ^3.0.83
         version: 3.0.84(zod@3.25.76)
+      '@eloquio/agent-harness':
+        specifier: workspace:*
+        version: link:../../packages/agent-harness
       '@eloquio/lattik-logger':
         specifier: workspace:*
         version: link:../../packages/lattik-logger
-      '@eloquio/lattik-skills':
-        specifier: workspace:*
-        version: link:../../packages/lattik-skills
       ai:
         specifier: ^6.0.141
         version: 6.0.142(zod@3.25.76)
@@ -75,15 +75,15 @@ importers:
       '@codemirror/lang-yaml':
         specifier: ^6.1.3
         version: 6.1.3
+      '@eloquio/agent-harness':
+        specifier: workspace:*
+        version: link:../../packages/agent-harness
       '@eloquio/lattik-expression':
         specifier: workspace:*
         version: link:../../packages/lattik-expression
       '@eloquio/lattik-logger':
         specifier: workspace:*
         version: link:../../packages/lattik-logger
-      '@eloquio/lattik-skills':
-        specifier: workspace:*
-        version: link:../../packages/lattik-skills
       '@json-render/core':
         specifier: ^0.16.0
         version: 0.16.0(zod@4.3.6)
@@ -188,6 +188,25 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  packages/agent-harness:
+    dependencies:
+      gray-matter:
+        specifier: ^4.0.3
+        version: 4.0.3
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.37
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^3
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@20.19.37)(jiti@2.6.1)(lightningcss@1.32.0)(msw@2.12.14(@types/node@20.19.37)(typescript@5.9.3))(tsx@4.21.0)
+
   packages/lattik-expression:
     devDependencies:
       typescript:
@@ -215,25 +234,6 @@ importers:
       vitest:
         specifier: ^3
         version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.15)(jiti@2.6.1)(lightningcss@1.32.0)(msw@2.12.14(@types/node@22.19.15)(typescript@5.9.3))(tsx@4.21.0)
-
-  packages/lattik-skills:
-    dependencies:
-      gray-matter:
-        specifier: ^4.0.3
-        version: 4.0.3
-      zod:
-        specifier: ^4.3.6
-        version: 4.3.6
-    devDependencies:
-      '@types/node':
-        specifier: ^20
-        version: 20.19.37
-      typescript:
-        specifier: ^5
-        version: 5.9.3
-      vitest:
-        specifier: ^3
-        version: 3.2.4(@types/debug@4.1.13)(@types/node@20.19.37)(jiti@2.6.1)(lightningcss@1.32.0)(msw@2.12.14(@types/node@20.19.37)(typescript@5.9.3))(tsx@4.21.0)
 
 packages:
 

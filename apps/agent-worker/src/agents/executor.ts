@@ -19,7 +19,7 @@ import {
   type OnStepFinishEvent,
   type OnFinishEvent,
 } from "ai";
-import { getSkill } from "@eloquio/lattik-skills";
+import { getSkill } from "@eloquio/agent-harness";
 import { createFinishSkillTool } from "../tools/finish-skill.js";
 import { getTool } from "../tools/registry.js";
 

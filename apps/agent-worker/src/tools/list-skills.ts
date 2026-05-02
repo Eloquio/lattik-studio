@@ -8,7 +8,7 @@
 
 import { z } from "zod";
 import { tool, zodSchema } from "ai";
-import { listSkills } from "@eloquio/lattik-skills";
+import { listSkills } from "@eloquio/agent-harness";
 
 export const listSkillsTool = tool({
   description:

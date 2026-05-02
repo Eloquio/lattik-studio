@@ -13,7 +13,7 @@
 
 import { z } from "zod";
 import { tool, zodSchema } from "ai";
-import { getSkill } from "@eloquio/lattik-skills";
+import { getSkill } from "@eloquio/agent-harness";
 import { apiFetch } from "../runtime.js";
 
 export interface EmitRunContext {
