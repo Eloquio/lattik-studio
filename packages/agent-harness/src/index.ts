@@ -53,3 +53,10 @@ export {
   createListSkillsTool,
   type CreateListSkillsToolOptions,
 } from "./tools/list-skills.js";
+
+export {
+  buildAgent,
+  renderInstructions,
+  resolveBaseTools,
+  type BuildAgentOptions,
+} from "./build-agent.js";
