@@ -9,7 +9,7 @@
  * Returns the first failure or null when everything passes.
  */
 
-import type { DoneCheck } from "@eloquio/lattik-skills";
+import type { DoneCheck } from "@eloquio/agent-harness";
 
 export interface DoneCheckFailure {
   index: number;

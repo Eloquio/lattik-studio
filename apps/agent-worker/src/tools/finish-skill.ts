@@ -9,7 +9,7 @@
 
 import { z } from "zod";
 import { tool, zodSchema } from "ai";
-import type { DoneCheck } from "@eloquio/lattik-skills";
+import type { DoneCheck } from "@eloquio/agent-harness";
 import { apiFetch } from "../runtime.js";
 import { runDoneChecks } from "../done-checks.js";
 
