@@ -1,0 +1,35 @@
+{
+  "name": "@eloquio/json-render-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@eloquio/render-intents": "workspace:*"
+  },
+  "peerDependencies": {
+    "@json-render/core": "^0.16.0"
+  },
+  "devDependencies": {
+    "@json-render/core": "^0.16.0",
+    "@types/node": "^20",
+    "typescript": "^5",
+    "vitest": "^3"
+  }
+}
