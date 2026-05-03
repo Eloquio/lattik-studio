@@ -1,5 +1,6 @@
 import { tool, zodSchema } from "ai";
 import { z } from "zod";
+import type { QueryResultIntent } from "@eloquio/render-intents";
 import { executeQuery, TrinoQueryError } from "../lib/trino-client.js";
 
 /**
@@ -8,12 +9,17 @@ import { executeQuery, TrinoQueryError } from "../lib/trino-client.js";
  * Real implementations this slice:
  *   - listTables — SHOW CATALOGS / SCHEMAS / TABLES against Trino.
  *   - describeTable — DESCRIBE against Trino.
+ *   - runQuery — executes against Trino, emits a typed query-result
+ *     render-intent. DuckDB-backed `lattik_scan()` queries aren't
+ *     supported yet — the duckdb client port is a separate slice.
  *
- * Still stubbed (bigger port — needs the canvas-spec builder
- * spec-builder.ts (~150 lines) + the DuckDB client for `lattik_scan`
- * queries (~225 lines), plus canvas-state mutation):
- *   - runQuery — full Trino/DuckDB query path with canvas updates.
+ * The render-intent model means runQuery emits a single query-result
+ * intent rather than rebuilding a multi-surface canvas spec. The
+ * SQL editor surface is whatever the user sees from the most recent
+ * `renderSqlEditor` call; runQuery doesn't touch it.
  */
+
+const SAMPLE_ROWS_FOR_AGENT = 20;
 
 export const listTablesTool = tool({
   description:
@@ -95,17 +101,40 @@ export const describeTableTool = tool({
 
 export const runQueryTool = tool({
   description:
-    "Run a SQL query against Trino. Pass `sql` explicitly, or omit to use the SQL currently shown in the canvas editor. Read-only — DDL/DML is rejected for safety.",
+    "Run a SQL query against Trino and display the result on the canvas. Read-only — only SELECT / SHOW / DESCRIBE / EXPLAIN / WITH are allowed. Returns columns + a sample of rows for the agent to reason about (full result rendered on the canvas).",
   inputSchema: zodSchema(
     z.object({
-      sql: z.string().optional().describe("SQL to run; omit to use canvas SQL."),
+      sql: z.string().describe("SQL to run."),
     }),
   ),
-  execute: async (input) => ({
-    stub: true,
-    note: "Real implementation pending — needs spec-builder (~150 lines) + duckdb-client (~225 lines) + canvas-state mutation. Each is its own follow-up slice.",
-    input,
-    rows: [],
-    columns: [],
-  }),
+  execute: async (
+    input: { sql: string },
+  ): Promise<
+    | (QueryResultIntent & { sampleRows: unknown[][] })
+    | { error: string; code?: string }
+  > => {
+    try {
+      const result = await executeQuery(input.sql);
+      return {
+        kind: "query-result",
+        surface: "results",
+        data: {
+          columns: result.columns,
+          rows: result.rows,
+          rowCount: result.rowCount,
+          truncated: result.truncated,
+          durationMs: result.durationMs,
+        },
+        // The agent reasons over the small sample inline rather than
+        // pulling the full row set into context. The intent's `data.rows`
+        // carries the full set the canvas renders.
+        sampleRows: result.rows.slice(0, SAMPLE_ROWS_FOR_AGENT),
+      };
+    } catch (err) {
+      if (err instanceof TrinoQueryError) {
+        return { error: err.message, code: err.code };
+      }
+      return { error: (err as Error).message };
+    }
+  },
 });

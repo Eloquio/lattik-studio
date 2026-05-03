@@ -85,10 +85,12 @@ describe("intentToSpec dispatcher", () => {
   });
 
   it("returns a PlaceholderCard for kinds without an adapter yet", () => {
+    // entity-form (and the other 4 form kinds) and definition-review are
+    // the remaining unimplemented adapters as of this slice.
     const spec = intentToSpec({
-      kind: "sql-editor",
-      surface: "editor",
-      data: { sql: "SELECT 1" },
+      kind: "entity-form",
+      surface: "form",
+      data: { initialState: {} },
     });
     expect(spec.elements.main).toMatchObject({
       type: "PlaceholderCard",
