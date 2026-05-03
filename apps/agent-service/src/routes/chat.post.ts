@@ -24,6 +24,23 @@ import { getTaskInstancesTool } from "../agents/PipelineManager/tools/get-task-i
 import { getTaskLogsTool } from "../agents/PipelineManager/tools/get-task-logs.js";
 import { renderDagOverviewTool } from "../agents/PipelineManager/tools/render-dag-overview.js";
 import { renderDagRunDetailTool } from "../agents/PipelineManager/tools/render-dag-run-detail.js";
+import {
+  renderEntityFormTool,
+  renderDimensionFormTool,
+  renderLoggerTableFormTool,
+  renderLattikTableFormTool,
+  renderMetricFormTool,
+} from "../agents/DataArchitect/tools/render-forms.js";
+import {
+  reviewDefinitionTool,
+  staticCheckTool,
+  updateDefinitionTool,
+  generateYamlTool,
+  submitPRTool,
+  deleteDefinitionTool,
+  listDefinitionsTool,
+  getDefinitionTool,
+} from "../agents/DataArchitect/tools/definition-flow.js";
 
 /**
  * /chat — Phase 1 streaming execution.
@@ -116,7 +133,65 @@ function buildPipelineManagerAgent(canvasState: unknown | null) {
   });
 }
 
-const SUPPORTED_AGENTS: ReadonlySet<AgentId> = new Set(["PipelineManager"]);
+function buildDataArchitectAgent(canvasState: unknown | null) {
+  const agent = AGENTS.get("DataArchitect");
+  if (!agent) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: "DataArchitect AGENT.md missing from manifest",
+    });
+  }
+
+  // Names-only preflight, same pattern as PipelineManager.
+  assertBaseToolsResolve(agent, [
+    "getSkill",
+    "readCanvasState",
+    "renderEntityForm",
+    "renderDimensionForm",
+    "renderLoggerTableForm",
+    "renderLattikTableForm",
+    "renderMetricForm",
+    "reviewDefinition",
+    "staticCheck",
+    "updateDefinition",
+    "generateYaml",
+    "submitPR",
+    "deleteDefinition",
+    "listDefinitions",
+    "getDefinition",
+    "handback",
+  ]);
+
+  return new ToolLoopAgent({
+    id: agent.frontmatter.id,
+    model: gateway(agent.frontmatter.model),
+    instructions: renderInstructions(agent.body, { skills: "(none yet)" }),
+    tools: {
+      getSkill: createGetSkillTool({ caller: "DataArchitect" }),
+      readCanvasState: createReadCanvasStateTool({ getCanvasState: () => canvasState }),
+      renderEntityForm: renderEntityFormTool,
+      renderDimensionForm: renderDimensionFormTool,
+      renderLoggerTableForm: renderLoggerTableFormTool,
+      renderLattikTableForm: renderLattikTableFormTool,
+      renderMetricForm: renderMetricFormTool,
+      reviewDefinition: reviewDefinitionTool,
+      staticCheck: staticCheckTool,
+      updateDefinition: updateDefinitionTool,
+      generateYaml: generateYamlTool,
+      submitPR: submitPRTool,
+      deleteDefinition: deleteDefinitionTool,
+      listDefinitions: listDefinitionsTool,
+      getDefinition: getDefinitionTool,
+      handback: createHandbackTool({ fromAgent: "DataArchitect" }),
+    },
+    stopWhen: stepCountIs(agent.frontmatter.max_steps),
+  });
+}
+
+const SUPPORTED_AGENTS: ReadonlySet<AgentId> = new Set([
+  "PipelineManager",
+  "DataArchitect",
+]);
 
 export default defineEventHandler(async (event) => {
   const auth = event.context.auth;
@@ -156,9 +231,16 @@ export default defineEventHandler(async (event) => {
     },
   ];
 
-  const agent = buildPipelineManagerAgent(null);
+  // Branching on agentId so each call site sees one concrete ToolLoopAgent
+  // generic — TS can't unify the union of agents with different tool sets.
+  if (agentId === "DataArchitect") {
+    return createAgentUIStreamResponse({
+      agent: buildDataArchitectAgent(null),
+      uiMessages,
+    });
+  }
   return createAgentUIStreamResponse({
-    agent,
+    agent: buildPipelineManagerAgent(null),
     uiMessages,
   });
 });
