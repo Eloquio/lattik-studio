@@ -16,13 +16,20 @@ import { assertRunOwner } from "../../lib/workflow-runs.js";
 // same translator the POST route uses, so a reconnecting `useChat`
 // client picks up the tail in the wire format it expects.
 //
-// Caveat: text-part lifecycle is ID'd by iteration (`t<N>`). Mid-step
-// reattach may emit only `text-delta` chunks for an iteration whose
-// `text-start` was already in the prior chunks the client missed. The
-// AI SDK's reducer handles this gracefully (text just appears) but the
-// shape is technically out of spec. A more rigorous reattach would
-// reconstruct the prefix events from the loop's prior persisted state;
-// deferred.
+// Strict-spec prefix reconstruction: the translator's state machine
+// (whether it's emitted `start`, which iteration is open, whether
+// there's an in-progress text-part) is sensitive to events that
+// preceded the cursor. Without seeding from those events, the client
+// would receive a fresh `start` + `start-step` + `text-start` even
+// mid-stream — duplicates that AI SDK is tolerant of but that are
+// technically out of spec. To avoid that, this route:
+//   1. Reads the run's tail index up-front.
+//   2. Resolves the (possibly negative) `?startIndex` to an absolute
+//      position.
+//   3. Opens the readable from index 0 and tells the translator to
+//      `skipFirstN` events. The state machine consumes the prefix
+//      silently and only starts emitting at the cursor — coherent
+//      mid-stream prefix, no duplicates.
 //
 // Auth via `attachAuth` middleware + per-run ownership check against
 // the `workflow_run` table written when the run was started.
@@ -42,22 +49,34 @@ export default defineEventHandler(async (event) => {
   }
   await assertRunOwner({ runId, userId: auth.userId });
   const startIndexRaw = getQuery(event).startIndex;
-  const startIndex =
+  const requestedStartIndex =
     typeof startIndexRaw === "string" ? Number.parseInt(startIndexRaw, 10) : undefined;
 
   const run = getRun<unknown>(runId);
-  const readable = run.getReadable<LoopEvent>(
-    startIndex !== undefined && Number.isFinite(startIndex) ? { startIndex } : {},
-  );
+  // First peek at the tail to resolve negative indices and clamp
+  // positive ones. `getTailIndex` returns -1 for empty streams.
+  const tailIndex = await run.getReadable<LoopEvent>({}).getTailIndex();
+  const absoluteStartIndex =
+    requestedStartIndex === undefined || !Number.isFinite(requestedStartIndex)
+      ? 0
+      : requestedStartIndex < 0
+        ? Math.max(0, tailIndex + 1 + requestedStartIndex)
+        : Math.min(requestedStartIndex, tailIndex + 1);
+
+  // Open a fresh readable from index 0 — the translator's `skipFirstN`
+  // is what gates output, not the workflow's own startIndex. This way
+  // the state machine sees every prior event.
+  const readable = run.getReadable<LoopEvent>({ startIndex: 0 });
 
   setResponseHeader(event, "x-run-id", runId);
-  setResponseHeader(event, "x-tail-index", String(await readable.getTailIndex()));
+  setResponseHeader(event, "x-tail-index", String(tailIndex));
+  setResponseHeader(event, "x-resolved-start-index", String(absoluteStartIndex));
   setResponseHeader(event, "content-type", "text/event-stream");
   setResponseHeader(event, "cache-control", "no-cache");
   setResponseHeader(event, "x-vercel-ai-ui-message-stream", "v1");
 
   return readable
-    .pipeThrough(loopEventToUIMessageChunk())
+    .pipeThrough(loopEventToUIMessageChunk({ skipFirstN: absoluteStartIndex }))
     .pipeThrough(new JsonToSseTransformStream() as unknown as TransformStream<
       UIMessageChunk,
       string

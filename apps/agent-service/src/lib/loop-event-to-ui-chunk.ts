@@ -22,11 +22,22 @@ import type { LoopEvent } from "../workflows/agent-loop.js";
  * iteration's first event arrives) and at `loop-finish`, never inside
  * `model-finish` — model-finish doesn't end the step; tool calls may
  * still follow within the same iteration.
+ *
+ * `skipFirstN` is the strict-spec reattach knob. The translator state
+ * machine consumes ALL events (so `started`, `currentIteration`, and
+ * `currentTextId` are correctly seeded by the time we reach the
+ * cursor), but suppresses output for the first N events. That lets a
+ * reattaching client open a stream from index 0 conceptually, drop the
+ * prefix it already saw, and receive a coherent SSE tail without any
+ * duplicate `start` / `start-step` / `text-start` chunks.
  */
-export function loopEventToUIMessageChunk(): TransformStream<LoopEvent, UIMessageChunk> {
+export function loopEventToUIMessageChunk({
+  skipFirstN = 0,
+}: { skipFirstN?: number } = {}): TransformStream<LoopEvent, UIMessageChunk> {
   let started = false;
   let currentIteration: number | null = null;
   let currentTextId: string | null = null;
+  let position = 0;
 
   function transitionToIteration(
     controller: TransformStreamDefaultController<UIMessageChunk>,
@@ -51,14 +62,24 @@ export function loopEventToUIMessageChunk(): TransformStream<LoopEvent, UIMessag
 
   return new TransformStream<LoopEvent, UIMessageChunk>({
     transform(event, controller) {
+      // While we're still in the prefix the client already saw, run the
+      // state machine but discard its output. Past the cursor, forward
+      // chunks normally. Cast is harmless — only `enqueue` is read.
+      const sink: TransformStreamDefaultController<UIMessageChunk> =
+        position < skipFirstN
+          ? ({
+              enqueue: () => {},
+            } as unknown as TransformStreamDefaultController<UIMessageChunk>)
+          : controller;
+      position++;
       switch (event.type) {
         case "text-delta": {
-          transitionToIteration(controller, event.iteration);
+          transitionToIteration(sink, event.iteration);
           if (currentTextId === null) {
             currentTextId = `t${event.iteration}`;
-            controller.enqueue({ type: "text-start", id: currentTextId });
+            sink.enqueue({ type: "text-start", id: currentTextId });
           }
-          controller.enqueue({
+          sink.enqueue({
             type: "text-delta",
             id: currentTextId,
             delta: event.payload.delta,
@@ -66,22 +87,22 @@ export function loopEventToUIMessageChunk(): TransformStream<LoopEvent, UIMessag
           break;
         }
         case "model-finish": {
-          transitionToIteration(controller, event.iteration);
+          transitionToIteration(sink, event.iteration);
           if (currentTextId !== null) {
-            controller.enqueue({ type: "text-end", id: currentTextId });
+            sink.enqueue({ type: "text-end", id: currentTextId });
             currentTextId = null;
           }
           // No finish-step here — tool calls may follow in the same step.
           break;
         }
         case "tool-call": {
-          transitionToIteration(controller, event.iteration);
-          controller.enqueue({
+          transitionToIteration(sink, event.iteration);
+          sink.enqueue({
             type: "tool-input-start",
             toolCallId: event.payload.toolCallId,
             toolName: event.payload.toolName,
           });
-          controller.enqueue({
+          sink.enqueue({
             type: "tool-input-available",
             toolCallId: event.payload.toolCallId,
             toolName: event.payload.toolName,
@@ -90,7 +111,7 @@ export function loopEventToUIMessageChunk(): TransformStream<LoopEvent, UIMessag
           break;
         }
         case "tool-result": {
-          controller.enqueue({
+          sink.enqueue({
             type: "tool-output-available",
             toolCallId: event.payload.toolCallId,
             output: event.payload.output,
@@ -99,14 +120,14 @@ export function loopEventToUIMessageChunk(): TransformStream<LoopEvent, UIMessag
         }
         case "loop-finish": {
           if (currentTextId !== null) {
-            controller.enqueue({ type: "text-end", id: currentTextId });
+            sink.enqueue({ type: "text-end", id: currentTextId });
             currentTextId = null;
           }
           if (currentIteration !== null) {
-            controller.enqueue({ type: "finish-step" });
+            sink.enqueue({ type: "finish-step" });
             currentIteration = null;
           }
-          controller.enqueue({ type: "finish" });
+          sink.enqueue({ type: "finish" });
           break;
         }
       }
