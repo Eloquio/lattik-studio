@@ -49,6 +49,9 @@ const bodySchema = z.object({
   /** Paused-task stack; only consumed by the Assistant. Other agents
    *  receive the array but ignore it. */
   taskStack: z.array(taskStackEntrySchema).default([]),
+  /** Regenerate-message hint — assistant message id the workflow
+   *  should truncate the DB history at (exclusive) before running. */
+  regenerateFromMessageId: z.string().optional(),
 });
 
 export default defineEventHandler(async (event) => {
@@ -76,6 +79,7 @@ export default defineEventHandler(async (event) => {
       canvasState: body.data.canvasState ?? null,
       userId: auth.userId,
       taskStack: body.data.taskStack,
+      regenerateFromMessageId: body.data.regenerateFromMessageId,
     },
   ]);
   await recordRunOwner({

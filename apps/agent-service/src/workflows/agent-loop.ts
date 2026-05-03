@@ -829,13 +829,25 @@ export interface AgentLoopInput {
    *  and persists the new turn back at the end. */
   conversationId: string;
   /** New user-side messages this turn — typically a single UIMessage with
-   *  one text part. Concatenated to the prior history before running. */
+   *  one text part. Concatenated to the prior history before running.
+   *  Empty for `regenerate-message` turns: the prior user message that
+   *  drives regeneration is already in the (truncated) DB history. */
   newUserMessages: UIMessage[];
   canvasState: unknown;
   userId: string;
   /** Paused-task stack; only meaningful for the Assistant agent. Empty
    *  array for the rest. */
   taskStack: TaskStackEntry[];
+  /** Regenerate-message hint. If set, the workflow truncates its
+   *  DB-loaded prior history at this message id (exclusive — drops the
+   *  matching message and everything after) before running. The web
+   *  client passes the assistant message id that `useChat`'s regenerate
+   *  flow targets; the workflow re-runs the model on the resulting
+   *  shorter history and the new assistant turn replaces the old one
+   *  in the persisted conversation. Unknown ids no-op (treated as
+   *  "history matches what the client sees, nothing to truncate"),
+   *  which is safer than 400-erroring on stale state. */
+  regenerateFromMessageId?: string;
 }
 
 export async function agentLoopWorkflow(input: AgentLoopInput) {
@@ -852,7 +864,20 @@ export async function agentLoopWorkflow(input: AgentLoopInput) {
     conversationId: input.conversationId,
     userId: input.userId,
   });
-  const priorMessages: UIMessage[] = prior?.messages ?? [];
+  let priorMessages: UIMessage[] = prior?.messages ?? [];
+
+  // Regenerate-message: truncate the DB history at the targeted message
+  // (exclusive) before running. The new assistant response replaces the
+  // old one. Unknown id → no-op truncation.
+  if (input.regenerateFromMessageId) {
+    const idx = priorMessages.findIndex(
+      (m) => m.id === input.regenerateFromMessageId,
+    );
+    if (idx >= 0) {
+      priorMessages = priorMessages.slice(0, idx);
+    }
+  }
+
   const fullUiHistory: UIMessage[] = [...priorMessages, ...input.newUserMessages];
 
   const messages: ModelMessage[] = await convertToModelMessages(fullUiHistory);
