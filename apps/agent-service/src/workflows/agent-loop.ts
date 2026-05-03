@@ -19,20 +19,23 @@ import { getTaskLogsTool } from "../agents/PipelineManager/tools/get-task-logs.j
 import { renderDagOverviewTool } from "../agents/PipelineManager/tools/render-dag-overview.js";
 import { renderDagRunDetailTool } from "../agents/PipelineManager/tools/render-dag-run-detail.js";
 
-// DataArchitect tools — only `renderEntityForm` for now. The richer factory
-// tools (`staticCheck`, `updateDefinition`, `getDefinition`, etc.) live in
-// `definition-flow.ts`, which transitively imports `lib/validation/index.ts`
-// + `lib/validation/referential.ts`. Those use TypeScript's `moduleResolution:
-// "Bundler"` `.js`-pointing-at-`.ts`-source idiom; nitropack's rollup
-// resolves it, but `@workflow/builders`'s esbuild step-bundle pass marks
-// any non-step / non-serde file as external and emits literal `.ts`
-// imports that Node ESM rejects at runtime. Dynamic `import()` doesn't
-// dodge this — esbuild static-resolves string-literal paths. Wiring the
-// factory tools cleanly needs either: (a) editing the source to use
-// extensionless imports throughout the DA validation chain, or (b)
-// configuring the workflow build to inline them. Both deferred to a
-// separate slice.
-import { renderEntityFormTool } from "../agents/DataArchitect/tools/render-forms.js";
+// DataArchitect tools.
+import {
+  renderEntityFormTool,
+  renderDimensionFormTool,
+  renderLoggerTableFormTool,
+  renderLattikTableFormTool,
+  renderMetricFormTool,
+} from "../agents/DataArchitect/tools/render-forms.js";
+import {
+  listDefinitionsTool,
+  getDefinitionTool,
+  createStaticCheckTool,
+  createUpdateDefinitionTool,
+  createGenerateYamlTool,
+} from "../agents/DataArchitect/tools/definition-flow.js";
+import { createSubmitPRTool } from "../agents/DataArchitect/tools/submit-pr.js";
+import { deleteDefinitionTool } from "../agents/DataArchitect/tools/delete-definition.js";
 
 // DataAnalyst tools (all pure)
 import {
@@ -151,12 +154,45 @@ Use \`getDagDetail\` / \`listDagRuns\` / \`getTaskInstances\` / \`getTaskLogs\` 
     maxLoopSteps: 6,
   },
   DataArchitect: {
-    system:
-      "You are the Data Architect spike agent. You help users define data pipeline concepts. For define-entity requests, FIRST call `renderEntityForm` to put a form on the canvas with whatever fields you can infer from the user's message (name, description). Never ask clarifying questions in chat first — the form fields ARE the questions. Be concise.",
-    // Spike scope: only `renderEntityForm` until the validation-chain bundle
-    // issue (see import comment above) is resolved.
-    toolNames: ["renderEntityForm"],
-    maxLoopSteps: 6,
+    system: `You are the Data Architect agent in Lattik Studio. You help users define data pipeline concepts: Entities, Dimensions, Logger Tables, Lattik Tables, and Metrics.
+
+## Canvas Rendering — STRICT
+**ANY define-X request — "define an entity called orders", "create a dimension", "add a logger table", etc. — MUST be answered by calling the matching renderXForm tool FIRST.** Pick:
+- \`renderEntityForm\` for entities
+- \`renderDimensionForm\` for dimensions
+- \`renderLoggerTableForm\` for logger tables
+- \`renderLattikTableForm\` for lattik tables
+- \`renderMetricForm\` for metrics
+
+Pre-fill every field you can reasonably infer from the user's message — name, description, columns, retention, grain, etc. The form fields ARE the questions; never ask in chat first. The user fills in the rest on the canvas.
+
+## PR Submission Flow
+After the user is happy with the form, the fixed sequence is:
+1. \`staticCheck\` — fix any errors before continuing.
+2. \`updateDefinition\` — save the draft.
+3. \`generateYaml\` — renders the editable YAML on the canvas. STOP and ask if they want to create the PR. The user may edit the YAML before answering.
+4. \`submitPR\` — only after explicit confirmation. Share the returned \`prUrl\` as a clickable markdown link.
+
+## Browse / Delete
+- \`listDefinitions\` and \`getDefinition\` for "show me my definitions" / "what's in X".
+- \`deleteDefinition\` for "delete the X definition" — note the YAML deletion is separate from dropping the warehouse table.
+
+Be concise.`,
+    toolNames: [
+      "renderEntityForm",
+      "renderDimensionForm",
+      "renderLoggerTableForm",
+      "renderLattikTableForm",
+      "renderMetricForm",
+      "staticCheck",
+      "updateDefinition",
+      "generateYaml",
+      "submitPR",
+      "deleteDefinition",
+      "listDefinitions",
+      "getDefinition",
+    ],
+    maxLoopSteps: 10,
   },
   DataAnalyst: {
     system:
@@ -171,6 +207,14 @@ Use \`getDagDetail\` / \`listDagRuns\` / \`getTaskInstances\` / \`getTaskLogs\` 
 // inside the model step because zodSchema's wrapper has a Symbol-keyed
 // property that fails to cross the workflow→step serialization boundary.
 // ---------------------------------------------------------------------------
+
+const definitionKindEnum = z.enum([
+  "entity",
+  "dimension",
+  "logger_table",
+  "lattik_table",
+  "metric",
+]);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const TOOL_DEFINITIONS: Record<string, () => any> = {
@@ -239,11 +283,11 @@ const TOOL_DEFINITIONS: Record<string, () => any> = {
         z.object({ dagId: z.string(), dagRunId: z.string() }),
       ),
     }),
-  // DataArchitect (spike scope — see import comment for what's deferred)
+  // DataArchitect — render-form tools (one per definition kind).
   renderEntityForm: () =>
     tool({
       description:
-        "Render an Entity definition form on the canvas. Pre-fill `initialState` with whatever the user said (name, description). The form is editable on the canvas afterwards.",
+        "Render an Entity definition form on the canvas. Pre-fill `initialState` with whatever the user said (name, description, attributes). The form is editable on the canvas afterwards.",
       inputSchema: zodSchema(
         z.object({
           initialState: z
@@ -252,6 +296,102 @@ const TOOL_DEFINITIONS: Record<string, () => any> = {
               description: z.string().optional(),
             })
             .optional(),
+        }),
+      ),
+    }),
+  renderDimensionForm: () =>
+    tool({
+      description:
+        "Render a Dimension definition form on the canvas. Pre-fill `initialState` with anything you can infer (name, description, entity it belongs to, value column).",
+      inputSchema: zodSchema(
+        z.object({ initialState: z.record(z.string(), z.unknown()).optional() }),
+      ),
+    }),
+  renderLoggerTableForm: () =>
+    tool({
+      description:
+        "Render a Logger Table definition form on the canvas. Pre-fill `initialState` with anything you can infer (name, description, columns with types, retention, dedup).",
+      inputSchema: zodSchema(
+        z.object({ initialState: z.record(z.string(), z.unknown()).optional() }),
+      ),
+    }),
+  renderLattikTableForm: () =>
+    tool({
+      description:
+        "Render a Lattik Table (materialized view) form on the canvas. Pre-fill `initialState` with anything you can infer (name, description, source tables, grain, schedule).",
+      inputSchema: zodSchema(
+        z.object({ initialState: z.record(z.string(), z.unknown()).optional() }),
+      ),
+    }),
+  renderMetricForm: () =>
+    tool({
+      description:
+        "Render a Metric definition form on the canvas. Pre-fill `initialState` with anything you can infer (name, description, source table, expression, aggregation).",
+      inputSchema: zodSchema(
+        z.object({ initialState: z.record(z.string(), z.unknown()).optional() }),
+      ),
+    }),
+  // DataArchitect — PR-flow factory tools (need canvasState; updateDefinition
+  // additionally needs the verified userId).
+  staticCheck: () =>
+    tool({
+      description:
+        "Run static validation against the current canvas form state for the given definition kind. Returns errors keyed by field path. Always call this before `updateDefinition`.",
+      inputSchema: zodSchema(z.object({ kind: definitionKindEnum })),
+    }),
+  updateDefinition: () =>
+    tool({
+      description:
+        "Save the current canvas draft as a definition the user owns. Use after `staticCheck` passes.",
+      inputSchema: zodSchema(
+        z.object({
+          kind: definitionKindEnum,
+          name: z.string().describe("The canonical name (snake_case)"),
+        }),
+      ),
+    }),
+  generateYaml: () =>
+    tool({
+      description:
+        "Render the YAML preview for the current canvas draft on the canvas. STOP after calling and ask whether to create the PR — the user may edit the YAML before answering.",
+      inputSchema: zodSchema(z.object({ kind: definitionKindEnum })),
+    }),
+  submitPR: () =>
+    tool({
+      description:
+        "Open a Gitea PR for the YAML currently shown on the canvas. Returns `{ status: 'submitted', prUrl }` on success — share the prUrl as a clickable markdown link in your reply.",
+      inputSchema: zodSchema(
+        z.object({
+          kind: definitionKindEnum,
+          name: z.string(),
+        }),
+      ),
+    }),
+  // DataArchitect — browse + delete (pure).
+  listDefinitions: () =>
+    tool({
+      description:
+        "List the user's saved definitions, optionally filtered by kind.",
+      inputSchema: zodSchema(
+        z.object({ kind: definitionKindEnum.optional() }),
+      ),
+    }),
+  getDefinition: () =>
+    tool({
+      description:
+        "Fetch a previously-saved definition by name (any kind), returning the YAML spec body.",
+      inputSchema: zodSchema(
+        z.object({ name: z.string().describe("Definition name") }),
+      ),
+    }),
+  deleteDefinition: () =>
+    tool({
+      description:
+        "Open a Gitea PR that deletes a definition's YAML file. NOTE: this only stops the pipeline going forward; it does not drop the warehouse table. Tell the user that part is manual.",
+      inputSchema: zodSchema(
+        z.object({
+          name: z.string(),
+          kind: definitionKindEnum.optional(),
         }),
       ),
     }),
@@ -324,8 +464,43 @@ const TOOL_DISPATCHERS: Record<string, Dispatcher> = {
     renderDagOverviewTool.execute!(input as never, {} as never),
   renderDagRunDetail: (input) =>
     renderDagRunDetailTool.execute!(input as never, {} as never),
-  // DataArchitect (spike scope)
+  // DataArchitect — render-form tools (pure).
   renderEntityForm: (input) => renderEntityFormTool.execute!(input as never, {} as never),
+  renderDimensionForm: (input) =>
+    renderDimensionFormTool.execute!(input as never, {} as never),
+  renderLoggerTableForm: (input) =>
+    renderLoggerTableFormTool.execute!(input as never, {} as never),
+  renderLattikTableForm: (input) =>
+    renderLattikTableFormTool.execute!(input as never, {} as never),
+  renderMetricForm: (input) =>
+    renderMetricFormTool.execute!(input as never, {} as never),
+  // DataArchitect — PR-flow factory tools.
+  staticCheck: (input, ctx) =>
+    createStaticCheckTool({ getCanvasState: () => ctx.canvasState }).execute!(
+      input as never,
+      {} as never,
+    ),
+  updateDefinition: (input, ctx) =>
+    createUpdateDefinitionTool({
+      getCanvasState: () => ctx.canvasState,
+      userId: ctx.userId,
+    }).execute!(input as never, {} as never),
+  generateYaml: (input, ctx) =>
+    createGenerateYamlTool({ getCanvasState: () => ctx.canvasState }).execute!(
+      input as never,
+      {} as never,
+    ),
+  submitPR: (input, ctx) =>
+    createSubmitPRTool({ getCanvasState: () => ctx.canvasState }).execute!(
+      input as never,
+      {} as never,
+    ),
+  // DataArchitect — pure browse + delete.
+  listDefinitions: (input) =>
+    listDefinitionsTool.execute!(input as never, {} as never),
+  getDefinition: (input) => getDefinitionTool.execute!(input as never, {} as never),
+  deleteDefinition: (input) =>
+    deleteDefinitionTool.execute!(input as never, {} as never),
   // DataAnalyst — all pure
   listTables: (input) => listTablesTool.execute!(input as never, {} as never),
   describeTable: (input) => describeTableTool.execute!(input as never, {} as never),
