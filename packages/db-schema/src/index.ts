@@ -402,7 +402,10 @@ export const steps = pgTable(
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   },
   (t) => [
-    index("idx_run_step_run_seq").on(t.runId, t.sequence),
+    // The unique constraint creates its own backing btree index on
+    // (run_id, sequence), so a separate `idx_run_step_run_seq` would be
+    // a redundant duplicate. The DB historically had both; the standalone
+    // index is dropped via DDL alongside this commit.
     unique("uq_run_step_run_seq").on(t.runId, t.sequence),
   ]
 );
