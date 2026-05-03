@@ -79,6 +79,12 @@ export function ChatPanel({
   const [transport] = useState(
     () =>
       new DefaultChatTransport({
+        // Routes through the trusted-client bridge to apps/agent-service.
+        // The proxy attaches the auth context (X-User-Id from the NextAuth
+        // session, plus VERCEL_OIDC_TOKEN in production) and forwards to
+        // agent-service's /chat. The body shape matches what agent-service
+        // accepts directly.
+        api: "/api/agent-proxy/chat",
         body: () => ({
           extensionId: extensionIdRef.current,
           canvasState: canvasStateRef.current,

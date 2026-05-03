@@ -79,25 +79,78 @@ const AGENTS = parseAgents(AGENT_MANIFEST);
 const taskStackEntrySchema = z.object({
   extensionId: z.string().min(1),
   reason: z.string(),
+  // Optional fields the existing web client sends; we accept the wire
+  // shape but agent-service uses only extensionId + reason.
+  canvasState: z.unknown().optional(),
+  pausedAt: z.string().optional(),
 });
 
+/**
+ * /chat request shape — matches the body the web's `DefaultChatTransport`
+ * sends through useChat. agent-service is the ultimate consumer, so the
+ * schema mirrors what the AI SDK chat hook produces verbatim:
+ *
+ *   - `messages` — full UIMessage[] history (opaque to validation; the
+ *     AI SDK trusts the shape end-to-end since both sides are typed).
+ *   - `extensionId` — kebab-case specialist id (`pipeline-manager`,
+ *     `data-architect`, `data-analyst`), or null/undefined when talking
+ *     to the Assistant concierge. Web's chat-panel maintains this from
+ *     the active task / handoff state.
+ *   - `canvasState` — current canvas state, passed through to whichever
+ *     agent is built so its readCanvasState tool can return it.
+ *   - `taskStack` — paused-task stack (depth-1 today). Used by the
+ *     Assistant's handoff tool to enforce the depth cap and by its
+ *     {{taskStack}} prompt seam.
+ *   - `resumeContext` — short text describing prior context when
+ *     resuming a paused agent. Maps to the {{resumeContext}} seam.
+ */
 const chatRequestSchema = z.object({
-  conversationId: z.string().min(1),
-  agentId: z.string().min(1),
-  message: z.string().min(1),
-  /** Paused-task stack — depth-1 today (max one entry). Used by the
-   * Assistant's handoff tool to enforce the depth cap and by its
-   * prompt's {{taskStack}} seam to remind the agent of the resume
-   * target. */
+  messages: z.array(z.unknown()),
+  extensionId: z.string().nullable().optional(),
+  canvasState: z.unknown().optional(),
   taskStack: z.array(taskStackEntrySchema).optional(),
+  resumeContext: z.string().optional(),
 });
+
+/**
+ * Map the web's kebab-case extensionId to the canonical PascalCase
+ * AgentId. Null / undefined extensionId means "talk to the Assistant"
+ * (the concierge that routes incoming messages to specialists).
+ *
+ * Throws a structured 400 if an unknown extensionId arrives — that's a
+ * web/agent-service contract drift the caller should notice.
+ */
+const EXTENSION_TO_AGENT: Record<string, AgentId> = {
+  "pipeline-manager": "PipelineManager",
+  "data-architect": "DataArchitect",
+  "data-analyst": "DataAnalyst",
+};
+
+function resolveAgentId(extensionId: string | null | undefined): AgentId {
+  if (extensionId === null || extensionId === undefined || extensionId === "") {
+    return "Assistant";
+  }
+  const id = EXTENSION_TO_AGENT[extensionId];
+  if (!id) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: `Unknown extension "${extensionId}". Supported: ${Object.keys(EXTENSION_TO_AGENT).join(", ")}, or omit for the Assistant.`,
+    });
+  }
+  return id;
+}
 
 // Per-agent tool registries. Today only Pipeline Manager exists; new agents
 // will append their entries here as their AGENT.md migrations land. The
 // inline literal at construction time is deliberate — assigning to a const
 // triggers exponential type instantiation (see planner.ts comment in the
 // agent-worker).
-function buildPipelineManagerAgent(canvasState: unknown | null) {
+interface BuildOpts {
+  canvasState: unknown;
+  resumeContext?: string;
+}
+
+function buildPipelineManagerAgent(opts: BuildOpts) {
   const agent = AGENTS.get("PipelineManager");
   if (!agent) {
     throw createError({
@@ -108,7 +161,7 @@ function buildPipelineManagerAgent(canvasState: unknown | null) {
 
   const tools = {
     getSkill: createGetSkillTool({ caller: "PipelineManager" }),
-    readCanvasState: createReadCanvasStateTool({ getCanvasState: () => canvasState }),
+    readCanvasState: createReadCanvasStateTool({ getCanvasState: () => opts.canvasState }),
     listDags: listDagsTool,
     getDagDetail: getDagDetailTool,
     listDagRuns: listDagRunsTool,
@@ -137,7 +190,10 @@ function buildPipelineManagerAgent(canvasState: unknown | null) {
   return new ToolLoopAgent({
     id: agent.frontmatter.id,
     model: gateway(agent.frontmatter.model),
-    instructions: renderInstructions(agent.body, { skills: "(none yet)" }),
+    instructions: renderInstructions(agent.body, {
+      skills: "(none yet)",
+      resumeContext: opts.resumeContext,
+    }),
     tools: {
       getSkill: tools.getSkill,
       readCanvasState: tools.readCanvasState,
@@ -154,7 +210,7 @@ function buildPipelineManagerAgent(canvasState: unknown | null) {
   });
 }
 
-function buildDataArchitectAgent(canvasState: unknown | null, userId: string) {
+function buildDataArchitectAgent(opts: BuildOpts & { userId: string }) {
   const agent = AGENTS.get("DataArchitect");
   if (!agent) {
     throw createError({
@@ -186,23 +242,26 @@ function buildDataArchitectAgent(canvasState: unknown | null, userId: string) {
   return new ToolLoopAgent({
     id: agent.frontmatter.id,
     model: gateway(agent.frontmatter.model),
-    instructions: renderInstructions(agent.body, { skills: "(none yet)" }),
+    instructions: renderInstructions(agent.body, {
+      skills: "(none yet)",
+      resumeContext: opts.resumeContext,
+    }),
     tools: {
       getSkill: createGetSkillTool({ caller: "DataArchitect" }),
-      readCanvasState: createReadCanvasStateTool({ getCanvasState: () => canvasState }),
+      readCanvasState: createReadCanvasStateTool({ getCanvasState: () => opts.canvasState }),
       renderEntityForm: renderEntityFormTool,
       renderDimensionForm: renderDimensionFormTool,
       renderLoggerTableForm: renderLoggerTableFormTool,
       renderLattikTableForm: renderLattikTableFormTool,
       renderMetricForm: renderMetricFormTool,
       reviewDefinition: reviewDefinitionTool,
-      staticCheck: createStaticCheckTool({ getCanvasState: () => canvasState }),
+      staticCheck: createStaticCheckTool({ getCanvasState: () => opts.canvasState }),
       updateDefinition: createUpdateDefinitionTool({
-        userId,
-        getCanvasState: () => canvasState,
+        userId: opts.userId,
+        getCanvasState: () => opts.canvasState,
       }),
-      generateYaml: createGenerateYamlTool({ getCanvasState: () => canvasState }),
-      submitPR: createSubmitPRTool({ getCanvasState: () => canvasState }),
+      generateYaml: createGenerateYamlTool({ getCanvasState: () => opts.canvasState }),
+      submitPR: createSubmitPRTool({ getCanvasState: () => opts.canvasState }),
       deleteDefinition: deleteDefinitionTool,
       listDefinitions: listDefinitionsTool,
       getDefinition: getDefinitionTool,
@@ -212,7 +271,7 @@ function buildDataArchitectAgent(canvasState: unknown | null, userId: string) {
   });
 }
 
-function buildDataAnalystAgent(canvasState: unknown | null) {
+function buildDataAnalystAgent(opts: BuildOpts) {
   const agent = AGENTS.get("DataAnalyst");
   if (!agent) {
     throw createError({
@@ -238,7 +297,10 @@ function buildDataAnalystAgent(canvasState: unknown | null) {
   return new ToolLoopAgent({
     id: agent.frontmatter.id,
     model: gateway(agent.frontmatter.model),
-    instructions: renderInstructions(agent.body, { skills: "(none yet)" }),
+    instructions: renderInstructions(agent.body, {
+      skills: "(none yet)",
+      resumeContext: opts.resumeContext,
+    }),
     tools: {
       getSkill: createGetSkillTool({ caller: "DataAnalyst" }),
       listTables: listTablesTool,
@@ -246,7 +308,7 @@ function buildDataAnalystAgent(canvasState: unknown | null) {
       renderSqlEditor: renderSqlEditorTool,
       runQuery: runQueryTool,
       renderChart: renderChartTool,
-      readCanvasState: createReadCanvasStateTool({ getCanvasState: () => canvasState }),
+      readCanvasState: createReadCanvasStateTool({ getCanvasState: () => opts.canvasState }),
       updateLayout: updateLayoutTool,
       // listDefinitions / getDefinition are conceptually shared between
       // DataArchitect and DataAnalyst (DA reads definitions for context-aware
@@ -313,12 +375,6 @@ function sanitizeForPrompt(text: string): string {
     .slice(0, 500);
 }
 
-const SUPPORTED_AGENTS: ReadonlySet<AgentId> = new Set([
-  "Assistant",
-  "PipelineManager",
-  "DataArchitect",
-  "DataAnalyst",
-]);
 
 export default defineEventHandler(async (event) => {
   const auth = event.context.auth;
@@ -339,47 +395,42 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  const { agentId, message } = body.data;
-  if (!SUPPORTED_AGENTS.has(agentId as AgentId)) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: `Unknown or unsupported agent "${agentId}". Supported: ${[...SUPPORTED_AGENTS].join(", ")}`,
-    });
-  }
-
-  // Future: load prior UI messages from packages/db-schema's conversations
-  // table by (clientId, conversationId). For now, every request is a fresh
-  // single-turn stream — no history.
-  const uiMessages: UIMessage[] = [
-    {
-      id: crypto.randomUUID(),
-      role: "user",
-      parts: [{ type: "text", text: message }],
-    },
-  ];
+  const {
+    messages: rawMessages,
+    extensionId,
+    canvasState,
+    taskStack,
+    resumeContext,
+  } = body.data;
+  const agentId = resolveAgentId(extensionId);
+  const uiMessages = rawMessages as UIMessage[];
 
   // Branching on agentId so each call site sees one concrete ToolLoopAgent
   // generic — TS can't unify the union of agents with different tool sets.
   if (agentId === "Assistant") {
     return createAgentUIStreamResponse({
-      agent: buildAssistantAgent(body.data.taskStack ?? []),
+      agent: buildAssistantAgent(taskStack ?? []),
       uiMessages,
     });
   }
   if (agentId === "DataArchitect") {
     return createAgentUIStreamResponse({
-      agent: buildDataArchitectAgent(null, auth.userId),
+      agent: buildDataArchitectAgent({
+        canvasState,
+        userId: auth.userId,
+        resumeContext,
+      }),
       uiMessages,
     });
   }
   if (agentId === "DataAnalyst") {
     return createAgentUIStreamResponse({
-      agent: buildDataAnalystAgent(null),
+      agent: buildDataAnalystAgent({ canvasState, resumeContext }),
       uiMessages,
     });
   }
   return createAgentUIStreamResponse({
-    agent: buildPipelineManagerAgent(null),
+    agent: buildPipelineManagerAgent({ canvasState, resumeContext }),
     uiMessages,
   });
 });
