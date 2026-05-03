@@ -5,8 +5,7 @@ import type { UIMessage } from "ai";
 import { DefaultChatTransport } from "ai";
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Bot, Pencil, Plus, Trash2 } from "lucide-react";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Streamdown } from "streamdown";
 import { buildSpecFromParts } from "@json-render/react";
 import { intentToSpec } from "@eloquio/json-render-adapter";
 import {
@@ -640,14 +639,26 @@ export function ChatPanel({
                     <div className="mt-1 border-l-2 border-[#e0a96e]/40 pl-4 text-sm text-white/90 prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-headings:text-white prose-strong:text-white prose-code:text-[#e0a96e] prose-code:bg-white/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-pre:bg-white/5 prose-pre:border prose-pre:border-white/10 prose-a:text-[#e0a96e] prose-a:font-medium prose-a:underline prose-a:decoration-[#e0a96e]/50 prose-a:underline-offset-2 hover:prose-a:text-[#f0bb84] hover:prose-a:decoration-[#e0a96e] prose-table:border-collapse prose-table:w-full prose-table:text-xs prose-th:border prose-th:border-white/20 prose-th:bg-white/5 prose-th:px-2 prose-th:py-1 prose-th:text-left prose-th:text-white/80 prose-td:border prose-td:border-white/10 prose-td:px-2 prose-td:py-1">
                       {message.parts.map((part, i) => {
                         if (part.type === "text") {
+                          // Streamdown is the AI-Elements-recommended
+                          // streaming-aware markdown renderer for assistant
+                          // text — it parses incrementally so token-by-token
+                          // updates don't cause re-render jitter. Ships
+                          // remark-gfm + rehype-sanitize by default;
+                          // `skipHtml` + `disallowedElements` are kept as
+                          // belt-and-suspenders even though sanitization is
+                          // built in. The `components.a` override forces
+                          // external links into a new tab.
                           return (
-                            <Markdown
+                            <Streamdown
                               key={i}
-                              remarkPlugins={[remarkGfm]}
                               skipHtml
                               disallowedElements={["script", "iframe", "object", "embed", "form"]}
                               components={{
-                                a: ({ href, children, ...props }) => (
+                                a: ({
+                                  href,
+                                  children,
+                                  ...props
+                                }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
                                   <a
                                     {...props}
                                     href={href}
@@ -660,7 +671,7 @@ export function ChatPanel({
                               }}
                             >
                               {part.text}
-                            </Markdown>
+                            </Streamdown>
                           );
                         }
                         if (part.type.startsWith("tool-") && "state" in part) {
