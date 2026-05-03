@@ -13,7 +13,8 @@
     "build": "nitropack build",
     "prepare": "nitropack prepare",
     "preview": "node .output/server/index.mjs",
-    "typecheck": "nitropack prepare && tsc --noEmit"
+    "typecheck": "nitropack prepare && tsc --noEmit",
+    "test": "tsx --test src/lib/loop-event-to-ui-chunk.test.ts src/workflows/agent-loop.helpers.test.ts"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^3.0.83",
@@ -32,6 +33,7 @@
   "devDependencies": {
     "@types/node": "^20",
     "nitropack": "^2.13.4",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }

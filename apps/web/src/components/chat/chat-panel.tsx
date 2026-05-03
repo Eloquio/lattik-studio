@@ -5,7 +5,7 @@ import type { UIMessage } from "ai";
 import { DefaultChatTransport } from "ai";
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Bot, Pencil, Plus, Trash2 } from "lucide-react";
-import { Streamdown } from "streamdown";
+import { Streamdown, type Components as StreamdownComponents } from "streamdown";
 import { buildSpecFromParts } from "@json-render/react";
 import { intentToSpec } from "@eloquio/json-render-adapter";
 import {
@@ -17,6 +17,10 @@ import { ToolResult } from "./tool-result";
 import { ReviewSuggestions, type ReviewStatus } from "./review-suggestions";
 import { saveConversation, deleteConversation } from "@/lib/actions/conversations";
 import type { TaskStackEntry } from "@/lib/types/task-stack";
+import {
+  extensionIdToAgentId,
+  agentIdToExtensionId,
+} from "@/lib/chat/agent-id";
 
 /** Map extensionId → human-readable display name for the chat header and
  *  per-message agent labels. Keeps the client component free of server-only
@@ -36,43 +40,6 @@ function extensionDisplayName(extensionId: string): string {
   );
 }
 
-/** Map an extensionId to the workflow loop's PascalCase `agentId`.
- *  Null/undefined extensionId means the Assistant concierge — it now
- *  also runs through the workflow loop, so we always return a valid
- *  AgentId. */
-function extensionIdToAgentId(
-  extensionId: string | null,
-): "Assistant" | "PipelineManager" | "DataArchitect" | "DataAnalyst" {
-  switch (extensionId) {
-    case "pipeline-manager":
-      return "PipelineManager";
-    case "data-architect":
-      return "DataArchitect";
-    case "data-analyst":
-      return "DataAnalyst";
-    default:
-      return "Assistant";
-  }
-}
-
-/** Inverse of `extensionIdToAgentId` — used at the handoff-result seam,
- *  where the agent-service tool returns its `handedOffTo` value in
- *  PascalCase (it's the agent-service's AgentId, not a web-side
- *  extensionId). The rest of the web app keys canvas registry, display
- *  names, and the conversations row's activeExtensionId on kebab-case,
- *  so we normalize once here. */
-function agentIdToExtensionId(agentId: string): string {
-  switch (agentId) {
-    case "PipelineManager":
-      return "pipeline-manager";
-    case "DataArchitect":
-      return "data-architect";
-    case "DataAnalyst":
-      return "data-analyst";
-    default:
-      return agentId;
-  }
-}
 
 interface ChatPanelProps {
   chatId: string;
@@ -680,11 +647,7 @@ export function ChatPanel({
                               skipHtml
                               disallowedElements={["script", "iframe", "object", "embed", "form"]}
                               components={{
-                                a: ({
-                                  href,
-                                  children,
-                                  ...props
-                                }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+                                a: ({ href, children, node: _node, ...props }) => (
                                   <a
                                     {...props}
                                     href={href}
@@ -694,7 +657,7 @@ export function ChatPanel({
                                     {children}
                                   </a>
                                 ),
-                              }}
+                              } satisfies StreamdownComponents}
                             >
                               {part.text}
                             </Streamdown>

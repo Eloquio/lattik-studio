@@ -586,7 +586,7 @@ const TOOL_DISPATCHERS: Record<string, Dispatcher> = {
  * system prompt. Strip control chars and the triple-backtick fence
  * delimiter that could be used to break out of the system block.
  */
-function sanitizeForPrompt(text: string): string {
+export function sanitizeForPrompt(text: string): string {
   return text
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
     .replace(/```/g, "''")
@@ -599,7 +599,7 @@ function sanitizeForPrompt(text: string): string {
  * always, but the Assistant only needs the special instructions when a
  * task is on the stack.
  */
-function renderTaskStackBlock(taskStack: TaskStackEntry[]): string {
+export function renderTaskStackBlock(taskStack: TaskStackEntry[]): string {
   const top = taskStack.length > 0 ? taskStack[taskStack.length - 1] : null;
   if (!top) return "";
   return `\n## Paused Task\nThere is a paused task on the stack: the "${top.extensionId}" agent was working on "${sanitizeForPrompt(top.reason)}" and is waiting to resume.\n- Do NOT hand off to a different specialist — handle the user's new request yourself.\n- When the user indicates they are done with their current request ("that's all", "nothing else", "I'm done", etc.), use the handoff tool to resume the paused agent (agentId: "${top.extensionId}") so it can continue where it left off.\n- Briefly tell the user you're handing them back to the paused agent.`;
