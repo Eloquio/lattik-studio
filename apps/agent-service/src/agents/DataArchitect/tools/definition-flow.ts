@@ -1,5 +1,6 @@
 import { tool, zodSchema } from "ai";
 import { z } from "zod";
+import type { YamlPreviewIntent } from "@eloquio/render-intents";
 import {
   listDefinitions,
   getDefinitionByName,
@@ -191,7 +192,9 @@ export function createGenerateYamlTool(opts: CreateGenerateYamlToolOptions) {
         ),
       }),
     ),
-    execute: async (input: { kind: z.infer<typeof definitionKindEnum> }) => {
+    execute: async (
+      input: { kind: z.infer<typeof definitionKindEnum> },
+    ): Promise<YamlPreviewIntent | { error: string }> => {
       const canvasState = opts.getCanvasState();
       const name = getDefinitionNameFromCanvas(canvasState);
       if (!name) {
@@ -203,30 +206,14 @@ export function createGenerateYamlTool(opts: CreateGenerateYamlToolOptions) {
       const definitionSpec = canvasStateToSpec(input.kind, canvasState);
       const files = generateYamlFiles(input.kind, name, definitionSpec);
 
-      // Phase 2 will replace this with a render-intent. For now we emit the
-      // same json-render Spec apps/web already knows how to display, typed
-      // as `unknown` to avoid pulling @json-render/core into agent-service.
-      const spec: unknown = {
-        root: "main",
-        elements: {
-          main: { type: "YamlEditor", props: {}, children: [] },
-        },
-        state: {
-          kind: input.kind,
-          name,
-          files: files.map((f, i) => ({
-            _key: `yamlfile_${i}`,
-            path: f.path,
-            content: f.content,
-          })),
-          active_file: 0,
-        },
-      };
       return {
-        kind: input.kind,
-        spec,
-        instruction:
-          "The YAML editor is now on the canvas with the generated YAML pre-filled. The user can review, edit, and add files before creating the PR. Tell the user briefly that the YAML is ready and ask if they'd like to create the PR. Do NOT call submitPR until the user explicitly confirms.",
+        kind: "yaml-preview",
+        surface: "yaml",
+        data: {
+          definitionKind: input.kind,
+          name,
+          files,
+        },
       };
     },
   });
