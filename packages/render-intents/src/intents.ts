@@ -79,6 +79,14 @@ export interface DagRunDetailIntent {
   data: {
     dagId: string;
     runId: string;
+    /** Logical run date (Airflow's `logical_date`), or null when unknown. */
+    logicalDate: string | null;
+    /** Run-level state. Same vocabulary as DagRunState plus null for
+     * "agent couldn't fetch run metadata." */
+    runState: DagRunState | null;
+    /** ISO timestamps; null when the run hasn't started / finished yet. */
+    startDate: string | null;
+    endDate: string | null;
     tasks: TaskInstanceSummary[];
   };
 }

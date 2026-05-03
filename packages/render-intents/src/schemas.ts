@@ -17,6 +17,8 @@ import { z } from "zod";
 // Building blocks
 // ---------------------------------------------------------------------------
 
+const dagRunStateSchema = z.enum(["queued", "running", "success", "failed"]);
+
 const dagSummarySchema = z.object({
   dagId: z.string(),
   description: z.string().nullable(),
@@ -25,12 +27,8 @@ const dagSummarySchema = z.object({
   schedule: z.union([z.string(), z.object({ value: z.string() }), z.null()]),
   tags: z.array(z.string()),
   nextRun: z.string().nullable(),
-  lastRunState: z
-    .enum(["queued", "running", "success", "failed"])
-    .nullable(),
-  recentRunStates: z.array(
-    z.enum(["queued", "running", "success", "failed"]),
-  ),
+  lastRunState: dagRunStateSchema.nullable(),
+  recentRunStates: z.array(dagRunStateSchema),
 });
 
 const taskInstanceStateSchema = z
@@ -83,6 +81,10 @@ const dagRunDetailIntentSchema = z.object({
   data: z.object({
     dagId: z.string(),
     runId: z.string(),
+    logicalDate: z.string().nullable(),
+    runState: dagRunStateSchema.nullable(),
+    startDate: z.string().nullable(),
+    endDate: z.string().nullable(),
     tasks: z.array(taskInstanceSummarySchema),
   }),
 });
