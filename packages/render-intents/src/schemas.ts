@@ -25,6 +25,12 @@ const dagSummarySchema = z.object({
   schedule: z.union([z.string(), z.object({ value: z.string() }), z.null()]),
   tags: z.array(z.string()),
   nextRun: z.string().nullable(),
+  lastRunState: z
+    .enum(["queued", "running", "success", "failed"])
+    .nullable(),
+  recentRunStates: z.array(
+    z.enum(["queued", "running", "success", "failed"]),
+  ),
 });
 
 const taskInstanceStateSchema = z

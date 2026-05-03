@@ -24,6 +24,8 @@
 // Pipeline Manager
 // ---------------------------------------------------------------------------
 
+export type DagRunState = "queued" | "running" | "success" | "failed";
+
 export interface DagSummary {
   dagId: string;
   description: string | null;
@@ -34,6 +36,10 @@ export interface DagSummary {
   tags: string[];
   /** ISO timestamp of the next scheduled run, or null if paused/unscheduled. */
   nextRun: string | null;
+  /** State of the most recent run, or null when the DAG has never run. */
+  lastRunState: DagRunState | null;
+  /** States of the last N runs in chronological order — drives the sparkline. */
+  recentRunStates: DagRunState[];
 }
 
 export interface DagOverviewIntent {

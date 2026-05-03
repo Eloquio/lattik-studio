@@ -35,6 +35,9 @@ importers:
       '@eloquio/lattik-expression':
         specifier: workspace:*
         version: link:../../packages/lattik-expression
+      '@eloquio/render-intents':
+        specifier: workspace:*
+        version: link:../../packages/render-intents
       ai:
         specifier: ^6.0.141
         version: 6.0.142(zod@4.3.6)
