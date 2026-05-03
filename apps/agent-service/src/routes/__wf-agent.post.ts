@@ -14,8 +14,10 @@ import {
 
 // Spike: kicks off the generalized per-tool-durable agent loop. Pick the
 // agent via `agentId` (PipelineManager / DataArchitect / DataAnalyst).
-// Per-request state (canvasState, userId) flows through workflow input.
-// Stream is NDJSON-encoded for easy curl inspection.
+// `userId` comes from the verified auth context, NOT the request body —
+// the trusted client (web / slack-bot / discord-bot) authenticates its
+// own user and asserts identity via `X-User-Id`. Stream is NDJSON-encoded
+// for easy curl inspection.
 
 const agentIdSchema = z.enum(["PipelineManager", "DataArchitect", "DataAnalyst"]);
 
@@ -26,10 +28,17 @@ const bodySchema = z.object({
    *  part. The workflow loads prior history from the DB and appends. */
   newUserMessages: z.array(z.unknown()).default([]),
   canvasState: z.unknown().optional(),
-  userId: z.string(),
 });
 
 export default defineEventHandler(async (event) => {
+  const auth = event.context.auth;
+  if (!auth) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: "auth context missing — middleware not wired",
+    });
+  }
+
   const body = await readValidatedBody(event, (raw) => bodySchema.safeParse(raw));
   if (!body.success) {
     throw createError({
@@ -44,7 +53,7 @@ export default defineEventHandler(async (event) => {
       conversationId: body.data.conversationId,
       newUserMessages: body.data.newUserMessages as UIMessage[],
       canvasState: body.data.canvasState ?? null,
-      userId: body.data.userId,
+      userId: auth.userId,
     },
   ]);
 
