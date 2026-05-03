@@ -9,10 +9,13 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { buildSpecFromParts } from "@json-render/react";
 import { intentToSpec } from "@eloquio/json-render-adapter";
-import { renderIntentSchema } from "@eloquio/render-intents";
+import {
+  renderIntentSchema,
+  type ReviewSuggestion,
+  type ReviewSuggestionsWidget,
+} from "@eloquio/render-intents";
 import { ToolResult } from "./tool-result";
 import { ReviewSuggestions, type ReviewStatus } from "./review-suggestions";
-import type { ReviewSuggestion } from "@/extensions/data-architect/tools/review-definition";
 import { saveConversation, deleteConversation } from "@/lib/actions/conversations";
 import type { TaskStackEntry } from "@/lib/types/task-stack";
 
@@ -591,8 +594,11 @@ export function ChatPanel({
                             p.state === "output-available" &&
                             p.output &&
                             typeof p.output === "object" &&
-                            "suggestions" in p.output &&
-                            Array.isArray((p.output as Record<string, unknown>).suggestions) &&
+                            (p.output as { kind?: string }).kind === "review-suggestions" &&
+                            "data" in p.output &&
+                            Array.isArray(
+                              (p.output as { data?: { suggestions?: unknown } }).data?.suggestions,
+                            ) &&
                             p.toolCallId
                           ) {
                             const toolCallId = p.toolCallId;
@@ -605,7 +611,7 @@ export function ChatPanel({
                             return (
                               <ReviewSuggestions
                                 key={i}
-                                suggestions={(p.output as { suggestions: ReviewSuggestion[] }).suggestions}
+                                suggestions={(p.output as ReviewSuggestionsWidget).data.suggestions}
                                 onApply={onCanvasStateWrite}
                                 onComplete={(summary) => sendMessage({ text: summary })}
                                 initialStatus={statusPart?.data}

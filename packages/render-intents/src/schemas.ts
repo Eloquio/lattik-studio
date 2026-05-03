@@ -119,17 +119,6 @@ const metricFormIntentSchema = z.object({
   data: formInitialStateSchema,
 });
 
-const definitionReviewIntentSchema = z.object({
-  kind: z.literal("definition-review"),
-  surface: z.literal("review"),
-  data: z.object({
-    definitionKind: z.string(),
-    name: z.string(),
-    before: z.unknown(),
-    after: z.unknown(),
-  }),
-});
-
 const yamlPreviewIntentSchema = z.object({
   kind: z.literal("yaml-preview"),
   surface: z.literal("yaml"),
@@ -190,7 +179,6 @@ export const renderIntentSchema = z.discriminatedUnion("kind", [
   loggerTableFormIntentSchema,
   lattikTableFormIntentSchema,
   metricFormIntentSchema,
-  definitionReviewIntentSchema,
   yamlPreviewIntentSchema,
   prSubmittedIntentSchema,
   sqlEditorIntentSchema,
@@ -222,11 +210,6 @@ const definitionFormActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("submit"), values: z.record(z.string(), z.unknown()) }),
   z.object({ type: z.literal("edit-field"), field: z.string(), value: z.unknown() }),
   z.object({ type: z.literal("cancel") }),
-]);
-
-const definitionReviewActionSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("approve") }),
-  z.object({ type: z.literal("reject"), reason: z.string().optional() }),
 ]);
 
 const yamlPreviewActionSchema = z.discriminatedUnion("type", [
@@ -301,11 +284,6 @@ export const intentActionSchema = z.discriminatedUnion("intentKind", [
     action: definitionFormActionSchema,
   }),
   z.object({
-    intentKind: z.literal("definition-review"),
-    surface: z.literal("review"),
-    action: definitionReviewActionSchema,
-  }),
-  z.object({
     intentKind: z.literal("yaml-preview"),
     surface: z.literal("yaml"),
     action: yamlPreviewActionSchema,
@@ -330,4 +308,32 @@ export const intentActionSchema = z.discriminatedUnion("intentKind", [
     surface: z.literal("chart"),
     action: chartActionSchema,
   }),
+]);
+
+// ---------------------------------------------------------------------------
+// Message widget schemas — parallel to render-intents (see widgets.ts).
+// ---------------------------------------------------------------------------
+
+const reviewSuggestionActionSchema = z.object({
+  path: z.string(),
+  value: z.unknown(),
+});
+
+const reviewSuggestionSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  actions: z.array(reviewSuggestionActionSchema).min(1),
+});
+
+const reviewSuggestionsWidgetSchema = z.object({
+  kind: z.literal("review-suggestions"),
+  data: z.object({
+    definitionKind: z.string(),
+    suggestions: z.array(reviewSuggestionSchema),
+  }),
+});
+
+export const messageWidgetSchema = z.discriminatedUnion("kind", [
+  reviewSuggestionsWidgetSchema,
 ]);

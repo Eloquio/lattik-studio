@@ -84,22 +84,10 @@ describe("intentToSpec dispatcher", () => {
     expect(spec.elements.main).toMatchObject({ type: "Section" });
   });
 
-  it("returns a PlaceholderCard for kinds without an adapter yet", () => {
-    // definition-review is the only remaining unimplemented adapter as
-    // of this slice — its translator needs a canvas-state-aware diff
-    // renderer that doesn't exist yet.
-    const spec = intentToSpec({
-      kind: "definition-review",
-      surface: "review",
-      data: {
-        definitionKind: "entity",
-        name: "user",
-        before: {},
-        after: {},
-      },
-    });
-    expect(spec.elements.main).toMatchObject({
-      type: "PlaceholderCard",
-    });
-  });
+  // Every RenderIntent kind now has a real translator. The
+  // PlaceholderCard fallback is kept in the source as a graceful
+  // degradation hook for future kinds that ship before their adapter,
+  // but there's no kind to test it against today — when the next new
+  // kind lands, add a placeholder test against it for the in-flight
+  // window.
 });

@@ -12,7 +12,6 @@ export {
   type LoggerTableFormIntent,
   type LattikTableFormIntent,
   type MetricFormIntent,
-  type DefinitionReviewIntent,
   type YamlPreviewIntent,
   type PrSubmittedIntent,
   type SqlEditorIntent,
@@ -26,7 +25,6 @@ export {
   type DagOverviewAction,
   type DagRunDetailAction,
   type DefinitionFormAction,
-  type DefinitionReviewAction,
   type YamlPreviewAction,
   type PrSubmittedAction,
   type SqlEditorAction,
@@ -34,4 +32,17 @@ export {
   type ChartAction,
 } from "./actions.js";
 
-export { renderIntentSchema, intentActionSchema } from "./schemas.js";
+export {
+  isWidget,
+  type MessageWidget,
+  type MessageWidgetKind,
+  type ReviewSuggestionAction,
+  type ReviewSuggestion,
+  type ReviewSuggestionsWidget,
+} from "./widgets.js";
+
+export {
+  renderIntentSchema,
+  intentActionSchema,
+  messageWidgetSchema,
+} from "./schemas.js";
