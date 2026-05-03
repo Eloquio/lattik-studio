@@ -37,10 +37,10 @@ function extensionDisplayName(extensionId: string): string {
   );
 }
 
-/** Map kebab-case `extensionId` to the workflow loop's PascalCase
- *  `agentId`. Returns null for the Assistant (extensionId = null) — the
- *  Assistant concierge isn't yet wired into the workflow loop, so chats
- *  without an active specialist still go through the legacy `/chat` route. */
+/** Map an extensionId to the workflow loop's PascalCase `agentId`.
+ *  Returns null for the Assistant — its tool surface (`handoff`) hasn't
+ *  been migrated to the workflow loop yet, so chats without an active
+ *  specialist still go through the legacy `/chat` route. */
 function extensionIdToAgentId(
   extensionId: string | null,
 ): "PipelineManager" | "DataArchitect" | "DataAnalyst" | null {
@@ -53,6 +53,25 @@ function extensionIdToAgentId(
       return "DataAnalyst";
     default:
       return null;
+  }
+}
+
+/** Inverse of `extensionIdToAgentId` — used at the handoff-result seam,
+ *  where the agent-service tool returns its `handedOffTo` value in
+ *  PascalCase (it's the agent-service's AgentId, not a web-side
+ *  extensionId). The rest of the web app keys canvas registry, display
+ *  names, and the conversations row's activeExtensionId on kebab-case,
+ *  so we normalize once here. */
+function agentIdToExtensionId(agentId: string): string {
+  switch (agentId) {
+    case "PipelineManager":
+      return "pipeline-manager";
+    case "DataArchitect":
+      return "data-architect";
+    case "DataAnalyst":
+      return "data-analyst";
+    default:
+      return agentId;
   }
 }
 
@@ -323,9 +342,14 @@ export function ChatPanel({
             return;
           }
 
-          // CASE 1: Forward handoff (assistant → specialist)
+          // CASE 1: Forward handoff (assistant → specialist).
+          // The tool returns its `handedOffTo` as the agent-service's
+          // PascalCase AgentId; the rest of the web app keys things on
+          // kebab-case extensionId, so normalize once at this seam.
           if ("handedOffTo" in toolOutput && toolOutput.handedOffTo) {
-            const targetAgent = toolOutput.handedOffTo as string;
+            const targetAgent = agentIdToExtensionId(
+              toolOutput.handedOffTo as string,
+            );
             if (targetAgent !== activeExtensionId) {
               // Check if this is a resume (target matches the paused specialist on the stack)
               const stack = taskStackRef.current;
