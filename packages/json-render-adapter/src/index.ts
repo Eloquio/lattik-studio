@@ -17,11 +17,17 @@ import { dagOverviewToSpec } from "./dag-overview.js";
 import { dagRunDetailToSpec } from "./dag-run-detail.js";
 import { yamlPreviewToSpec } from "./yaml-preview.js";
 import { prSubmittedToSpec } from "./pr-submitted.js";
+import { sqlEditorToSpec } from "./sql-editor.js";
+import { queryResultToSpec } from "./query-result.js";
+import { chartToSpec } from "./chart.js";
 
 export { dagOverviewToSpec } from "./dag-overview.js";
 export { dagRunDetailToSpec } from "./dag-run-detail.js";
 export { yamlPreviewToSpec } from "./yaml-preview.js";
 export { prSubmittedToSpec } from "./pr-submitted.js";
+export { sqlEditorToSpec } from "./sql-editor.js";
+export { queryResultToSpec } from "./query-result.js";
+export { chartToSpec } from "./chart.js";
 
 /**
  * Per-kind dispatcher. The adapter is currently complete only for
@@ -43,15 +49,21 @@ export function intentToSpec(intent: RenderIntent): Spec {
     case "pr-submitted":
       return prSubmittedToSpec(intent);
 
+    case "sql-editor":
+      return sqlEditorToSpec(intent);
+
+    case "query-result":
+      return queryResultToSpec(intent);
+
+    case "chart":
+      return chartToSpec(intent);
+
     case "entity-form":
     case "dimension-form":
     case "logger-table-form":
     case "lattik-table-form":
     case "metric-form":
     case "definition-review":
-    case "sql-editor":
-    case "query-result":
-    case "chart":
       return placeholderSpec(intent.kind);
 
     default:
