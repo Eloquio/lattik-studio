@@ -8,7 +8,7 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test src/lib/api-validation.test.ts src/lib/bearer-auth.test.ts src/lib/worker-tokens.test.ts src/extensions/data-architect/canvas-to-spec.test.ts",
+    "test": "tsx --test src/lib/api-validation.test.ts src/lib/bearer-auth.test.ts src/lib/worker-tokens.test.ts src/lib/chat/agent-id.test.ts src/extensions/data-architect/canvas-to-spec.test.ts",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
   },
