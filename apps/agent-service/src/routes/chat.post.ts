@@ -41,6 +41,16 @@ import {
   listDefinitionsTool,
   getDefinitionTool,
 } from "../agents/DataArchitect/tools/definition-flow.js";
+import {
+  listTablesTool,
+  describeTableTool,
+  runQueryTool,
+} from "../agents/DataAnalyst/tools/data-tools.js";
+import {
+  renderSqlEditorTool,
+  renderChartTool,
+  updateLayoutTool,
+} from "../agents/DataAnalyst/tools/render-tools.js";
 
 /**
  * /chat — Phase 1 streaming execution.
@@ -188,9 +198,59 @@ function buildDataArchitectAgent(canvasState: unknown | null) {
   });
 }
 
+function buildDataAnalystAgent(canvasState: unknown | null) {
+  const agent = AGENTS.get("DataAnalyst");
+  if (!agent) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: "DataAnalyst AGENT.md missing from manifest",
+    });
+  }
+
+  assertBaseToolsResolve(agent, [
+    "getSkill",
+    "listTables",
+    "describeTable",
+    "renderSqlEditor",
+    "runQuery",
+    "renderChart",
+    "readCanvasState",
+    "updateLayout",
+    "listDefinitions",
+    "getDefinition",
+    "handback",
+  ]);
+
+  return new ToolLoopAgent({
+    id: agent.frontmatter.id,
+    model: gateway(agent.frontmatter.model),
+    instructions: renderInstructions(agent.body, { skills: "(none yet)" }),
+    tools: {
+      getSkill: createGetSkillTool({ caller: "DataAnalyst" }),
+      listTables: listTablesTool,
+      describeTable: describeTableTool,
+      renderSqlEditor: renderSqlEditorTool,
+      runQuery: runQueryTool,
+      renderChart: renderChartTool,
+      readCanvasState: createReadCanvasStateTool({ getCanvasState: () => canvasState }),
+      updateLayout: updateLayoutTool,
+      // listDefinitions / getDefinition are conceptually shared between
+      // DataArchitect and DataAnalyst (DA reads definitions for context-aware
+      // queries). For now both agents reuse the DataArchitect-side stubs;
+      // the real implementations would live in a shared
+      // apps/agent-service/src/tools/definitions/ tier when migrated.
+      listDefinitions: listDefinitionsTool,
+      getDefinition: getDefinitionTool,
+      handback: createHandbackTool({ fromAgent: "DataAnalyst" }),
+    },
+    stopWhen: stepCountIs(agent.frontmatter.max_steps),
+  });
+}
+
 const SUPPORTED_AGENTS: ReadonlySet<AgentId> = new Set([
   "PipelineManager",
   "DataArchitect",
+  "DataAnalyst",
 ]);
 
 export default defineEventHandler(async (event) => {
@@ -236,6 +296,12 @@ export default defineEventHandler(async (event) => {
   if (agentId === "DataArchitect") {
     return createAgentUIStreamResponse({
       agent: buildDataArchitectAgent(null),
+      uiMessages,
+    });
+  }
+  if (agentId === "DataAnalyst") {
+    return createAgentUIStreamResponse({
+      agent: buildDataAnalystAgent(null),
       uiMessages,
     });
   }
