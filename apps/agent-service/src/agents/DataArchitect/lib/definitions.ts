@@ -21,6 +21,7 @@ import {
   type DefinitionKind,
   type DefinitionStatus,
 } from "@eloquio/db-schema";
+import type { InferInsertModel } from "drizzle-orm";
 import { getDb } from "../../../lib/db.js";
 
 export async function listDefinitions(opts?: {
@@ -99,11 +100,38 @@ export async function createDefinition(data: {
   return row;
 }
 
-export async function updateDefinition(id: string, patch: { spec: unknown }) {
+export async function updateDefinition(
+  id: string,
+  patch: {
+    spec?: unknown;
+    status?: DefinitionStatus;
+    prUrl?: string | null;
+    prMergedAt?: Date | null;
+  },
+) {
+  const set: Partial<InferInsertModel<typeof definitions>> = {
+    updatedAt: new Date(),
+  };
+  if (patch.spec !== undefined) set.spec = patch.spec;
+  if (patch.status !== undefined) set.status = patch.status;
+  if (patch.prUrl !== undefined) set.prUrl = patch.prUrl;
+  if (patch.prMergedAt !== undefined) set.prMergedAt = patch.prMergedAt;
   const [row] = await getDb()
     .update(definitions)
-    .set({ spec: patch.spec, updatedAt: new Date() })
+    .set(set)
     .where(eq(definitions.id, id))
     .returning();
   return row;
+}
+
+/**
+ * Flip a merged definition into the deletion-pending state and pin the
+ * deletion PR url so the merge webhook can find the row when the PR
+ * lands. Used by the delete-definition tool flow.
+ */
+export async function markDefinitionPendingDeletion(
+  id: string,
+  prUrl: string,
+) {
+  return updateDefinition(id, { status: "pending_deletion", prUrl });
 }
