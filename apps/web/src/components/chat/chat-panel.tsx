@@ -119,11 +119,11 @@ export function ChatPanel({
   const [transport] = useState(
     () =>
       new DefaultChatTransport({
-        // All chats — Assistant concierge included — now run through
-        // agent-service's per-tool-durable workflow loop. The legacy
-        // `/api/agent-proxy/chat` ToolLoopAgent route stays as the
-        // fallback for non-`submit-message` triggers (e.g.
-        // regenerate-message) until those gain workflow-side support.
+        // All chats — Assistant concierge included, both submit-message
+        // and regenerate-message — run through agent-service's per-tool-
+        // durable workflow loop. The legacy `/api/agent-proxy/chat`
+        // ToolLoopAgent route stays only as a fallback for unknown
+        // triggers (none today; reserved for future AI SDK additions).
         api: "/api/agent-proxy/chat",
         prepareSendMessagesRequest({
           id,
@@ -135,8 +135,8 @@ export function ChatPanel({
           headers,
           credentials,
         }) {
+          const agentId = extensionIdToAgentId(extensionIdRef.current);
           if (trigger === "submit-message") {
-            const agentId = extensionIdToAgentId(extensionIdRef.current);
             // Pick the just-submitted user message — prefer the one whose
             // id matches `messageId`, fall back to the last user message
             // in history. The workflow loads prior turns from the DB.
@@ -157,8 +157,29 @@ export function ChatPanel({
               },
             };
           }
-          // Legacy path — preserves the existing /chat body shape for
-          // regenerate-message / other triggers we haven't migrated.
+          if (trigger === "regenerate-message" && messageId) {
+            // Tell the workflow to truncate its DB history at the
+            // assistant message being regenerated (exclusive) and
+            // re-run from there. No new user message — the prior user
+            // turn that drives regeneration is already in the
+            // (truncated) DB history.
+            return {
+              api: "/api/agent-proxy/__wf-chat",
+              headers,
+              credentials,
+              body: {
+                ...body,
+                agentId,
+                conversationId: id,
+                newUserMessages: [],
+                regenerateFromMessageId: messageId,
+                canvasState: canvasStateRef.current,
+                taskStack: taskStackRef.current,
+              },
+            };
+          }
+          // Unknown trigger — preserve the legacy body shape so the
+          // fallback route still works if AI SDK adds new triggers.
           return {
             api,
             headers,

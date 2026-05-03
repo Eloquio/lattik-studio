@@ -40,6 +40,7 @@ const bodySchema = z.object({
   newUserMessages: z.array(z.unknown()).default([]),
   canvasState: z.unknown().optional(),
   taskStack: z.array(taskStackEntrySchema).default([]),
+  regenerateFromMessageId: z.string().optional(),
 });
 
 export default defineEventHandler(async (event) => {
@@ -67,6 +68,7 @@ export default defineEventHandler(async (event) => {
       canvasState: body.data.canvasState ?? null,
       userId: auth.userId,
       taskStack: body.data.taskStack,
+      regenerateFromMessageId: body.data.regenerateFromMessageId,
     },
   ]);
   await recordRunOwner({
