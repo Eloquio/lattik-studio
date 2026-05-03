@@ -12,17 +12,43 @@
 
 import { type Agent } from "./agent-schema.js";
 
-/** Replace the deliberately-capped template seams in an AGENT.md body. */
+/**
+ * Replace the deliberately-capped template seams in an AGENT.md body.
+ *
+ * Recognized seams (each is runtime-supplied dynamic context — never
+ * LLM-chosen):
+ *
+ *   {{skills}}        — bullet list of skills owned by this agent
+ *   {{resumeContext}} — `[CONTEXT] <text>\n\n` when resuming a previous run
+ *   {{specialists}}   — list of registered specialist agents (Assistant only)
+ *   {{taskStack}}     — paused-task context block (Assistant only)
+ *
+ * The seam set is deliberately small and named — adding a generic
+ * `Record<string, string>` would invite UX-via-prompt-templating, which
+ * is the trap the design avoided by making `surface` static and tools
+ * structured. A new agent that needs a new seam adds it here explicitly.
+ */
 export function renderInstructions(
   body: string,
-  vars: { skills?: string; resumeContext?: string },
+  vars: {
+    skills?: string;
+    resumeContext?: string;
+    specialists?: string;
+    taskStack?: string;
+  },
 ): string {
   const skills = vars.skills ?? "";
   const resume =
     vars.resumeContext && vars.resumeContext.length > 0
       ? `[CONTEXT] ${vars.resumeContext}\n\n`
       : "";
-  return body.replaceAll("{{skills}}", skills).replaceAll("{{resumeContext}}", resume);
+  const specialists = vars.specialists ?? "";
+  const taskStack = vars.taskStack ?? "";
+  return body
+    .replaceAll("{{skills}}", skills)
+    .replaceAll("{{resumeContext}}", resume)
+    .replaceAll("{{specialists}}", specialists)
+    .replaceAll("{{taskStack}}", taskStack);
 }
 
 /**
