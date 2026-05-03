@@ -11,8 +11,17 @@ import { getRun } from "workflow/api";
 // stream the original POST consumed — optionally starting from `?startIndex=N`
 // so reconnecting clients skip chunks they've already seen. Negative indices
 // count from the tail (e.g. -3 = last 3 chunks).
+//
+// Auth via `attachAuth` middleware. Per-run ownership not yet enforced —
+// see __wf-agent/[runId].get.ts for the same TODO + rationale.
 
 export default defineEventHandler(async (event) => {
+  if (!event.context.auth) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: "auth context missing — middleware not wired",
+    });
+  }
   const runId = getRouterParam(event, "runId");
   if (!runId) {
     throw createError({ statusCode: 400, statusMessage: "Missing runId" });

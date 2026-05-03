@@ -14,8 +14,17 @@ import type { LoopEvent } from "../../workflows/pipeline-manager-loop.js";
 // works structurally but stringifies objects with `String()`, which
 // produces "[object Object]" — typed-loop callers want the actual JSON
 // shape.
+//
+// Auth via `attachAuth` middleware. Per-run ownership not yet enforced —
+// see __wf-agent/[runId].get.ts for the same TODO + rationale.
 
 export default defineEventHandler(async (event) => {
+  if (!event.context.auth) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: "auth context missing — middleware not wired",
+    });
+  }
   const runId = getRouterParam(event, "runId");
   if (!runId) {
     throw createError({ statusCode: 400, statusMessage: "Missing runId" });

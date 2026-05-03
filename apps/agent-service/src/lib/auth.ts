@@ -171,12 +171,14 @@ export async function verifyRequest(event: H3Event): Promise<AuthContext> {
 /**
  * Path prefixes that bypass auth.
  *
- * - `/.well-known/workflow/` — the workflow SDK's internal callbacks.
- * - `/__wf` — spike routes (`/__wf`, `/__wf-stream`, `/__wf-stream/<id>`,
- *   `/__wf-ai`). All routes under this prefix are smoke-test only and
- *   should be removed before production cutover.
+ * - `/.well-known/workflow/` — the workflow SDK's internal callbacks
+ *   (queue/dispatcher → step/flow/webhook routes). These are hit by the
+ *   workflow runtime itself, not by external clients, so the trusted-
+ *   client headers don't apply. Production deployments should rely on
+ *   network-level isolation here; HMAC-signing the dispatcher→runtime
+ *   hop is a separate hardening slice.
  */
-const PUBLIC_PREFIXES = ["/.well-known/workflow/", "/__wf"];
+const PUBLIC_PREFIXES = ["/.well-known/workflow/"];
 
 /** h3 middleware. Skips public routes, verifies and attaches context otherwise. */
 export async function attachAuth(event: H3Event): Promise<void> {
