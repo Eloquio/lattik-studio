@@ -73,10 +73,16 @@ export const renderDagOverviewTool = tool({
             dagId: dag.dag_id,
             description: dag.description,
             isPaused: dag.is_paused,
-            isActive: dag.is_active,
-            schedule: dag.schedule_interval,
+            // Airflow 3.x list response doesn't have `is_active`. Derive it:
+            // a non-paused, non-stale DAG is active.
+            isActive: dag.is_active ?? (!dag.is_paused && !dag.is_stale),
+            // Same for `schedule_interval` — fall back to the new
+            // `timetable_summary` field, then null. Coerce undefined → null
+            // so the field is present on the wire (JSON.stringify drops
+            // undefined; the render-intent schema requires the key).
+            schedule: dag.schedule_interval ?? dag.timetable_summary ?? null,
             tags: dag.tags.map((t) => t.name),
-            nextRun: dag.next_dagrun,
+            nextRun: dag.next_dagrun ?? null,
             lastRunState,
             recentRunStates,
           };
