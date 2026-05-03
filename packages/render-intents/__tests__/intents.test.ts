@@ -48,6 +48,8 @@ describe("renderIntentSchema", () => {
             schedule: "@hourly",
             tags: ["lattik"],
             nextRun: "2026-05-03T00:00:00Z",
+            lastRunState: "success",
+            recentRunStates: ["success", "success", "failed"],
           },
         ],
         totalEntries: 1,

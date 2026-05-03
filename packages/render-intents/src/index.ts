@@ -2,6 +2,7 @@ export {
   isIntent,
   type RenderIntent,
   type RenderIntentKind,
+  type DagRunState,
   type DagSummary,
   type DagOverviewIntent,
   type TaskInstanceSummary,
