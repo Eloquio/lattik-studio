@@ -82,7 +82,7 @@ export type LoopEvent =
   | {
       type: "tool-call";
       iteration: number;
-      payload: { toolCallId: string; toolName: string };
+      payload: { toolCallId: string; toolName: string; input: unknown };
     }
   | {
       type: "tool-result";
@@ -340,7 +340,11 @@ async function runToolStep(input: {
   await writer.write({
     type: "tool-call",
     iteration: input.iteration,
-    payload: { toolCallId: input.toolCallId, toolName: input.toolName },
+    payload: {
+      toolCallId: input.toolCallId,
+      toolName: input.toolName,
+      input: input.input,
+    },
   });
 
   const dispatcher = TOOL_DISPATCHERS[input.toolName];
