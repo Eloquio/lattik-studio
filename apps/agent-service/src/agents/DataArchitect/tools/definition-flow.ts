@@ -10,6 +10,7 @@ import {
   canvasStateToSpec,
   getDefinitionNameFromCanvas,
 } from "../lib/canvas-to-spec.js";
+import { validate } from "../lib/validation/index.js";
 
 /**
  * Definition-lifecycle tools for Data Architect.
@@ -160,12 +161,27 @@ export const reviewDefinitionTool = tool({
   execute: async () => noteStub(),
 });
 
-export const staticCheckTool = tool({
-  description:
-    "Run the static-check validators on the current canvas form (naming, referential integrity, expression typing). Surface every error so the user can fix before continuing.",
-  inputSchema: zodSchema(z.object({})),
-  execute: async () => ({ ...noteStub(), errors: [] }),
-});
+export interface CreateStaticCheckToolOptions {
+  getCanvasState: () => unknown;
+}
+
+export function createStaticCheckTool(opts: CreateStaticCheckToolOptions) {
+  return tool({
+    description:
+      "Run static validation checks on the definition currently rendered on the canvas. Reads the canvas form state directly — do NOT pass a spec. Validates naming conventions, required fields, referential integrity, and expression syntax. Returns pass/fail with error details.",
+    inputSchema: zodSchema(
+      z.object({
+        kind: definitionKindEnum.describe(
+          "The type of definition currently on the canvas",
+        ),
+      }),
+    ),
+    execute: async (input: { kind: z.infer<typeof definitionKindEnum> }) => {
+      const spec = canvasStateToSpec(input.kind, opts.getCanvasState());
+      return await validate(input.kind, spec);
+    },
+  });
+}
 
 export const generateYamlTool = tool({
   description:

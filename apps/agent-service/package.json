@@ -19,6 +19,7 @@
     "@ai-sdk/gateway": "^3.0.83",
     "@eloquio/agent-harness": "workspace:*",
     "@eloquio/db-schema": "workspace:*",
+    "@eloquio/lattik-expression": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "postgres": "^3.4.8",
     "ai": "^6.0.141",
