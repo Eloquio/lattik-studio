@@ -1,6 +1,6 @@
 import { getWritable } from "workflow";
 import {
-  generateText,
+  streamText,
   gateway,
   tool,
   zodSchema,
@@ -48,6 +48,11 @@ const MAX_LOOP_STEPS = 6;
 // ---------------------------------------------------------------------------
 
 export type LoopEvent =
+  | {
+      type: "text-delta";
+      iteration: number;
+      payload: { delta: string };
+    }
   | {
       type: "model-finish";
       iteration: number;
@@ -110,41 +115,56 @@ async function runModelStep(input: {
     tools[name] = builder();
   }
 
-  const result = await generateText({
+  const result = streamText({
     model: gateway("anthropic/claude-haiku-4.5"),
     system: PIPELINE_MANAGER_INSTRUCTIONS,
     messages: input.messages,
     tools,
   });
 
-  // Emit a structured event into the run's stream so callers (and the
-  // smoke test) can observe progress live. `getWritable()` is only
-  // supported inside steps — workflow bodies have to delegate writes.
+  // Stream text deltas into the run's writable as they arrive — they're
+  // durable, so reattach mid-stream sees them, and on workflow replay the
+  // step is cached entirely (not re-run), so no duplicate writes either.
+  // After the stream drains, await the final aggregates and emit a
+  // structured `model-finish` marker, then return cached state.
   const writable = getWritable<LoopEvent>();
   const writer = writable.getWriter();
   try {
+    for await (const delta of result.textStream) {
+      if (delta) {
+        await writer.write({
+          type: "text-delta",
+          iteration: input.iteration,
+          payload: { delta },
+        });
+      }
+    }
+    const [text, toolCalls, finishReason] = await Promise.all([
+      result.text,
+      result.toolCalls,
+      result.finishReason,
+    ]);
     await writer.write({
       type: "model-finish",
       iteration: input.iteration,
       payload: {
-        text: result.text,
-        finishReason: result.finishReason,
-        toolCallCount: result.toolCalls.length,
+        text,
+        finishReason,
+        toolCallCount: toolCalls.length,
       },
     });
+    return {
+      text,
+      toolCalls: toolCalls.map((c) => ({
+        toolCallId: c.toolCallId,
+        toolName: c.toolName,
+        input: c.input,
+      })),
+      finishReason,
+    };
   } finally {
     writer.releaseLock();
   }
-
-  return {
-    text: result.text,
-    toolCalls: result.toolCalls.map((c) => ({
-      toolCallId: c.toolCallId,
-      toolName: c.toolName,
-      input: c.input,
-    })),
-    finishReason: result.finishReason,
-  };
 }
 
 async function runToolStep(input: {
