@@ -32,6 +32,9 @@ importers:
       '@eloquio/db-schema':
         specifier: workspace:*
         version: link:../../packages/db-schema
+      '@eloquio/lattik-expression':
+        specifier: workspace:*
+        version: link:../../packages/lattik-expression
       ai:
         specifier: ^6.0.141
         version: 6.0.142(zod@4.3.6)

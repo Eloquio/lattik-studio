@@ -55,6 +55,31 @@ export async function getDefinitionByName(kind: DefinitionKind, name: string) {
   return row ?? null;
 }
 
+/**
+ * Return all merged definitions, optionally filtered by kind. Used by the
+ * referential validator to verify that an Entity / Dimension / Table the
+ * draft references actually exists in production. Only `merged` rows count
+ * — drafts and pending PRs aren't authoritative.
+ *
+ * Limit defaults to 1000 (the validator's REFERENTIAL_LIMIT) and is
+ * clamped to a max of 1000 — referential checks load every merged
+ * definition into memory and we don't want pathological queries to drag
+ * the service down.
+ */
+export async function listMergedDefinitions(
+  kind?: DefinitionKind,
+  limit = 1000,
+) {
+  const wheres = [eq(definitions.status, "merged" as const)];
+  if (kind) wheres.push(eq(definitions.kind, kind));
+  const take = Math.min(Math.max(limit, 1), 1000);
+  return getDb()
+    .select()
+    .from(definitions)
+    .where(and(...wheres))
+    .limit(take);
+}
+
 export async function createDefinition(data: {
   kind: DefinitionKind;
   name: string;

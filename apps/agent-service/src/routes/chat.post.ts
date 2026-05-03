@@ -33,7 +33,7 @@ import {
 } from "../agents/DataArchitect/tools/render-forms.js";
 import {
   reviewDefinitionTool,
-  staticCheckTool,
+  createStaticCheckTool,
   createUpdateDefinitionTool,
   generateYamlTool,
   submitPRTool,
@@ -185,7 +185,7 @@ function buildDataArchitectAgent(canvasState: unknown | null, userId: string) {
       renderLattikTableForm: renderLattikTableFormTool,
       renderMetricForm: renderMetricFormTool,
       reviewDefinition: reviewDefinitionTool,
-      staticCheck: staticCheckTool,
+      staticCheck: createStaticCheckTool({ getCanvasState: () => canvasState }),
       updateDefinition: createUpdateDefinitionTool({
         userId,
         getCanvasState: () => canvasState,
