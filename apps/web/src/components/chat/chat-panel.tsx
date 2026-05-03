@@ -8,6 +8,8 @@ import { ArrowUp, Bot, Pencil, Plus, Trash2 } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { buildSpecFromParts } from "@json-render/react";
+import { intentToSpec } from "@eloquio/json-render-adapter";
+import { renderIntentSchema } from "@eloquio/render-intents";
 import { ToolResult } from "./tool-result";
 import { ReviewSuggestions, type ReviewStatus } from "./review-suggestions";
 import type { ReviewSuggestion } from "@/extensions/data-architect/tools/review-definition";
@@ -417,8 +419,24 @@ export function ChatPanel({
           "output" in part
         ) {
           const output = (part as { output?: unknown }).output;
-          if (output && typeof output === "object" && "spec" in output) {
-            latestSpec = (output as { spec: unknown }).spec;
+          if (output && typeof output === "object") {
+            // Legacy path: tool returns a server-built json-render Spec wrapped
+            // in `{ spec }`. Used by apps/web's in-process render tools (per-
+            // extension) that haven't migrated to the render-intent protocol.
+            if ("spec" in output) {
+              latestSpec = (output as { spec: unknown }).spec;
+            } else if ("kind" in output && "surface" in output && "data" in output) {
+              // Render-intent path: tool returns a typed RenderIntent (Phase 2
+              // protocol). Validate at this trust boundary — once the chat
+              // hook routes to agent-service over the wire, this is where
+              // shape integrity gets enforced. Pipe through intentToSpec to
+              // get the json-render Spec the canvas registry already
+              // understands.
+              const parsed = renderIntentSchema.safeParse(output);
+              if (parsed.success) {
+                latestSpec = intentToSpec(parsed.data);
+              }
+            }
           }
         }
       }

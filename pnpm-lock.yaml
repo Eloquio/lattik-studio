@@ -127,12 +127,18 @@ importers:
       '@eloquio/db-schema':
         specifier: workspace:*
         version: link:../../packages/db-schema
+      '@eloquio/json-render-adapter':
+        specifier: workspace:*
+        version: link:../../packages/json-render-adapter
       '@eloquio/lattik-expression':
         specifier: workspace:*
         version: link:../../packages/lattik-expression
       '@eloquio/lattik-logger':
         specifier: workspace:*
         version: link:../../packages/lattik-logger
+      '@eloquio/render-intents':
+        specifier: workspace:*
+        version: link:../../packages/render-intents
       '@json-render/core':
         specifier: ^0.16.0
         version: 0.16.0(zod@4.3.6)
