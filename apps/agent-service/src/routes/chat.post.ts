@@ -34,7 +34,7 @@ import {
 import {
   reviewDefinitionTool,
   staticCheckTool,
-  updateDefinitionTool,
+  createUpdateDefinitionTool,
   generateYamlTool,
   submitPRTool,
   deleteDefinitionTool,
@@ -143,7 +143,7 @@ function buildPipelineManagerAgent(canvasState: unknown | null) {
   });
 }
 
-function buildDataArchitectAgent(canvasState: unknown | null) {
+function buildDataArchitectAgent(canvasState: unknown | null, userId: string) {
   const agent = AGENTS.get("DataArchitect");
   if (!agent) {
     throw createError({
@@ -186,7 +186,10 @@ function buildDataArchitectAgent(canvasState: unknown | null) {
       renderMetricForm: renderMetricFormTool,
       reviewDefinition: reviewDefinitionTool,
       staticCheck: staticCheckTool,
-      updateDefinition: updateDefinitionTool,
+      updateDefinition: createUpdateDefinitionTool({
+        userId,
+        getCanvasState: () => canvasState,
+      }),
       generateYaml: generateYamlTool,
       submitPR: submitPRTool,
       deleteDefinition: deleteDefinitionTool,
@@ -295,7 +298,7 @@ export default defineEventHandler(async (event) => {
   // generic — TS can't unify the union of agents with different tool sets.
   if (agentId === "DataArchitect") {
     return createAgentUIStreamResponse({
-      agent: buildDataArchitectAgent(null),
+      agent: buildDataArchitectAgent(null, auth.userId),
       uiMessages,
     });
   }

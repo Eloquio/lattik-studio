@@ -1,6 +1,15 @@
 import { tool, zodSchema } from "ai";
 import { z } from "zod";
-import { listDefinitions, getDefinitionByName } from "../lib/definitions.js";
+import {
+  listDefinitions,
+  getDefinitionByName,
+  createDefinition,
+  updateDefinition as updateDefinitionRow,
+} from "../lib/definitions.js";
+import {
+  canvasStateToSpec,
+  getDefinitionNameFromCanvas,
+} from "../lib/canvas-to-spec.js";
 
 /**
  * Definition-lifecycle tools for Data Architect.
@@ -8,11 +17,13 @@ import { listDefinitions, getDefinitionByName } from "../lib/definitions.js";
  * Real implementations this slice:
  *   - listDefinitions, getDefinition — read-only queries against the
  *     definitions table.
+ *   - updateDefinition — factory; takes the user id (for createdBy on
+ *     insert) and a canvas-state getter. The spec is derived from the
+ *     canvas form via canvasStateToSpec.
  *
- * Still stubs (each is its own follow-up slice — they need bigger ports):
- *   - updateDefinition — needs canvas-to-spec (~300 lines).
+ * Still stubs (each is its own follow-up slice):
  *   - staticCheck — needs the validation library (4 files).
- *   - generateYaml — needs the yaml generator + canvas-to-spec.
+ *   - generateYaml — needs the yaml generator + canvas-to-spec (have it).
  *   - submitPR, deleteDefinition — need the Gitea client.
  *   - reviewDefinition — needs canvas-state-aware diff rendering.
  */
@@ -91,12 +102,56 @@ export const getDefinitionTool = tool({
 // Stubs — still pending real implementations
 // ---------------------------------------------------------------------------
 
-export const updateDefinitionTool = tool({
-  description:
-    "Persist the current canvas form as a definition draft in the definitions DB. Idempotent on (kind, name) — overwrites the in-progress draft.",
-  inputSchema: zodSchema(z.object({})),
-  execute: async () => noteStub(),
-});
+export interface CreateUpdateDefinitionToolOptions {
+  /** The user creating/owning the draft — flows into definitions.createdBy. */
+  userId: string;
+  getCanvasState: () => unknown;
+}
+
+export function createUpdateDefinitionTool(opts: CreateUpdateDefinitionToolOptions) {
+  return tool({
+    description:
+      "Save or update a definition in the database as a draft, using the current canvas form state as the source of truth. The name and spec are read directly from the canvas — do NOT pass them. If a definition with the same kind and name exists, it will be updated; otherwise a new draft is created.",
+    inputSchema: zodSchema(
+      z.object({
+        kind: definitionKindEnum.describe(
+          "The type of definition currently on the canvas",
+        ),
+      }),
+    ),
+    execute: async (input: { kind: z.infer<typeof definitionKindEnum> }) => {
+      const canvasState = opts.getCanvasState();
+      const name = getDefinitionNameFromCanvas(canvasState);
+      if (!name) {
+        return { error: "Canvas form has no name field set — fill it in before saving." };
+      }
+      const spec = canvasStateToSpec(input.kind, canvasState);
+      try {
+        const existing = await getDefinitionByName(input.kind, name);
+        if (existing) {
+          const updated = await updateDefinitionRow(existing.id, { spec });
+          return { action: "updated", id: updated.id, name, kind: input.kind };
+        }
+        const created = await createDefinition({
+          kind: input.kind,
+          name,
+          spec,
+          userId: opts.userId,
+        });
+        return { action: "created", id: created.id, name, kind: input.kind };
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("unique")) {
+          const existing = await getDefinitionByName(input.kind, name);
+          if (existing) {
+            const updated = await updateDefinitionRow(existing.id, { spec });
+            return { action: "updated", id: updated.id, name, kind: input.kind };
+          }
+        }
+        return { error: error instanceof Error ? error.message : String(error) };
+      }
+    },
+  });
+}
 
 export const reviewDefinitionTool = tool({
   description:
