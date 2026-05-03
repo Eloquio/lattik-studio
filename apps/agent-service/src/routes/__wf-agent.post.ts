@@ -21,9 +21,12 @@ const agentIdSchema = z.enum(["PipelineManager", "DataArchitect", "DataAnalyst"]
 
 const bodySchema = z.object({
   agentId: agentIdSchema,
-  messages: z.array(z.unknown()),
+  conversationId: z.string().min(1),
+  /** New user-side messages this turn — typically just one with a text
+   *  part. The workflow loads prior history from the DB and appends. */
+  newUserMessages: z.array(z.unknown()).default([]),
   canvasState: z.unknown().optional(),
-  userId: z.string().default("u-spike"),
+  userId: z.string(),
 });
 
 export default defineEventHandler(async (event) => {
@@ -38,7 +41,8 @@ export default defineEventHandler(async (event) => {
   const run = await start(agentLoopWorkflow, [
     {
       agentId: body.data.agentId as AgentId,
-      uiMessages: body.data.messages as UIMessage[],
+      conversationId: body.data.conversationId,
+      newUserMessages: body.data.newUserMessages as UIMessage[],
       canvasState: body.data.canvasState ?? null,
       userId: body.data.userId,
     },
