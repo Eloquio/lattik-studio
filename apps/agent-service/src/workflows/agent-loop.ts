@@ -949,16 +949,24 @@ export async function agentLoopWorkflow(input: AgentLoopInput) {
 
   // Build a single assistant UIMessage from finalText. Tool-call detail
   // lives in the workflow run's persisted events under runId — recoverable
-  // via reattach if a richer view is ever needed. The id is generated
-  // deterministically from runId so replay produces the same message
-  // identity (the workflow runtime injects `runId` via `WORKFLOW_RUN_ID`
-  // env at step start, but for the workflow-body-side id we just use a
-  // stable per-conversation suffix).
-  const assistantUiMessage: UIMessage = {
-    id: `wfm_${input.conversationId}_${Date.now()}`,
-    role: "assistant",
-    parts: finalText ? [{ type: "text", text: finalText }] : [],
-  };
+  // via reattach if a richer view is ever needed. The id uses Date.now()
+  // so each commit gets a fresh identity (replays don't re-run the
+  // commit step, so the seemingly-non-deterministic id is fine).
+  //
+  // If `finalText` is empty AND no tool calls ran, the loop produced
+  // nothing useful — typically a degenerate path like regenerate with
+  // a stale messageId (full history, no new prompt → model has nothing
+  // to respond to). Skip the assistant entirely so we don't pollute the
+  // persisted history with empty-parts phantoms. Still commit the prior
+  // + newUserMessages so any new user input the request shipped is saved.
+  const producedSomething = finalText.length > 0 || toolStepInvocations > 0;
+  const assistantUiMessage: UIMessage | null = producedSomething
+    ? {
+        id: `wfm_${input.conversationId}_${Date.now()}`,
+        role: "assistant",
+        parts: finalText ? [{ type: "text", text: finalText }] : [],
+      }
+    : null;
 
   // Title heuristic: first 80 chars of the first user message text, or
   // keep the existing one if this isn't the first turn.
@@ -978,7 +986,9 @@ export async function agentLoopWorkflow(input: AgentLoopInput) {
     conversationId: input.conversationId,
     userId: input.userId,
     title,
-    messages: [...priorMessages, ...input.newUserMessages, assistantUiMessage],
+    messages: assistantUiMessage
+      ? [...priorMessages, ...input.newUserMessages, assistantUiMessage]
+      : [...priorMessages, ...input.newUserMessages],
   });
 
   await runLoopFinishStep({
