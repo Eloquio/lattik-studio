@@ -16,6 +16,7 @@ import {
 } from "@eloquio/agent-harness";
 import { AGENT_MANIFEST } from "../agents/agents.generated.js";
 import { createHandbackTool } from "../tools/handback.js";
+import { createHandoffTool } from "../tools/handoff.js";
 import { createReadCanvasStateTool } from "../tools/read-canvas-state.js";
 import { listDagsTool } from "../agents/PipelineManager/tools/list-dags.js";
 import { getDagDetailTool } from "../agents/PipelineManager/tools/get-dag-detail.js";
@@ -75,10 +76,20 @@ import {
 
 const AGENTS = parseAgents(AGENT_MANIFEST);
 
+const taskStackEntrySchema = z.object({
+  extensionId: z.string().min(1),
+  reason: z.string(),
+});
+
 const chatRequestSchema = z.object({
   conversationId: z.string().min(1),
   agentId: z.string().min(1),
   message: z.string().min(1),
+  /** Paused-task stack — depth-1 today (max one entry). Used by the
+   * Assistant's handoff tool to enforce the depth cap and by its
+   * prompt's {{taskStack}} seam to remind the agent of the resume
+   * target. */
+  taskStack: z.array(taskStackEntrySchema).optional(),
 });
 
 // Per-agent tool registries. Today only Pipeline Manager exists; new agents
@@ -250,7 +261,60 @@ function buildDataAnalystAgent(canvasState: unknown | null) {
   });
 }
 
+function buildAssistantAgent(taskStack: { extensionId: string; reason: string }[]) {
+  const agent = AGENTS.get("Assistant");
+  if (!agent) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: "Assistant AGENT.md missing from manifest",
+    });
+  }
+
+  assertBaseToolsResolve(agent, ["handoff"]);
+
+  // Build the dynamic-context strings the Assistant's prompt expects.
+  // {{specialists}} becomes the registered list (everything except the
+  // Assistant itself). {{taskStack}} becomes a paused-task reminder
+  // block, or empty when nothing is paused.
+  const specialists = [...AGENTS.values()]
+    .filter((a) => a.frontmatter.id !== "Assistant")
+    .map((a) => `- **${a.frontmatter.name}** (id: "${a.frontmatter.id}"): ${a.frontmatter.description}`)
+    .join("\n");
+
+  const top = taskStack.length > 0 ? taskStack[taskStack.length - 1] : null;
+  const taskStackText = top
+    ? `\n## Paused Task\nThere is a paused task on the stack: the "${top.extensionId}" agent was working on "${sanitizeForPrompt(top.reason)}" and is waiting to resume.\n- Do NOT hand off to a different specialist — handle the user's new request yourself.\n- When the user indicates they are done with their current request ("that's all", "nothing else", "I'm done", etc.), use the handoff tool to resume the paused agent (agentId: "${top.extensionId}") so it can continue where it left off.\n- Briefly tell the user you're handing them back to the paused agent.`
+    : "";
+
+  return new ToolLoopAgent({
+    id: agent.frontmatter.id,
+    model: gateway(agent.frontmatter.model),
+    instructions: renderInstructions(agent.body, {
+      specialists: specialists || "No specialist agents are registered.",
+      taskStack: taskStackText,
+    }),
+    tools: {
+      handoff: createHandoffTool({ taskStack }),
+    },
+    stopWhen: stepCountIs(agent.frontmatter.max_steps),
+  });
+}
+
+/**
+ * Defense-in-depth: the paused-task `reason` arrives in a user-controlled
+ * request payload, then lands in the Assistant's system prompt. Strip
+ * structural characters that could be used to inject prompt directives
+ * or close out the system message.
+ */
+function sanitizeForPrompt(text: string): string {
+  return text
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+    .replace(/```/g, "''")
+    .slice(0, 500);
+}
+
 const SUPPORTED_AGENTS: ReadonlySet<AgentId> = new Set([
+  "Assistant",
   "PipelineManager",
   "DataArchitect",
   "DataAnalyst",
@@ -296,6 +360,12 @@ export default defineEventHandler(async (event) => {
 
   // Branching on agentId so each call site sees one concrete ToolLoopAgent
   // generic — TS can't unify the union of agents with different tool sets.
+  if (agentId === "Assistant") {
+    return createAgentUIStreamResponse({
+      agent: buildAssistantAgent(body.data.taskStack ?? []),
+      uiMessages,
+    });
+  }
   if (agentId === "DataArchitect") {
     return createAgentUIStreamResponse({
       agent: buildDataArchitectAgent(null, auth.userId),

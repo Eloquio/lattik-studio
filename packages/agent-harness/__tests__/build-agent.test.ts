@@ -53,6 +53,24 @@ describe("renderInstructions", () => {
       renderInstructions("Hello {{user}}, list {{skills}}", { skills: "(none)" }),
     ).toBe("Hello {{user}}, list (none)");
   });
+
+  it("substitutes {{specialists}} and {{taskStack}} for the Assistant", () => {
+    const body = "Available: {{specialists}}\n{{taskStack}}";
+    expect(
+      renderInstructions(body, {
+        specialists: "- Pipeline Manager\n- Data Architect",
+        taskStack: "Paused: data-architect (defining user)",
+      }),
+    ).toBe(
+      "Available: - Pipeline Manager\n- Data Architect\nPaused: data-architect (defining user)",
+    );
+  });
+
+  it("strips {{specialists}} and {{taskStack}} when missing", () => {
+    expect(
+      renderInstructions("Available: {{specialists}}\n{{taskStack}}", {}),
+    ).toBe("Available: \n");
+  });
 });
 
 describe("assertBaseToolsResolve", () => {
