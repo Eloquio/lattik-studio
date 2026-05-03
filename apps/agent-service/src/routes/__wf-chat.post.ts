@@ -28,13 +28,26 @@ import { loopEventToUIMessageChunk } from "../lib/loop-event-to-ui-chunk.js";
 // `userId` comes from the verified auth context. The body shape matches
 // `__wf-agent.post.ts` for symmetry.
 
-const agentIdSchema = z.enum(["PipelineManager", "DataArchitect", "DataAnalyst"]);
+const agentIdSchema = z.enum([
+  "Assistant",
+  "PipelineManager",
+  "DataArchitect",
+  "DataAnalyst",
+]);
+
+const taskStackEntrySchema = z.object({
+  extensionId: z.string(),
+  reason: z.string(),
+});
 
 const bodySchema = z.object({
   agentId: agentIdSchema,
   conversationId: z.string().min(1),
   newUserMessages: z.array(z.unknown()).default([]),
   canvasState: z.unknown().optional(),
+  /** Paused-task stack; only consumed by the Assistant. Other agents
+   *  receive the array but ignore it. */
+  taskStack: z.array(taskStackEntrySchema).default([]),
 });
 
 export default defineEventHandler(async (event) => {
@@ -61,6 +74,7 @@ export default defineEventHandler(async (event) => {
       newUserMessages: body.data.newUserMessages as UIMessage[],
       canvasState: body.data.canvasState ?? null,
       userId: auth.userId,
+      taskStack: body.data.taskStack,
     },
   ]);
 

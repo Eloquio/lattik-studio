@@ -38,12 +38,12 @@ function extensionDisplayName(extensionId: string): string {
 }
 
 /** Map an extensionId to the workflow loop's PascalCase `agentId`.
- *  Returns null for the Assistant — its tool surface (`handoff`) hasn't
- *  been migrated to the workflow loop yet, so chats without an active
- *  specialist still go through the legacy `/chat` route. */
+ *  Null/undefined extensionId means the Assistant concierge — it now
+ *  also runs through the workflow loop, so we always return a valid
+ *  AgentId. */
 function extensionIdToAgentId(
   extensionId: string | null,
-): "PipelineManager" | "DataArchitect" | "DataAnalyst" | null {
+): "Assistant" | "PipelineManager" | "DataArchitect" | "DataAnalyst" {
   switch (extensionId) {
     case "pipeline-manager":
       return "PipelineManager";
@@ -52,7 +52,7 @@ function extensionIdToAgentId(
     case "data-analyst":
       return "DataAnalyst";
     default:
-      return null;
+      return "Assistant";
   }
 }
 
@@ -120,17 +120,12 @@ export function ChatPanel({
   const [transport] = useState(
     () =>
       new DefaultChatTransport({
-        // Default api for the Assistant concierge, which still runs through
-        // agent-service's legacy `/chat` ToolLoopAgent route. Specialist
-        // conversations override `api` per-request below to hit the
-        // per-tool-durable workflow loop.
+        // All chats — Assistant concierge included — now run through
+        // agent-service's per-tool-durable workflow loop. The legacy
+        // `/api/agent-proxy/chat` ToolLoopAgent route stays as the
+        // fallback for non-`submit-message` triggers (e.g.
+        // regenerate-message) until those gain workflow-side support.
         api: "/api/agent-proxy/chat",
-        // The transform decides which agent-service endpoint a given
-        // turn hits. Specialists go to the new workflow loop with a
-        // slimmed body (`conversationId` + only the new user message);
-        // the loop loads prior history from the DB. The Assistant stays
-        // on the legacy route with full message history because its
-        // tool surface (`handoff`) hasn't been migrated yet.
         prepareSendMessagesRequest({
           id,
           messages,
@@ -141,11 +136,11 @@ export function ChatPanel({
           headers,
           credentials,
         }) {
-          const agentId = extensionIdToAgentId(extensionIdRef.current);
-          if (agentId && trigger === "submit-message") {
-            // Pick out the just-submitted user message. Prefer the one
-            // whose id matches `messageId`; fall back to the last user
-            // message in history.
+          if (trigger === "submit-message") {
+            const agentId = extensionIdToAgentId(extensionIdRef.current);
+            // Pick the just-submitted user message — prefer the one whose
+            // id matches `messageId`, fall back to the last user message
+            // in history. The workflow loads prior turns from the DB.
             const newMsg =
               (messageId && messages.find((m) => m.id === messageId)) ||
               [...messages].reverse().find((m) => m.role === "user");
@@ -159,10 +154,12 @@ export function ChatPanel({
                 conversationId: id,
                 newUserMessages: newMsg ? [newMsg] : [],
                 canvasState: canvasStateRef.current,
+                taskStack: taskStackRef.current,
               },
             };
           }
-          // Legacy path — preserves the existing /chat body shape.
+          // Legacy path — preserves the existing /chat body shape for
+          // regenerate-message / other triggers we haven't migrated.
           return {
             api,
             headers,

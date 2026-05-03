@@ -45,6 +45,9 @@ import {
 } from "../agents/DataAnalyst/tools/data-tools.js";
 import { renderSqlEditorTool } from "../agents/DataAnalyst/tools/render-tools.js";
 
+// Assistant (concierge) — handoff is its only tool.
+import { createHandoffTool } from "../tools/handoff.js";
+
 // Conversation persistence
 import { eq } from "drizzle-orm";
 import { conversations } from "@eloquio/db-schema";
@@ -67,13 +70,28 @@ import { getDb } from "../lib/db.js";
 // Types
 // ---------------------------------------------------------------------------
 
-export type AgentId = "PipelineManager" | "DataArchitect" | "DataAnalyst";
+export type AgentId =
+  | "Assistant"
+  | "PipelineManager"
+  | "DataArchitect"
+  | "DataAnalyst";
+
+export interface TaskStackEntry {
+  /** PascalCase agent id of the paused specialist (matches AgentId). */
+  extensionId: string;
+  /** Short human-readable description of what they were working on. */
+  reason: string;
+}
 
 export interface AgentLoopContext {
   /** Canvas state forwarded to factory tools that need to read it. */
   canvasState: unknown;
   /** End-user identity, used by the few tools that write to per-user state. */
   userId: string;
+  /** Paused-task stack (depth-1 today). The Assistant's `handoff` tool
+   *  inspects this to allow stack-pop resumes while blocking new
+   *  handoffs above the depth limit. */
+  taskStack: TaskStackEntry[];
 }
 
 export type LoopEvent =
@@ -130,6 +148,35 @@ interface ModelStepResult {
 // ---------------------------------------------------------------------------
 
 const AGENT_CONFIGS: Record<AgentId, { system: string; toolNames: string[]; maxLoopSteps: number }> = {
+  Assistant: {
+    // The `{{taskStack}}` seam is substituted per-turn inside `runModelStep`
+    // because the paused-task block depends on the workflow input, not the
+    // static config. The specialists block is hardcoded here — it changes
+    // only when a new specialist agent ships.
+    system: `You are the Lattik Studio Assistant — the main AI assistant for Lattik Studio, an agentic analytics platform.
+
+You help users with their analytics needs. When a user's request matches a specialized agent, hand off to that agent using the handoff tool.
+
+Available agents:
+- **Pipeline Manager** (id: "PipelineManager"): Monitor and operate Airflow DAGs — list runs, inspect task state, dig into failures.
+- **Data Architect** (id: "DataArchitect"): Define data pipeline concepts (entities, dimensions, logger tables, lattik tables, metrics) and submit them as PRs.
+- **Data Analyst** (id: "DataAnalyst"): Explore data with SQL — list tables, run queries, render charts.
+
+## When to hand off
+- If the user's request clearly matches an available agent's specialty → hand off
+- For general questions, greetings, or tasks that don't match any agent → handle them yourself
+
+## Routing rules (apply before asking the user)
+- **Any delete / drop / remove request** targeting a table, definition, entity, dimension, logger table, lattik table, or metric → hand off to the **Data Architect** agent (id: "DataArchitect") without asking. The Data Architect owns all deletion flows; the Data Analyst is not allowed to delete.
+
+## Guidelines
+- Be friendly and concise.
+- When handing off, briefly tell the user which agent you're routing them to and why.
+
+{{taskStack}}`,
+    toolNames: ["handoff"],
+    maxLoopSteps: 5,
+  },
   PipelineManager: {
     system: `You are the Pipeline Manager agent in Lattik Studio. You help users monitor and operate their data pipelines (Airflow DAGs).
 
@@ -437,6 +484,20 @@ const TOOL_DEFINITIONS: Record<string, () => any> = {
         z.object({ initialSql: z.string().optional() }),
       ),
     }),
+  // Assistant — concierge handoff. The actual stack-depth check lives in
+  // the `createHandoffTool` factory at dispatch time (it needs the live
+  // taskStack from per-request context).
+  handoff: () =>
+    tool({
+      description:
+        "Hand off the conversation to a specialized agent. Use this when the user's request matches an available agent.",
+      inputSchema: zodSchema(
+        z.object({
+          agentId: z.string().describe("The id of the agent to hand off to"),
+          reason: z.string().describe("Brief reason for the handoff"),
+        }),
+      ),
+    }),
 };
 
 // ---------------------------------------------------------------------------
@@ -506,16 +567,51 @@ const TOOL_DISPATCHERS: Record<string, Dispatcher> = {
   describeTable: (input) => describeTableTool.execute!(input as never, {} as never),
   runQuery: (input) => runQueryTool.execute!(input as never, {} as never),
   renderSqlEditor: (input) => renderSqlEditorTool.execute!(input as never, {} as never),
+  // Assistant — handoff factory captures the live taskStack so it can
+  // enforce the depth-1 stack limit and detect resume-of-paused.
+  handoff: (input, ctx) =>
+    createHandoffTool({ taskStack: ctx.taskStack }).execute!(
+      input as never,
+      {} as never,
+    ),
 };
 
 // ---------------------------------------------------------------------------
 // Steps
 // ---------------------------------------------------------------------------
 
+/**
+ * Defense-in-depth sanitizer for paused-task `reason` strings, which
+ * arrive in user-controlled request payloads and land in the Assistant's
+ * system prompt. Strip control chars and the triple-backtick fence
+ * delimiter that could be used to break out of the system block.
+ */
+function sanitizeForPrompt(text: string): string {
+  return text
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+    .replace(/```/g, "''")
+    .slice(0, 500);
+}
+
+/**
+ * Render the per-turn `{{taskStack}}` block for the Assistant's system
+ * prompt. Returns "" when nothing is paused — the prompt has the seam
+ * always, but the Assistant only needs the special instructions when a
+ * task is on the stack.
+ */
+function renderTaskStackBlock(taskStack: TaskStackEntry[]): string {
+  const top = taskStack.length > 0 ? taskStack[taskStack.length - 1] : null;
+  if (!top) return "";
+  return `\n## Paused Task\nThere is a paused task on the stack: the "${top.extensionId}" agent was working on "${sanitizeForPrompt(top.reason)}" and is waiting to resume.\n- Do NOT hand off to a different specialist — handle the user's new request yourself.\n- When the user indicates they are done with their current request ("that's all", "nothing else", "I'm done", etc.), use the handoff tool to resume the paused agent (agentId: "${top.extensionId}") so it can continue where it left off.\n- Briefly tell the user you're handing them back to the paused agent.`;
+}
+
 async function runModelStep(input: {
   iteration: number;
   agentId: AgentId;
   messages: ModelMessage[];
+  /** Forwarded so the Assistant's system prompt can render its
+   *  `{{taskStack}}` seam per-turn. Other agents ignore it. */
+  taskStack: TaskStackEntry[];
 }): Promise<ModelStepResult> {
   "use step";
   const config = AGENT_CONFIGS[input.agentId];
@@ -535,9 +631,15 @@ async function runModelStep(input: {
     tools[name] = builder();
   }
 
+  // Substitute the `{{taskStack}}` seam if present (only the Assistant
+  // template has it today). Cheap noop for the other agents.
+  const systemPrompt = config.system.includes("{{taskStack}}")
+    ? config.system.replace("{{taskStack}}", renderTaskStackBlock(input.taskStack))
+    : config.system;
+
   const result = streamText({
     model: gateway("anthropic/claude-haiku-4.5"),
-    system: config.system,
+    system: systemPrompt,
     messages: input.messages,
     tools,
   });
@@ -731,6 +833,9 @@ export interface AgentLoopInput {
   newUserMessages: UIMessage[];
   canvasState: unknown;
   userId: string;
+  /** Paused-task stack; only meaningful for the Assistant agent. Empty
+   *  array for the rest. */
+  taskStack: TaskStackEntry[];
 }
 
 export async function agentLoopWorkflow(input: AgentLoopInput) {
@@ -754,6 +859,7 @@ export async function agentLoopWorkflow(input: AgentLoopInput) {
   const context: AgentLoopContext = {
     canvasState: input.canvasState,
     userId: input.userId,
+    taskStack: input.taskStack,
   };
 
   let iterations = 0;
@@ -766,6 +872,7 @@ export async function agentLoopWorkflow(input: AgentLoopInput) {
       iteration: iterations,
       agentId: input.agentId,
       messages,
+      taskStack: input.taskStack,
     });
     modelStepInvocations++;
 
