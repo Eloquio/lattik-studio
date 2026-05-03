@@ -122,8 +122,13 @@ export function ChatPanel({
         // All chats — Assistant concierge included, both submit-message
         // and regenerate-message — run through agent-service's per-tool-
         // durable workflow loop. The legacy `/api/agent-proxy/chat`
-        // ToolLoopAgent route stays only as a fallback for unknown
-        // triggers (none today; reserved for future AI SDK additions).
+        // ToolLoopAgent route was deleted in the workflow-cutover slice;
+        // the `api` value here is just a default that the per-request
+        // override always replaces. If a future AI SDK adds a new
+        // trigger we don't handle, the unknown-trigger branch returns
+        // a body shape that targets the now-deleted route — the request
+        // will 404 from agent-service, which is the desired
+        // fail-loudly behavior until the new trigger is wired.
         api: "/api/agent-proxy/chat",
         prepareSendMessagesRequest({
           id,
