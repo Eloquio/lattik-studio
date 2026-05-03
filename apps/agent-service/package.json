@@ -18,6 +18,8 @@
   "dependencies": {
     "@ai-sdk/gateway": "^3.0.83",
     "@eloquio/agent-harness": "workspace:*",
+    "@eloquio/db-schema": "workspace:*",
+    "drizzle-orm": "^0.45.2",
     "ai": "^6.0.141",
     "h3": "^1.15.0",
     "zod": "^4.3.6"
