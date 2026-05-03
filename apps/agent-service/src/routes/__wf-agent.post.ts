@@ -19,7 +19,17 @@ import {
 // own user and asserts identity via `X-User-Id`. Stream is NDJSON-encoded
 // for easy curl inspection.
 
-const agentIdSchema = z.enum(["PipelineManager", "DataArchitect", "DataAnalyst"]);
+const agentIdSchema = z.enum([
+  "Assistant",
+  "PipelineManager",
+  "DataArchitect",
+  "DataAnalyst",
+]);
+
+const taskStackEntrySchema = z.object({
+  extensionId: z.string(),
+  reason: z.string(),
+});
 
 const bodySchema = z.object({
   agentId: agentIdSchema,
@@ -28,6 +38,7 @@ const bodySchema = z.object({
    *  part. The workflow loads prior history from the DB and appends. */
   newUserMessages: z.array(z.unknown()).default([]),
   canvasState: z.unknown().optional(),
+  taskStack: z.array(taskStackEntrySchema).default([]),
 });
 
 export default defineEventHandler(async (event) => {
@@ -54,6 +65,7 @@ export default defineEventHandler(async (event) => {
       newUserMessages: body.data.newUserMessages as UIMessage[],
       canvasState: body.data.canvasState ?? null,
       userId: auth.userId,
+      taskStack: body.data.taskStack,
     },
   ]);
 
