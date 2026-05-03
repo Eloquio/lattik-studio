@@ -85,12 +85,18 @@ describe("intentToSpec dispatcher", () => {
   });
 
   it("returns a PlaceholderCard for kinds without an adapter yet", () => {
-    // entity-form (and the other 4 form kinds) and definition-review are
-    // the remaining unimplemented adapters as of this slice.
+    // definition-review is the only remaining unimplemented adapter as
+    // of this slice — its translator needs a canvas-state-aware diff
+    // renderer that doesn't exist yet.
     const spec = intentToSpec({
-      kind: "entity-form",
-      surface: "form",
-      data: { initialState: {} },
+      kind: "definition-review",
+      surface: "review",
+      data: {
+        definitionKind: "entity",
+        name: "user",
+        before: {},
+        after: {},
+      },
     });
     expect(spec.elements.main).toMatchObject({
       type: "PlaceholderCard",

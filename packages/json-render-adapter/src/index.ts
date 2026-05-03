@@ -20,6 +20,13 @@ import { prSubmittedToSpec } from "./pr-submitted.js";
 import { sqlEditorToSpec } from "./sql-editor.js";
 import { queryResultToSpec } from "./query-result.js";
 import { chartToSpec } from "./chart.js";
+import {
+  entityFormToSpec,
+  dimensionFormToSpec,
+  loggerTableFormToSpec,
+  lattikTableFormToSpec,
+  metricFormToSpec,
+} from "./forms.js";
 
 export { dagOverviewToSpec } from "./dag-overview.js";
 export { dagRunDetailToSpec } from "./dag-run-detail.js";
@@ -28,6 +35,13 @@ export { prSubmittedToSpec } from "./pr-submitted.js";
 export { sqlEditorToSpec } from "./sql-editor.js";
 export { queryResultToSpec } from "./query-result.js";
 export { chartToSpec } from "./chart.js";
+export {
+  entityFormToSpec,
+  dimensionFormToSpec,
+  loggerTableFormToSpec,
+  lattikTableFormToSpec,
+  metricFormToSpec,
+} from "./forms.js";
 
 /**
  * Per-kind dispatcher. The adapter is currently complete only for
@@ -59,10 +73,20 @@ export function intentToSpec(intent: RenderIntent): Spec {
       return chartToSpec(intent);
 
     case "entity-form":
+      return entityFormToSpec(intent);
+
     case "dimension-form":
+      return dimensionFormToSpec(intent);
+
     case "logger-table-form":
+      return loggerTableFormToSpec(intent);
+
     case "lattik-table-form":
+      return lattikTableFormToSpec(intent);
+
     case "metric-form":
+      return metricFormToSpec(intent);
+
     case "definition-review":
       return placeholderSpec(intent.kind);
 
