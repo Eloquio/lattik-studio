@@ -1,5 +1,6 @@
 import { tool, zodSchema } from "ai";
 import { z } from "zod";
+import type { PrSubmittedIntent } from "@eloquio/render-intents";
 import {
   createBranch,
   commitFiles,
@@ -88,7 +89,11 @@ export function createSubmitPRTool(opts: CreateSubmitPRToolOptions) {
         ),
       }),
     ),
-    execute: async (input: { kind: z.infer<typeof definitionKindEnum> }) => {
+    execute: async (
+      input: { kind: z.infer<typeof definitionKindEnum> },
+    ): Promise<
+      PrSubmittedIntent | { status: "error"; message: string }
+    > => {
       const canvasState = opts.getCanvasState();
       const state = getCanvasFormState(canvasState);
       const rawName = typeof state.name === "string" ? state.name : "";
@@ -136,37 +141,17 @@ export function createSubmitPRTool(opts: CreateSubmitPRToolOptions) {
           });
         }
 
-        const filePaths = files.map((f) => f.path);
-        // Phase 2 will replace this with a render-intent. For now we emit the
-        // same json-render Spec shape apps/web's chat watcher already
-        // understands — typed as `unknown` to keep @json-render/core out of
-        // agent-service.
-        const spec: unknown = {
-          root: "main",
-          elements: {
-            main: {
-              type: "PRSubmittedCard",
-              props: {
-                kind: input.kind,
-                name,
-                prNumber: pr.number,
-                prUrl,
-                branch: branchName,
-                files: filePaths,
-              },
-              children: [],
-            },
-          },
-          state: {},
-        };
-
         return {
-          status: "submitted",
-          prNumber: pr.number,
-          prUrl,
-          branch: branchName,
-          files: filePaths,
-          spec,
+          kind: "pr-submitted",
+          surface: "pr-card",
+          data: {
+            definitionKind: input.kind,
+            name,
+            prNumber: pr.number,
+            prUrl,
+            branch: branchName,
+            files: files.map((f) => f.path),
+          },
         };
       } catch (error) {
         console.error("submitPR error:", error);
