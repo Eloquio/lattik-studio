@@ -286,6 +286,9 @@ importers:
       '@eloquio/render-intents':
         specifier: workspace:*
         version: link:../render-intents
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
     devDependencies:
       '@json-render/core':
         specifier: ^0.16.0

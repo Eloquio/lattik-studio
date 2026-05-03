@@ -21,7 +21,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@eloquio/render-intents": "workspace:*"
+    "@eloquio/render-intents": "workspace:*",
+    "zod": "^4.3.6"
   },
   "peerDependencies": {
     "@json-render/core": "^0.16.0"
