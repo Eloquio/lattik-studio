@@ -14,8 +14,10 @@
 import type { Spec } from "@json-render/core";
 import type { RenderIntent } from "@eloquio/render-intents";
 import { dagOverviewToSpec } from "./dag-overview.js";
+import { dagRunDetailToSpec } from "./dag-run-detail.js";
 
 export { dagOverviewToSpec } from "./dag-overview.js";
+export { dagRunDetailToSpec } from "./dag-run-detail.js";
 
 /**
  * Per-kind dispatcher. The adapter is currently complete only for
@@ -29,6 +31,8 @@ export function intentToSpec(intent: RenderIntent): Spec {
       return dagOverviewToSpec(intent);
 
     case "dag-run-detail":
+      return dagRunDetailToSpec(intent);
+
     case "entity-form":
     case "dimension-form":
     case "logger-table-form":
