@@ -11,6 +11,7 @@ import {
   getDefinitionNameFromCanvas,
 } from "../lib/canvas-to-spec.js";
 import { validate } from "../lib/validation/index.js";
+import { generateYamlFiles } from "../lib/yaml-generator.js";
 
 /**
  * Definition-lifecycle tools for Data Architect.
@@ -183,12 +184,61 @@ export function createStaticCheckTool(opts: CreateStaticCheckToolOptions) {
   });
 }
 
-export const generateYamlTool = tool({
-  description:
-    "Render the YAML spec on the canvas as an editable, syntax-highlighted block. STOP after this and ask the user whether to submit a PR.",
-  inputSchema: zodSchema(z.object({})),
-  execute: async () => noteStub(),
-});
+export interface CreateGenerateYamlToolOptions {
+  getCanvasState: () => unknown;
+}
+
+export function createGenerateYamlTool(opts: CreateGenerateYamlToolOptions) {
+  return tool({
+    description:
+      "Generate YAML files from the current canvas definition and display them on the canvas in an editable, syntax-highlighted YAML editor. Reads the spec from canvas form state — do NOT pass a spec, name, or specJson. The user may then manually adjust the YAML before submitting a PR. Run this AFTER static checks pass and BEFORE submitPR.",
+    inputSchema: zodSchema(
+      z.object({
+        kind: definitionKindEnum.describe(
+          "The type of definition currently on the canvas",
+        ),
+      }),
+    ),
+    execute: async (input: { kind: z.infer<typeof definitionKindEnum> }) => {
+      const canvasState = opts.getCanvasState();
+      const name = getDefinitionNameFromCanvas(canvasState);
+      if (!name) {
+        return {
+          error:
+            "Canvas form has no name field set — fill it in before generating YAML.",
+        };
+      }
+      const definitionSpec = canvasStateToSpec(input.kind, canvasState);
+      const files = generateYamlFiles(input.kind, name, definitionSpec);
+
+      // Phase 2 will replace this with a render-intent. For now we emit the
+      // same json-render Spec apps/web already knows how to display, typed
+      // as `unknown` to avoid pulling @json-render/core into agent-service.
+      const spec: unknown = {
+        root: "main",
+        elements: {
+          main: { type: "YamlEditor", props: {}, children: [] },
+        },
+        state: {
+          kind: input.kind,
+          name,
+          files: files.map((f, i) => ({
+            _key: `yamlfile_${i}`,
+            path: f.path,
+            content: f.content,
+          })),
+          active_file: 0,
+        },
+      };
+      return {
+        kind: input.kind,
+        spec,
+        instruction:
+          "The YAML editor is now on the canvas with the generated YAML pre-filled. The user can review, edit, and add files before creating the PR. Tell the user briefly that the YAML is ready and ask if they'd like to create the PR. Do NOT call submitPR until the user explicitly confirms.",
+      };
+    },
+  });
+}
 
 export const submitPRTool = tool({
   description:
