@@ -37,6 +37,11 @@ import {
 } from "../agents/DataAnalyst/tools/data-tools.js";
 import { renderSqlEditorTool } from "../agents/DataAnalyst/tools/render-tools.js";
 
+// Conversation persistence
+import { eq } from "drizzle-orm";
+import { conversations } from "@eloquio/db-schema";
+import { getDb } from "../lib/db.js";
+
 // Spike: generalized per-tool-durable agent loop. Same architecture as
 // `pipeline-manager-loop.ts` (workflow body drives the loop, every model
 // call and tool call is its own step), but parameterized over agent
@@ -367,6 +372,75 @@ async function runToolStep(input: {
   return output;
 }
 
+// ---------------------------------------------------------------------------
+// Conversation persistence steps. Reads/writes the same `conversation` row
+// that apps/web's `saveConversation` server action manages, so the workflow
+// can pick up where prior turns left off and replay them on reattach. The
+// row stores `messages: UIMessage[]` (not ModelMessage[]) — that's the
+// shape `useChat` consumes — so the workflow body keeps both views in
+// parallel: the prior UI history is what gets persisted, and a freshly
+// converted ModelMessage[] is what gets fed to the model.
+//
+// Both steps are owner-guarded by `userId`. The load step returns `null`
+// when no conversation exists yet (first turn). The commit step does an
+// idempotent UPSERT scoped by (id, userId), so replays don't double-write.
+// ---------------------------------------------------------------------------
+
+async function loadConversationStep(input: {
+  conversationId: string;
+  userId: string;
+}): Promise<{ messages: UIMessage[]; title: string } | null> {
+  "use step";
+  const db = getDb();
+  const rows = await db
+    .select({
+      messages: conversations.messages,
+      title: conversations.title,
+      userId: conversations.userId,
+    })
+    .from(conversations)
+    .where(eq(conversations.id, input.conversationId))
+    .limit(1);
+  if (rows.length === 0) return null;
+  const row = rows[0];
+  // Owner check — silently treat a foreign-owned conversation the same as
+  // a missing one rather than leaking its existence.
+  if (row.userId !== input.userId) return null;
+  return {
+    messages: (row.messages ?? []) as UIMessage[],
+    title: row.title,
+  };
+}
+
+async function commitConversationStep(input: {
+  conversationId: string;
+  userId: string;
+  title: string;
+  messages: UIMessage[];
+}): Promise<void> {
+  "use step";
+  const db = getDb();
+  await db
+    .insert(conversations)
+    .values({
+      id: input.conversationId,
+      userId: input.userId,
+      title: input.title,
+      messages: input.messages,
+    })
+    .onConflictDoUpdate({
+      target: conversations.id,
+      set: {
+        title: input.title,
+        messages: input.messages,
+        updatedAt: new Date(),
+      },
+      // Owner guard — a conflict where the existing row belongs to a
+      // different user resolves to no-op rather than reassigning.
+      setWhere: eq(conversations.userId, input.userId),
+    });
+}
+
 async function runLoopFinishStep(input: {
   iteration: number;
   agentId: AgentId;
@@ -394,7 +468,12 @@ async function runLoopFinishStep(input: {
 
 export interface AgentLoopInput {
   agentId: AgentId;
-  uiMessages: UIMessage[];
+  /** Stable conversation id; the workflow loads prior history from the DB
+   *  and persists the new turn back at the end. */
+  conversationId: string;
+  /** New user-side messages this turn — typically a single UIMessage with
+   *  one text part. Concatenated to the prior history before running. */
+  newUserMessages: UIMessage[];
   canvasState: unknown;
   userId: string;
 }
@@ -407,7 +486,16 @@ export async function agentLoopWorkflow(input: AgentLoopInput) {
     throw new Error(`Unknown agentId: ${input.agentId}`);
   }
 
-  const messages: ModelMessage[] = await convertToModelMessages(input.uiMessages);
+  // Load prior conversation state (or start fresh). The owner guard lives
+  // in `loadConversationStep` — a foreign-owned id reads as null.
+  const prior = await loadConversationStep({
+    conversationId: input.conversationId,
+    userId: input.userId,
+  });
+  const priorMessages: UIMessage[] = prior?.messages ?? [];
+  const fullUiHistory: UIMessage[] = [...priorMessages, ...input.newUserMessages];
+
+  const messages: ModelMessage[] = await convertToModelMessages(fullUiHistory);
   const context: AgentLoopContext = {
     canvasState: input.canvasState,
     userId: input.userId,
@@ -472,6 +560,40 @@ export async function agentLoopWorkflow(input: AgentLoopInput) {
     iterations++;
   }
 
+  // Build a single assistant UIMessage from finalText. Tool-call detail
+  // lives in the workflow run's persisted events under runId — recoverable
+  // via reattach if a richer view is ever needed. The id is generated
+  // deterministically from runId so replay produces the same message
+  // identity (the workflow runtime injects `runId` via `WORKFLOW_RUN_ID`
+  // env at step start, but for the workflow-body-side id we just use a
+  // stable per-conversation suffix).
+  const assistantUiMessage: UIMessage = {
+    id: `wfm_${input.conversationId}_${Date.now()}`,
+    role: "assistant",
+    parts: finalText ? [{ type: "text", text: finalText }] : [],
+  };
+
+  // Title heuristic: first 80 chars of the first user message text, or
+  // keep the existing one if this isn't the first turn.
+  const firstUserText = (() => {
+    const firstUser = [...priorMessages, ...input.newUserMessages].find(
+      (m) => m.role === "user",
+    );
+    if (!firstUser) return "New conversation";
+    const textPart = firstUser.parts.find(
+      (p): p is { type: "text"; text: string } => p.type === "text",
+    );
+    return textPart?.text.slice(0, 80) ?? "New conversation";
+  })();
+  const title = prior?.title ?? firstUserText;
+
+  await commitConversationStep({
+    conversationId: input.conversationId,
+    userId: input.userId,
+    title,
+    messages: [...priorMessages, ...input.newUserMessages, assistantUiMessage],
+  });
+
   await runLoopFinishStep({
     iteration: iterations,
     agentId: input.agentId,
@@ -485,5 +607,6 @@ export async function agentLoopWorkflow(input: AgentLoopInput) {
     iterations,
     modelStepInvocations,
     toolStepInvocations,
+    persistedTurns: priorMessages.length / 2 + 1,
   };
 }
