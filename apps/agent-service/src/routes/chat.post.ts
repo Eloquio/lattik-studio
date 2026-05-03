@@ -1,6 +1,12 @@
 import { defineEventHandler, readValidatedBody, createError } from "h3";
 import { z } from "zod";
-import { ToolLoopAgent, gateway, stepCountIs } from "ai";
+import {
+  ToolLoopAgent,
+  createAgentUIStreamResponse,
+  gateway,
+  stepCountIs,
+  type UIMessage,
+} from "ai";
 import {
   assertBaseToolsResolve,
   parseAgents,
@@ -20,23 +26,24 @@ import { renderDagOverviewTool } from "../agents/PipelineManager/tools/render-da
 import { renderDagRunDetailTool } from "../agents/PipelineManager/tools/render-dag-run-detail.js";
 
 /**
- * /chat — Phase 1 synchronous execution.
+ * /chat — Phase 1 streaming execution.
  *
  * Loads the requested agent from the embedded AGENT.md manifest, builds a
  * ToolLoopAgent with the runtime-bound tool registry (handback +
  * readCanvasState are chat-runtime-shared; the rest are Pipeline-Manager-
- * owned stubs), runs `agent.generate()` with the user message, returns the
- * text result. No SSE, no Workflow, no real Airflow tools yet — those land
- * in subsequent slices.
+ * owned stubs), and streams the run via `createAgentUIStreamResponse` in
+ * the AI SDK's UI Message Stream format — directly consumable by the
+ * `useChat` hook on the web client.
  *
- * Runtime credentials for the AI Gateway:
- *  - On Vercel deployments, the AI Gateway integration auto-issues an
- *    OIDC token to the function (no manual env var). The gateway()
- *    factory picks it up automatically.
- *  - For local dev, run `vercel env pull` to mirror the production OIDC
- *    setup, or set AI_GATEWAY_API_KEY directly as a fallback.
- * Without credentials, generate() throws a clear "missing credentials"
- * error to the caller — easy to spot.
+ * Runtime credentials for the AI Gateway: on Vercel deployments the AI
+ * Gateway integration auto-issues an OIDC token; locally, run
+ * `vercel env pull` to mirror that setup. The gateway() factory picks up
+ * the token automatically. Missing credentials produce a clear
+ * authentication error from the gateway.
+ *
+ * Conversation persistence (UI message history loaded from the shared
+ * conversations table) and Vercel Workflow integration land in subsequent
+ * slices. Today every request is a fresh single-turn stream.
  */
 
 const AGENTS = parseAgents(AGENT_MANIFEST);
@@ -138,19 +145,20 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  // Future: load conversation state from packages/db-schema's conversations
-  // table by (clientId, conversationId). For now, every call is a fresh
-  // single-turn run. SSE + Workflow integration replace this in the next
-  // slice.
+  // Future: load prior UI messages from packages/db-schema's conversations
+  // table by (clientId, conversationId). For now, every request is a fresh
+  // single-turn stream — no history.
+  const uiMessages: UIMessage[] = [
+    {
+      id: crypto.randomUUID(),
+      role: "user",
+      parts: [{ type: "text", text: message }],
+    },
+  ];
+
   const agent = buildPipelineManagerAgent(null);
-  const result = await agent.generate({ prompt: message });
-  return {
-    clientId: auth.clientId,
-    userId: auth.userId,
-    conversationId: body.data.conversationId,
-    agentId,
-    text: result.text,
-    finishReason: result.finishReason,
-    steps: result.steps.length,
-  };
+  return createAgentUIStreamResponse({
+    agent,
+    uiMessages,
+  });
 });
