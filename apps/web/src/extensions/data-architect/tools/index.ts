@@ -8,7 +8,6 @@ export {
   renderMetricFormTool,
   RENDER_FORM_TOOL_NAMES,
 } from "./render-form";
-export { createReviewDefinitionTool } from "./review-definition";
 export { createStaticCheckTool } from "./static-check";
 export { createUpdateDefinitionTool } from "./update-definition";
 export { createGenerateYamlTool } from "./generate-yaml";

@@ -128,16 +128,10 @@ export interface MetricFormIntent {
   data: { initialState: Record<string, unknown> };
 }
 
-export interface DefinitionReviewIntent {
-  kind: "definition-review";
-  surface: "review";
-  data: {
-    definitionKind: string;
-    name: string;
-    before: unknown;
-    after: unknown;
-  };
-}
+// review-definition is NOT a render-intent — it produces inline message
+// widgets (per-card accept/reject buttons attached to the assistant
+// message), not a canvas surface render. See `widgets.ts` for the
+// `ReviewSuggestionsWidget` shape.
 
 export interface YamlPreviewIntent {
   kind: "yaml-preview";
@@ -214,7 +208,6 @@ export type RenderIntent =
   | LoggerTableFormIntent
   | LattikTableFormIntent
   | MetricFormIntent
-  | DefinitionReviewIntent
   | YamlPreviewIntent
   | PrSubmittedIntent
   | SqlEditorIntent

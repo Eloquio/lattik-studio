@@ -33,13 +33,13 @@ import {
   renderMetricFormTool,
 } from "../agents/DataArchitect/tools/render-forms.js";
 import {
-  reviewDefinitionTool,
   createStaticCheckTool,
   createUpdateDefinitionTool,
   createGenerateYamlTool,
   listDefinitionsTool,
   getDefinitionTool,
 } from "../agents/DataArchitect/tools/definition-flow.js";
+import { createReviewDefinitionTool } from "../agents/DataArchitect/tools/review-definition.js";
 import { createSubmitPRTool } from "../agents/DataArchitect/tools/submit-pr.js";
 import { deleteDefinitionTool } from "../agents/DataArchitect/tools/delete-definition.js";
 import {
@@ -254,7 +254,9 @@ function buildDataArchitectAgent(opts: BuildOpts & { userId: string }) {
       renderLoggerTableForm: renderLoggerTableFormTool,
       renderLattikTableForm: renderLattikTableFormTool,
       renderMetricForm: renderMetricFormTool,
-      reviewDefinition: reviewDefinitionTool,
+      reviewDefinition: createReviewDefinitionTool({
+        getCanvasState: () => opts.canvasState,
+      }),
       staticCheck: createStaticCheckTool({ getCanvasState: () => opts.canvasState }),
       updateDefinition: createUpdateDefinitionTool({
         userId: opts.userId,

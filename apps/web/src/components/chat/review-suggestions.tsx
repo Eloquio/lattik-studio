@@ -3,9 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, X } from "lucide-react";
 import type {
-  ReviewAction,
   ReviewSuggestion,
-} from "@/extensions/data-architect/tools/review-definition";
+  ReviewSuggestionAction as ReviewAction,
+} from "@eloquio/render-intents";
 
 function prettyPath(jsonPointer: string): string {
   if (!jsonPointer.startsWith("/")) return jsonPointer;

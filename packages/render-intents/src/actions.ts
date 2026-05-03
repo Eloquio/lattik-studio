@@ -48,9 +48,10 @@ export type DefinitionFormAction =
   | { type: "edit-field"; field: string; value: unknown }
   | { type: "cancel" };
 
-export type DefinitionReviewAction =
-  | { type: "approve" }
-  | { type: "reject"; reason?: string };
+// review-definition is a MessageWidget, not a render-intent — its
+// per-card accept/reject buttons aren't typed as IntentActions; the
+// chat client persists decisions as `data-reviewDecisions` parts on
+// the message itself. See `widgets.ts`.
 
 export type YamlPreviewAction =
   /** User edited the YAML in the editor. The agent should use the new
@@ -93,7 +94,6 @@ export type IntentAction =
   | { intentKind: "logger-table-form"; surface: "form"; action: DefinitionFormAction }
   | { intentKind: "lattik-table-form"; surface: "form"; action: DefinitionFormAction }
   | { intentKind: "metric-form"; surface: "form"; action: DefinitionFormAction }
-  | { intentKind: "definition-review"; surface: "review"; action: DefinitionReviewAction }
   | { intentKind: "yaml-preview"; surface: "yaml"; action: YamlPreviewAction }
   | { intentKind: "pr-submitted"; surface: "pr-card"; action: PrSubmittedAction }
   | { intentKind: "sql-editor"; surface: "editor"; action: SqlEditorAction }

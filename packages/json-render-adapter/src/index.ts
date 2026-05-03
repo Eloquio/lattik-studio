@@ -87,14 +87,17 @@ export function intentToSpec(intent: RenderIntent): Spec {
     case "metric-form":
       return metricFormToSpec(intent);
 
-    case "definition-review":
-      return placeholderSpec(intent.kind);
-
     default:
       return assertNever(intent);
   }
 }
 
+// Kept for forward-compat: when a new RenderIntent kind lands without a
+// matching translator, the dispatcher's exhaustiveness check forces us to
+// add a case — for the slice where we want to ship the kind before the
+// adapter, route it here as a graceful degradation.
+//
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function placeholderSpec(kind: string): Spec {
   return {
     root: "main",

@@ -148,12 +148,10 @@ export function createUpdateDefinitionTool(opts: CreateUpdateDefinitionToolOptio
   });
 }
 
-export const reviewDefinitionTool = tool({
-  description:
-    "Render a side-by-side review of the definition draft (current canvas state) versus the persisted spec, so the user can confirm what's about to be written.",
-  inputSchema: zodSchema(z.object({})),
-  execute: async () => noteStub(),
-});
+// reviewDefinition lives in its own file (review-definition.ts) — it makes
+// an LLM call (Sonnet via generateObject) and returns a typed
+// ReviewSuggestionsWidget rather than a render-intent. See the
+// MessageWidget protocol in @eloquio/render-intents/widgets.
 
 export interface CreateStaticCheckToolOptions {
   getCanvasState: () => unknown;
