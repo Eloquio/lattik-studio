@@ -13,6 +13,11 @@ import { z } from "zod";
 // PipelineManager tools (pure)
 import { listDagsTool } from "../agents/PipelineManager/tools/list-dags.js";
 import { getDagDetailTool } from "../agents/PipelineManager/tools/get-dag-detail.js";
+import { listDagRunsTool } from "../agents/PipelineManager/tools/list-dag-runs.js";
+import { getTaskInstancesTool } from "../agents/PipelineManager/tools/get-task-instances.js";
+import { getTaskLogsTool } from "../agents/PipelineManager/tools/get-task-logs.js";
+import { renderDagOverviewTool } from "../agents/PipelineManager/tools/render-dag-overview.js";
+import { renderDagRunDetailTool } from "../agents/PipelineManager/tools/render-dag-run-detail.js";
 
 // DataArchitect tools — only `renderEntityForm` for now. The richer factory
 // tools (`staticCheck`, `updateDefinition`, `getDefinition`, etc.) live in
@@ -123,9 +128,26 @@ interface ModelStepResult {
 
 const AGENT_CONFIGS: Record<AgentId, { system: string; toolNames: string[]; maxLoopSteps: number }> = {
   PipelineManager: {
-    system:
-      "You are the Pipeline Manager spike agent. Use the available tools to investigate the user's request, then answer concisely. Stop calling tools as soon as you have enough information to respond.",
-    toolNames: ["listDags", "getDagDetail"],
+    system: `You are the Pipeline Manager agent in Lattik Studio. You help users monitor and operate their data pipelines (Airflow DAGs).
+
+## Canvas Rendering — STRICT
+**ANY request that asks to see, list, show, view, or browse DAGs — including "list my DAGs", "what DAGs do I have", "show me the DAGs", or any phrasing that means the user wants to see the DAG inventory — MUST be answered by calling \`renderDagOverview\` FIRST.** This is non-negotiable. The canvas IS the answer for these requests. \`listDags\` is for follow-up questions about specific properties; never call it for the initial "show me / list / what DAGs" question.
+
+When the user asks about a specific run, call \`renderDagRunDetail\` to show the task graph.
+
+After calling a render tool, acknowledge briefly in prose (one sentence) and let the user interact with the canvas. NEVER emit a \`spec\` code fence or any JSONL patches — the render tools are the only canvas-rendering mechanism.
+
+## Investigating a DAG
+Use \`getDagDetail\` / \`listDagRuns\` / \`getTaskInstances\` / \`getTaskLogs\` to dig into specifics after the canvas is rendered. Use \`listDags\` only when the user asks about something the canvas doesn't already show (e.g. raw schedule strings, owners, etc.). Be concise.`,
+    toolNames: [
+      "renderDagOverview",
+      "renderDagRunDetail",
+      "listDags",
+      "getDagDetail",
+      "listDagRuns",
+      "getTaskInstances",
+      "getTaskLogs",
+    ],
     maxLoopSteps: 6,
   },
   DataArchitect: {
@@ -156,7 +178,7 @@ const TOOL_DEFINITIONS: Record<string, () => any> = {
   listDags: () =>
     tool({
       description:
-        "List all Lattik-managed Airflow DAGs. Returns DAG ID, description, schedule, paused status, and tags.",
+        "Fetch raw DAG metadata as JSON (DAG ID, description, schedule cron, paused status, tags) for follow-up questions about specific properties. Do NOT call this for the user's initial 'list / show / what DAGs do I have' question — that question is answered by `renderDagOverview` rendering the canvas. Use this only when the user asks for something the canvas doesn't show (raw schedule strings, owners, etc.).",
       inputSchema: zodSchema(
         z.object({
           limit: z.number().optional().describe("Max number of DAGs (default 50)"),
@@ -169,6 +191,52 @@ const TOOL_DEFINITIONS: Record<string, () => any> = {
         "Get full detail for a specific DAG: schedule, paused status, tags, owners, and a structured task list.",
       inputSchema: zodSchema(
         z.object({ dagId: z.string().describe("The DAG ID to fetch detail for") }),
+      ),
+    }),
+  listDagRuns: () =>
+    tool({
+      description:
+        "List recent runs for a DAG. Each entry includes run id, start/end times, state, and external trigger flag.",
+      inputSchema: zodSchema(
+        z.object({
+          dagId: z.string(),
+          limit: z.number().optional(),
+        }),
+      ),
+    }),
+  getTaskInstances: () =>
+    tool({
+      description:
+        "List task instances for a specific DAG run, with state, start/end, duration, and try number.",
+      inputSchema: zodSchema(
+        z.object({ dagId: z.string(), dagRunId: z.string() }),
+      ),
+    }),
+  getTaskLogs: () =>
+    tool({
+      description:
+        "Fetch the log output for a specific task try (1-indexed), used to investigate failures.",
+      inputSchema: zodSchema(
+        z.object({
+          dagId: z.string(),
+          dagRunId: z.string(),
+          taskId: z.string(),
+          tryNumber: z.number(),
+        }),
+      ),
+    }),
+  renderDagOverview: () =>
+    tool({
+      description:
+        "Render the DAG overview on the canvas. Shows all Lattik-managed DAGs as cards with status badges, schedule, last run result, and visual run history. This is the starting point for any monitoring workflow. Call this BEFORE writing prose.",
+      inputSchema: zodSchema(z.object({})),
+    }),
+  renderDagRunDetail: () =>
+    tool({
+      description:
+        "Render a specific DAG run's task graph on the canvas — task nodes, dependencies, per-task state. Use when the user wants to inspect a particular run.",
+      inputSchema: zodSchema(
+        z.object({ dagId: z.string(), dagRunId: z.string() }),
       ),
     }),
   // DataArchitect (spike scope — see import comment for what's deferred)
@@ -248,6 +316,14 @@ const TOOL_DISPATCHERS: Record<string, Dispatcher> = {
   // PipelineManager
   listDags: (input) => listDagsTool.execute!(input as never, {} as never),
   getDagDetail: (input) => getDagDetailTool.execute!(input as never, {} as never),
+  listDagRuns: (input) => listDagRunsTool.execute!(input as never, {} as never),
+  getTaskInstances: (input) =>
+    getTaskInstancesTool.execute!(input as never, {} as never),
+  getTaskLogs: (input) => getTaskLogsTool.execute!(input as never, {} as never),
+  renderDagOverview: (input) =>
+    renderDagOverviewTool.execute!(input as never, {} as never),
+  renderDagRunDetail: (input) =>
+    renderDagRunDetailTool.execute!(input as never, {} as never),
   // DataArchitect (spike scope)
   renderEntityForm: (input) => renderEntityFormTool.execute!(input as never, {} as never),
   // DataAnalyst — all pure
