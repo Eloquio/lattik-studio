@@ -37,6 +37,25 @@ function extensionDisplayName(extensionId: string): string {
   );
 }
 
+/** Map kebab-case `extensionId` to the workflow loop's PascalCase
+ *  `agentId`. Returns null for the Assistant (extensionId = null) — the
+ *  Assistant concierge isn't yet wired into the workflow loop, so chats
+ *  without an active specialist still go through the legacy `/chat` route. */
+function extensionIdToAgentId(
+  extensionId: string | null,
+): "PipelineManager" | "DataArchitect" | "DataAnalyst" | null {
+  switch (extensionId) {
+    case "pipeline-manager":
+      return "PipelineManager";
+    case "data-architect":
+      return "DataArchitect";
+    case "data-analyst":
+      return "DataAnalyst";
+    default:
+      return null;
+  }
+}
+
 interface ChatPanelProps {
   chatId: string;
   initialMessages?: UIMessage[];
@@ -82,18 +101,63 @@ export function ChatPanel({
   const [transport] = useState(
     () =>
       new DefaultChatTransport({
-        // Routes through the trusted-client bridge to apps/agent-service.
-        // The proxy attaches the auth context (X-User-Id from the NextAuth
-        // session, plus VERCEL_OIDC_TOKEN in production) and forwards to
-        // agent-service's /chat. The body shape matches what agent-service
-        // accepts directly.
+        // Default api for the Assistant concierge, which still runs through
+        // agent-service's legacy `/chat` ToolLoopAgent route. Specialist
+        // conversations override `api` per-request below to hit the
+        // per-tool-durable workflow loop.
         api: "/api/agent-proxy/chat",
-        body: () => ({
-          extensionId: extensionIdRef.current,
-          canvasState: canvasStateRef.current,
-          taskStack: taskStackRef.current,
-          resumeContext: resumeContextRef.current,
-        }),
+        // The transform decides which agent-service endpoint a given
+        // turn hits. Specialists go to the new workflow loop with a
+        // slimmed body (`conversationId` + only the new user message);
+        // the loop loads prior history from the DB. The Assistant stays
+        // on the legacy route with full message history because its
+        // tool surface (`handoff`) hasn't been migrated yet.
+        prepareSendMessagesRequest({
+          id,
+          messages,
+          messageId,
+          trigger,
+          api,
+          body,
+          headers,
+          credentials,
+        }) {
+          const agentId = extensionIdToAgentId(extensionIdRef.current);
+          if (agentId && trigger === "submit-message") {
+            // Pick out the just-submitted user message. Prefer the one
+            // whose id matches `messageId`; fall back to the last user
+            // message in history.
+            const newMsg =
+              (messageId && messages.find((m) => m.id === messageId)) ||
+              [...messages].reverse().find((m) => m.role === "user");
+            return {
+              api: "/api/agent-proxy/__wf-chat",
+              headers,
+              credentials,
+              body: {
+                ...body,
+                agentId,
+                conversationId: id,
+                newUserMessages: newMsg ? [newMsg] : [],
+                canvasState: canvasStateRef.current,
+              },
+            };
+          }
+          // Legacy path — preserves the existing /chat body shape.
+          return {
+            api,
+            headers,
+            credentials,
+            body: {
+              ...body,
+              messages,
+              extensionId: extensionIdRef.current,
+              canvasState: canvasStateRef.current,
+              taskStack: taskStackRef.current,
+              resumeContext: resumeContextRef.current,
+            },
+          };
+        },
       })
   );
 
