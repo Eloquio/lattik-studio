@@ -20,6 +20,7 @@
     "@eloquio/agent-harness": "workspace:*",
     "@eloquio/db-schema": "workspace:*",
     "drizzle-orm": "^0.45.2",
+    "postgres": "^3.4.8",
     "ai": "^6.0.141",
     "h3": "^1.15.0",
     "jose": "^6.0.0",
