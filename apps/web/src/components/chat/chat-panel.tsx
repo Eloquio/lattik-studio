@@ -5,8 +5,7 @@ import type { UIMessage } from "ai";
 import { DefaultChatTransport } from "ai";
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Bot, Pencil, Plus, Trash2 } from "lucide-react";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Streamdown } from "streamdown";
 import { buildSpecFromParts } from "@json-render/react";
 import { intentToSpec } from "@eloquio/json-render-adapter";
 import {
@@ -35,6 +34,44 @@ function extensionDisplayName(extensionId: string): string {
       .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
       .join(" ")
   );
+}
+
+/** Map an extensionId to the workflow loop's PascalCase `agentId`.
+ *  Null/undefined extensionId means the Assistant concierge — it now
+ *  also runs through the workflow loop, so we always return a valid
+ *  AgentId. */
+function extensionIdToAgentId(
+  extensionId: string | null,
+): "Assistant" | "PipelineManager" | "DataArchitect" | "DataAnalyst" {
+  switch (extensionId) {
+    case "pipeline-manager":
+      return "PipelineManager";
+    case "data-architect":
+      return "DataArchitect";
+    case "data-analyst":
+      return "DataAnalyst";
+    default:
+      return "Assistant";
+  }
+}
+
+/** Inverse of `extensionIdToAgentId` — used at the handoff-result seam,
+ *  where the agent-service tool returns its `handedOffTo` value in
+ *  PascalCase (it's the agent-service's AgentId, not a web-side
+ *  extensionId). The rest of the web app keys canvas registry, display
+ *  names, and the conversations row's activeExtensionId on kebab-case,
+ *  so we normalize once here. */
+function agentIdToExtensionId(agentId: string): string {
+  switch (agentId) {
+    case "PipelineManager":
+      return "pipeline-manager";
+    case "DataArchitect":
+      return "data-architect";
+    case "DataAnalyst":
+      return "data-analyst";
+    default:
+      return agentId;
+  }
 }
 
 interface ChatPanelProps {
@@ -82,18 +119,86 @@ export function ChatPanel({
   const [transport] = useState(
     () =>
       new DefaultChatTransport({
-        // Routes through the trusted-client bridge to apps/agent-service.
-        // The proxy attaches the auth context (X-User-Id from the NextAuth
-        // session, plus VERCEL_OIDC_TOKEN in production) and forwards to
-        // agent-service's /chat. The body shape matches what agent-service
-        // accepts directly.
+        // All chats — Assistant concierge included, both submit-message
+        // and regenerate-message — run through agent-service's per-tool-
+        // durable workflow loop. The legacy `/api/agent-proxy/chat`
+        // ToolLoopAgent route was deleted in the workflow-cutover slice;
+        // the `api` value here is just a default that the per-request
+        // override always replaces. If a future AI SDK adds a new
+        // trigger we don't handle, the unknown-trigger branch returns
+        // a body shape that targets the now-deleted route — the request
+        // will 404 from agent-service, which is the desired
+        // fail-loudly behavior until the new trigger is wired.
         api: "/api/agent-proxy/chat",
-        body: () => ({
-          extensionId: extensionIdRef.current,
-          canvasState: canvasStateRef.current,
-          taskStack: taskStackRef.current,
-          resumeContext: resumeContextRef.current,
-        }),
+        prepareSendMessagesRequest({
+          id,
+          messages,
+          messageId,
+          trigger,
+          api,
+          body,
+          headers,
+          credentials,
+        }) {
+          const agentId = extensionIdToAgentId(extensionIdRef.current);
+          if (trigger === "submit-message") {
+            // Pick the just-submitted user message — prefer the one whose
+            // id matches `messageId`, fall back to the last user message
+            // in history. The workflow loads prior turns from the DB.
+            const newMsg =
+              (messageId && messages.find((m) => m.id === messageId)) ||
+              [...messages].reverse().find((m) => m.role === "user");
+            return {
+              api: "/api/agent-proxy/__wf-chat",
+              headers,
+              credentials,
+              body: {
+                ...body,
+                agentId,
+                conversationId: id,
+                newUserMessages: newMsg ? [newMsg] : [],
+                canvasState: canvasStateRef.current,
+                taskStack: taskStackRef.current,
+              },
+            };
+          }
+          if (trigger === "regenerate-message" && messageId) {
+            // Tell the workflow to truncate its DB history at the
+            // assistant message being regenerated (exclusive) and
+            // re-run from there. No new user message — the prior user
+            // turn that drives regeneration is already in the
+            // (truncated) DB history.
+            return {
+              api: "/api/agent-proxy/__wf-chat",
+              headers,
+              credentials,
+              body: {
+                ...body,
+                agentId,
+                conversationId: id,
+                newUserMessages: [],
+                regenerateFromMessageId: messageId,
+                canvasState: canvasStateRef.current,
+                taskStack: taskStackRef.current,
+              },
+            };
+          }
+          // Unknown trigger — preserve the legacy body shape so the
+          // fallback route still works if AI SDK adds new triggers.
+          return {
+            api,
+            headers,
+            credentials,
+            body: {
+              ...body,
+              messages,
+              extensionId: extensionIdRef.current,
+              canvasState: canvasStateRef.current,
+              taskStack: taskStackRef.current,
+              resumeContext: resumeContextRef.current,
+            },
+          };
+        },
       })
   );
 
@@ -259,9 +364,14 @@ export function ChatPanel({
             return;
           }
 
-          // CASE 1: Forward handoff (assistant → specialist)
+          // CASE 1: Forward handoff (assistant → specialist).
+          // The tool returns its `handedOffTo` as the agent-service's
+          // PascalCase AgentId; the rest of the web app keys things on
+          // kebab-case extensionId, so normalize once at this seam.
           if ("handedOffTo" in toolOutput && toolOutput.handedOffTo) {
-            const targetAgent = toolOutput.handedOffTo as string;
+            const targetAgent = agentIdToExtensionId(
+              toolOutput.handedOffTo as string,
+            );
             if (targetAgent !== activeExtensionId) {
               // Check if this is a resume (target matches the paused specialist on the stack)
               const stack = taskStackRef.current;
@@ -555,14 +665,26 @@ export function ChatPanel({
                     <div className="mt-1 border-l-2 border-[#e0a96e]/40 pl-4 text-sm text-white/90 prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-headings:text-white prose-strong:text-white prose-code:text-[#e0a96e] prose-code:bg-white/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-pre:bg-white/5 prose-pre:border prose-pre:border-white/10 prose-a:text-[#e0a96e] prose-a:font-medium prose-a:underline prose-a:decoration-[#e0a96e]/50 prose-a:underline-offset-2 hover:prose-a:text-[#f0bb84] hover:prose-a:decoration-[#e0a96e] prose-table:border-collapse prose-table:w-full prose-table:text-xs prose-th:border prose-th:border-white/20 prose-th:bg-white/5 prose-th:px-2 prose-th:py-1 prose-th:text-left prose-th:text-white/80 prose-td:border prose-td:border-white/10 prose-td:px-2 prose-td:py-1">
                       {message.parts.map((part, i) => {
                         if (part.type === "text") {
+                          // Streamdown is the AI-Elements-recommended
+                          // streaming-aware markdown renderer for assistant
+                          // text — it parses incrementally so token-by-token
+                          // updates don't cause re-render jitter. Ships
+                          // remark-gfm + rehype-sanitize by default;
+                          // `skipHtml` + `disallowedElements` are kept as
+                          // belt-and-suspenders even though sanitization is
+                          // built in. The `components.a` override forces
+                          // external links into a new tab.
                           return (
-                            <Markdown
+                            <Streamdown
                               key={i}
-                              remarkPlugins={[remarkGfm]}
                               skipHtml
                               disallowedElements={["script", "iframe", "object", "embed", "form"]}
                               components={{
-                                a: ({ href, children, ...props }) => (
+                                a: ({
+                                  href,
+                                  children,
+                                  ...props
+                                }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
                                   <a
                                     {...props}
                                     href={href}
@@ -575,7 +697,7 @@ export function ChatPanel({
                               }}
                             >
                               {part.text}
-                            </Markdown>
+                            </Streamdown>
                           );
                         }
                         if (part.type.startsWith("tool-") && "state" in part) {

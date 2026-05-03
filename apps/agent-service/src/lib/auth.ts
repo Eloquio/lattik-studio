@@ -168,9 +168,22 @@ export async function verifyRequest(event: H3Event): Promise<AuthContext> {
   return { clientId, userId };
 }
 
+/**
+ * Path prefixes that bypass auth.
+ *
+ * - `/.well-known/workflow/` — the workflow SDK's internal callbacks
+ *   (queue/dispatcher → step/flow/webhook routes). These are hit by the
+ *   workflow runtime itself, not by external clients, so the trusted-
+ *   client headers don't apply. Production deployments should rely on
+ *   network-level isolation here; HMAC-signing the dispatcher→runtime
+ *   hop is a separate hardening slice.
+ */
+const PUBLIC_PREFIXES = ["/.well-known/workflow/"];
+
 /** h3 middleware. Skips public routes, verifies and attaches context otherwise. */
 export async function attachAuth(event: H3Event): Promise<void> {
   const path = getRequestPath(event);
   if (PUBLIC_ROUTES.has(path)) return;
+  if (PUBLIC_PREFIXES.some((p) => path.startsWith(p))) return;
   event.context.auth = await verifyRequest(event);
 }

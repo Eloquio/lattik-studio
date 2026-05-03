@@ -20,12 +20,18 @@ export interface AirflowDag {
   dag_display_name: string;
   description: string | null;
   is_paused: boolean;
-  is_active: boolean;
-  schedule_interval: { value: string } | string | null;
+  // Airflow 3.x's `GET /dags` list response no longer surfaces these
+  // three fields — only `GET /dags/{id}` does. They're optional here so
+  // list-derived shapes can be coerced from the new fields below.
+  is_active?: boolean;
+  schedule_interval?: { value: string } | string | null;
+  next_dagrun?: string | null;
+  // Airflow 3.x replacements available on the list response.
+  is_stale?: boolean;
+  timetable_summary?: string | null;
   tags: Array<{ name: string }>;
-  next_dagrun: string | null;
   last_parsed_time: string | null;
-  owners: string[];
+  owners?: string[];
 }
 
 export interface AirflowDagRun {
