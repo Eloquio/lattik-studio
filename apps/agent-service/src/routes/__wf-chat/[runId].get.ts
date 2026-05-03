@@ -9,6 +9,7 @@ import { JsonToSseTransformStream, type UIMessageChunk } from "ai";
 import { getRun } from "workflow/api";
 import type { LoopEvent } from "../../workflows/agent-loop.js";
 import { loopEventToUIMessageChunk } from "../../lib/loop-event-to-ui-chunk.js";
+import { assertRunOwner } from "../../lib/workflow-runs.js";
 
 // SSE-encoded reattach for `__wf-chat.post.ts`. Reads from
 // `?startIndex=N` (negative-from-tail supported) and pipes through the
@@ -23,11 +24,13 @@ import { loopEventToUIMessageChunk } from "../../lib/loop-event-to-ui-chunk.js";
 // reconstruct the prefix events from the loop's prior persisted state;
 // deferred.
 //
-// Auth via `attachAuth` middleware. Per-run ownership not yet enforced
-// — see __wf-agent/[runId].get.ts for the same TODO + rationale.
+// Auth via `attachAuth` middleware + per-run ownership check against
+// the `workflow_run` table written when the run was started.
+// Foreign-owned runIds 404 to avoid leaking existence.
 
 export default defineEventHandler(async (event) => {
-  if (!event.context.auth) {
+  const auth = event.context.auth;
+  if (!auth) {
     throw createError({
       statusCode: 500,
       statusMessage: "auth context missing — middleware not wired",
@@ -37,6 +40,7 @@ export default defineEventHandler(async (event) => {
   if (!runId) {
     throw createError({ statusCode: 400, statusMessage: "Missing runId" });
   }
+  await assertRunOwner({ runId, userId: auth.userId });
   const startIndexRaw = getQuery(event).startIndex;
   const startIndex =
     typeof startIndexRaw === "string" ? Number.parseInt(startIndexRaw, 10) : undefined;

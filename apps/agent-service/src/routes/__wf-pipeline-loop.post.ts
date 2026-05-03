@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { UIMessage } from "ai";
 import { start } from "workflow/api";
 import { pipelineManagerLoopWorkflow } from "../workflows/pipeline-manager-loop.js";
+import { recordRunOwner } from "../lib/workflow-runs.js";
 
 // Spike 5 (start side): kicks off the per-tool-durable Pipeline Manager
 // loop. The workflow body drives the tool loop and emits structured events
@@ -21,6 +22,13 @@ const bodySchema = z.object({
 });
 
 export default defineEventHandler(async (event) => {
+  const auth = event.context.auth;
+  if (!auth) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: "auth context missing — middleware not wired",
+    });
+  }
   const body = await readValidatedBody(event, (raw) => bodySchema.safeParse(raw));
   if (!body.success) {
     throw createError({
@@ -32,6 +40,7 @@ export default defineEventHandler(async (event) => {
   const run = await start(pipelineManagerLoopWorkflow, [
     { uiMessages: body.data.messages as UIMessage[] },
   ]);
+  await recordRunOwner({ runId: run.runId, userId: auth.userId });
 
   setResponseHeader(event, "x-run-id", run.runId);
   setResponseHeader(event, "content-type", "application/x-ndjson");

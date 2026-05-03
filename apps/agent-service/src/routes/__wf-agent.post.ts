@@ -11,6 +11,7 @@ import {
   agentLoopWorkflow,
   type AgentId,
 } from "../workflows/agent-loop.js";
+import { recordRunOwner } from "../lib/workflow-runs.js";
 
 // Spike: kicks off the generalized per-tool-durable agent loop. Pick the
 // agent via `agentId` (PipelineManager / DataArchitect / DataAnalyst).
@@ -68,6 +69,11 @@ export default defineEventHandler(async (event) => {
       taskStack: body.data.taskStack,
     },
   ]);
+  await recordRunOwner({
+    runId: run.runId,
+    userId: auth.userId,
+    conversationId: body.data.conversationId,
+  });
 
   setResponseHeader(event, "x-run-id", run.runId);
   setResponseHeader(event, "content-type", "application/x-ndjson");

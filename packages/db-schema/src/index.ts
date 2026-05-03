@@ -420,3 +420,27 @@ export const verificationTokens = pgTable(
     }),
   ]
 );
+
+/**
+ * `workflow_run` — owner mapping for Vercel Workflow runs spawned by
+ * agent-service. Written at start time so reattach GETs (which take a
+ * runId in the URL) can verify the calling user owns the run before
+ * streaming its events back. The runId itself is unguessable, but
+ * verifying ownership on every read closes the defense-in-depth gap
+ * the auth-wiring slice flagged.
+ *
+ * conversationId is optional — most runs come from chat turns and
+ * carry it, but spike + worker-driven runs may not.
+ */
+export const workflowRuns = pgTable(
+  "workflow_run",
+  {
+    runId: text("runId").primaryKey(),
+    userId: text("userId")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: text("conversationId"),
+    createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [index("idx_workflow_runs_userId").on(t.userId)]
+);

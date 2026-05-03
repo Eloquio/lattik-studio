@@ -7,6 +7,7 @@ import {
 } from "h3";
 import { getRun } from "workflow/api";
 import type { LoopEvent } from "../../workflows/pipeline-manager-loop.js";
+import { assertRunOwner } from "../../lib/workflow-runs.js";
 
 // Spike 5/6 reattach: reads the per-tool-durable loop's stream from a
 // `?startIndex=N` cursor (negative-from-tail supported) and re-encodes
@@ -15,11 +16,11 @@ import type { LoopEvent } from "../../workflows/pipeline-manager-loop.js";
 // produces "[object Object]" — typed-loop callers want the actual JSON
 // shape.
 //
-// Auth via `attachAuth` middleware. Per-run ownership not yet enforced —
-// see __wf-agent/[runId].get.ts for the same TODO + rationale.
+// Auth via `attachAuth` middleware + per-run ownership check.
 
 export default defineEventHandler(async (event) => {
-  if (!event.context.auth) {
+  const auth = event.context.auth;
+  if (!auth) {
     throw createError({
       statusCode: 500,
       statusMessage: "auth context missing — middleware not wired",
@@ -29,6 +30,7 @@ export default defineEventHandler(async (event) => {
   if (!runId) {
     throw createError({ statusCode: 400, statusMessage: "Missing runId" });
   }
+  await assertRunOwner({ runId, userId: auth.userId });
   const startIndexRaw = getQuery(event).startIndex;
   const startIndex =
     typeof startIndexRaw === "string" ? Number.parseInt(startIndexRaw, 10) : undefined;

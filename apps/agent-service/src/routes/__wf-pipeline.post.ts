@@ -8,6 +8,7 @@ import { z } from "zod";
 import { JsonToSseTransformStream, type UIMessage, type UIMessageChunk } from "ai";
 import { start } from "workflow/api";
 import { pipelineManagerWorkflow } from "../workflows/pipeline-manager-run.js";
+import { recordRunOwner } from "../lib/workflow-runs.js";
 
 // Spike 4 (start side): chat-style POST that wraps a Pipeline Manager run in
 // a workflow. Streams the run's UI message chunks back as SSE — the same
@@ -23,6 +24,13 @@ const bodySchema = z.object({
 });
 
 export default defineEventHandler(async (event) => {
+  const auth = event.context.auth;
+  if (!auth) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: "auth context missing — middleware not wired",
+    });
+  }
   const body = await readValidatedBody(event, (raw) => bodySchema.safeParse(raw));
   if (!body.success) {
     throw createError({
@@ -38,6 +46,7 @@ export default defineEventHandler(async (event) => {
       resumeContext: body.data.resumeContext,
     },
   ]);
+  await recordRunOwner({ runId: run.runId, userId: auth.userId });
 
   setResponseHeader(event, "x-run-id", run.runId);
   setResponseHeader(event, "content-type", "text/event-stream");

@@ -6,17 +6,18 @@ import {
   createError,
 } from "h3";
 import { getRun } from "workflow/api";
+import { assertRunOwner } from "../../lib/workflow-runs.js";
 
 // Spike 2 (reattach side): given an existing runId, return the same readable
 // stream the original POST consumed — optionally starting from `?startIndex=N`
 // so reconnecting clients skip chunks they've already seen. Negative indices
 // count from the tail (e.g. -3 = last 3 chunks).
 //
-// Auth via `attachAuth` middleware. Per-run ownership not yet enforced —
-// see __wf-agent/[runId].get.ts for the same TODO + rationale.
+// Auth via `attachAuth` middleware + per-run ownership check.
 
 export default defineEventHandler(async (event) => {
-  if (!event.context.auth) {
+  const auth = event.context.auth;
+  if (!auth) {
     throw createError({
       statusCode: 500,
       statusMessage: "auth context missing — middleware not wired",
@@ -26,6 +27,7 @@ export default defineEventHandler(async (event) => {
   if (!runId) {
     throw createError({ statusCode: 400, statusMessage: "Missing runId" });
   }
+  await assertRunOwner({ runId, userId: auth.userId });
   const startIndexRaw = getQuery(event).startIndex;
   const startIndex =
     typeof startIndexRaw === "string" ? Number.parseInt(startIndexRaw, 10) : undefined;

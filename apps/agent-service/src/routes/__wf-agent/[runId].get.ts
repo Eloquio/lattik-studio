@@ -7,20 +7,18 @@ import {
 } from "h3";
 import { getRun } from "workflow/api";
 import type { LoopEvent } from "../../workflows/agent-loop.js";
+import { assertRunOwner } from "../../lib/workflow-runs.js";
 
 // Reattach for the generalized agent loop. Same `?startIndex=N` contract
 // as the other workflow routes, NDJSON-encoded.
 //
-// Auth is enforced by `attachAuth` middleware (trusted client + asserted
-// `X-User-Id`). TODO: per-run ownership — currently any authenticated
-// caller with a known runId can read its stream. A real check needs a
-// `runId → ownerUserId` mapping (committed when the workflow starts) so
-// reattach can compare against `event.context.auth.userId`. In practice
-// runIds are only handed back to the original POST caller, so this is a
-// defense-in-depth gap rather than an open door.
+// Auth is enforced by `attachAuth` middleware + per-run ownership
+// check against the `workflow_run` table written when the run was
+// started. Foreign-owned runIds 404 to avoid leaking existence.
 
 export default defineEventHandler(async (event) => {
-  if (!event.context.auth) {
+  const auth = event.context.auth;
+  if (!auth) {
     throw createError({
       statusCode: 500,
       statusMessage: "auth context missing — middleware not wired",
@@ -30,6 +28,7 @@ export default defineEventHandler(async (event) => {
   if (!runId) {
     throw createError({ statusCode: 400, statusMessage: "Missing runId" });
   }
+  await assertRunOwner({ runId, userId: auth.userId });
   const startIndexRaw = getQuery(event).startIndex;
   const startIndex =
     typeof startIndexRaw === "string" ? Number.parseInt(startIndexRaw, 10) : undefined;
