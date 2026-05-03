@@ -17,6 +17,7 @@ import {
   type LoopEvent,
 } from "../workflows/agent-loop.js";
 import { loopEventToUIMessageChunk } from "../lib/loop-event-to-ui-chunk.js";
+import { recordRunOwner } from "../lib/workflow-runs.js";
 
 // Cutover-friendly chat endpoint: same workflow underneath as
 // `__wf-agent.post.ts`, but emits SSE-encoded `UIMessageChunk`s — the
@@ -77,6 +78,11 @@ export default defineEventHandler(async (event) => {
       taskStack: body.data.taskStack,
     },
   ]);
+  await recordRunOwner({
+    runId: run.runId,
+    userId: auth.userId,
+    conversationId: body.data.conversationId,
+  });
 
   setResponseHeader(event, "x-run-id", run.runId);
   setResponseHeader(event, "content-type", "text/event-stream");

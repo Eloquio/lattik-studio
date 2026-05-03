@@ -7,6 +7,7 @@ import {
 } from "h3";
 import { JsonToSseTransformStream, type UIMessageChunk } from "ai";
 import { getRun } from "workflow/api";
+import { assertRunOwner } from "../../lib/workflow-runs.js";
 
 // Spike 4 (reattach side): SSE-encoded reconnection for an in-flight or
 // completed Pipeline Manager run. Mirrors the spike-2 reattach contract
@@ -14,11 +15,11 @@ import { getRun } from "workflow/api";
 // because the underlying readable carries `UIMessageChunk` objects rather
 // than strings.
 //
-// Auth via `attachAuth` middleware. Per-run ownership not yet enforced —
-// see __wf-agent/[runId].get.ts for the same TODO + rationale.
+// Auth via `attachAuth` middleware + per-run ownership check.
 
 export default defineEventHandler(async (event) => {
-  if (!event.context.auth) {
+  const auth = event.context.auth;
+  if (!auth) {
     throw createError({
       statusCode: 500,
       statusMessage: "auth context missing — middleware not wired",
@@ -28,6 +29,7 @@ export default defineEventHandler(async (event) => {
   if (!runId) {
     throw createError({ statusCode: 400, statusMessage: "Missing runId" });
   }
+  await assertRunOwner({ runId, userId: auth.userId });
   const startIndexRaw = getQuery(event).startIndex;
   const startIndex =
     typeof startIndexRaw === "string" ? Number.parseInt(startIndexRaw, 10) : undefined;
