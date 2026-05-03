@@ -36,11 +36,11 @@ import {
   createStaticCheckTool,
   createUpdateDefinitionTool,
   createGenerateYamlTool,
-  submitPRTool,
-  deleteDefinitionTool,
   listDefinitionsTool,
   getDefinitionTool,
 } from "../agents/DataArchitect/tools/definition-flow.js";
+import { createSubmitPRTool } from "../agents/DataArchitect/tools/submit-pr.js";
+import { deleteDefinitionTool } from "../agents/DataArchitect/tools/delete-definition.js";
 import {
   listTablesTool,
   describeTableTool,
@@ -191,7 +191,7 @@ function buildDataArchitectAgent(canvasState: unknown | null, userId: string) {
         getCanvasState: () => canvasState,
       }),
       generateYaml: createGenerateYamlTool({ getCanvasState: () => canvasState }),
-      submitPR: submitPRTool,
+      submitPR: createSubmitPRTool({ getCanvasState: () => canvasState }),
       deleteDefinition: deleteDefinitionTool,
       listDefinitions: listDefinitionsTool,
       getDefinition: getDefinitionTool,

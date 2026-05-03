@@ -16,18 +16,10 @@ import { generateYamlFiles } from "../lib/yaml-generator.js";
 /**
  * Definition-lifecycle tools for Data Architect.
  *
- * Real implementations this slice:
- *   - listDefinitions, getDefinition — read-only queries against the
- *     definitions table.
- *   - updateDefinition — factory; takes the user id (for createdBy on
- *     insert) and a canvas-state getter. The spec is derived from the
- *     canvas form via canvasStateToSpec.
- *
- * Still stubs (each is its own follow-up slice):
- *   - staticCheck — needs the validation library (4 files).
- *   - generateYaml — needs the yaml generator + canvas-to-spec (have it).
- *   - submitPR, deleteDefinition — need the Gitea client.
- *   - reviewDefinition — needs canvas-state-aware diff rendering.
+ * Real now: listDefinitions, getDefinition, updateDefinition, staticCheck,
+ * generateYaml. submitPR and deleteDefinition live in their own files
+ * (each is bigger). Only reviewDefinition is still stubbed — it needs a
+ * canvas-state-aware diff renderer that doesn't exist yet.
  */
 
 const definitionKindEnum = z.enum([
@@ -240,21 +232,6 @@ export function createGenerateYamlTool(opts: CreateGenerateYamlToolOptions) {
   });
 }
 
-export const submitPRTool = tool({
-  description:
-    "Submit a Gitea PR carrying the YAML currently shown on the canvas. Reads from canvas state; do NOT pass the YAML inline.",
-  inputSchema: zodSchema(z.object({})),
-  execute: async () => ({ ...noteStub(), status: "stub", prUrl: null }),
-});
-
-export const deleteDefinitionTool = tool({
-  description:
-    "Open a deletion PR for a definition. Specify the `name` (and `kind` if it's ambiguous across kinds).",
-  inputSchema: zodSchema(
-    z.object({
-      name: z.string(),
-      kind: definitionKindEnum.optional(),
-    }),
-  ),
-  execute: async (input) => ({ ...noteStub(), status: "stub", input }),
-});
+// submitPR / deleteDefinition live in their own files — each is substantial
+// (200+ lines apiece). Re-export through the index pattern from chat.post.ts
+// so callers see the same module surface.
