@@ -154,6 +154,15 @@ Set in `apps/web/.env` (gitignored):
 - `DUCKDB_EXTENSION_PATH` — (optional) path to the `lattik_stitch_duckdb.duckdb_extension` file. When set, the DuckDB client loads it on startup to enable `lattik_scan()` queries
 - `LATTIK_WAREHOUSE_PATH` — S3 path prefix for Lattik Tables (default: `s3://warehouse/lattik`)
 
+### agent-service env layering
+
+`apps/web/.env` is the **single source of truth** for shared dev creds. The agent-service (a separate Nitro process) loads them at startup via [`apps/agent-service/scripts/with-env.mjs`](apps/agent-service/scripts/with-env.mjs), which uses Node's `process.loadEnvFile()` to layer:
+
+1. `apps/web/.env` — shared creds (AI Gateway, Gitea, DATABASE_URL, …).
+2. `apps/agent-service/.env` — agent-service-specific overrides (`PORT`, `LATTIK_DEV_AUTH_BYPASS`, `LATTIK_DEV_TRUSTED_CLIENTS`). Created from [`apps/agent-service/.env.example`](apps/agent-service/.env.example) by `pnpm dev:bootstrap`.
+
+Rotating a value in `apps/web/.env` (e.g. a fresh `GITEA_TOKEN` after re-running `pnpm gitea:start`) is picked up by the agent-service automatically on next restart — no copy/sync needed. Both `pnpm --filter agent-service dev` (hot reload) and `pnpm --filter agent-service preview` (built bundle) use the wrapper, so neither requires marshalling env vars on the command line.
+
 ## Database
 
 PostgreSQL runs locally in a kind (Kubernetes in Docker) cluster, backed by a `PersistentVolumeClaim` against kind's default StorageClass. Data persists across pod restarts, image upgrades, and `pnpm db:stop`/`pnpm db:start` cycles. **It does not survive `pnpm dev:down`** — that deletes the kind cluster, and the PV's backing dir lives inside the cluster's filesystem. Re-seed with `pnpm db:push && pnpm db:seed` after a recreate. Same persistence story applies to gitea, minio, and iceberg-rest.

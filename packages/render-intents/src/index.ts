@@ -51,6 +51,8 @@ export {
   entityFormInitialStateSchema,
   dimensionFormInitialStateSchema,
   loggerTableFormInitialStateSchema,
+  loggerTableFormAgentInputSchema,
+  loggerColumnAgentInputSchema,
   lattikTableFormInitialStateSchema,
   metricFormInitialStateSchema,
 } from "./form-schemas.js";

@@ -10,7 +10,7 @@ import { z } from "zod";
 import {
   entityFormInitialStateSchema,
   dimensionFormInitialStateSchema,
-  loggerTableFormInitialStateSchema,
+  loggerTableFormAgentInputSchema,
   lattikTableFormInitialStateSchema,
   metricFormInitialStateSchema,
 } from "@eloquio/render-intents";
@@ -42,6 +42,7 @@ import {
 } from "../agents/DataArchitect/tools/definition-flow.js";
 import { createSubmitPRTool } from "../agents/DataArchitect/tools/submit-pr.js";
 import { deleteDefinitionTool } from "../agents/DataArchitect/tools/delete-definition.js";
+import { createReviewDefinitionTool } from "../agents/DataArchitect/tools/review-definition.js";
 
 // DataAnalyst tools (all pure)
 import {
@@ -227,11 +228,30 @@ Pre-fill every field you can reasonably infer from the user's message — name, 
 ## Modifying an already-rendered form
 **When the user asks to add, change, rename, or remove fields on an existing form** ("add user_id and ad_slot", "rename amount to revenue", "drop the country column", "set retention to 90d"), apply the change YOURSELF. Do NOT tell the user to edit the canvas manually. The flow is:
 1. Call \`readCanvasState\` to get the current form state (preserves anything the user has already filled in).
-2. Merge the user's requested change into that state — keep every other field intact.
-3. Call the same \`renderXForm\` tool again with the FULL merged \`initialState\`. The render replaces the canvas spec, so passing a partial state would drop the rest.
+2. Merge the user's requested change into that state — keep every other field intact. STRIP any \`dimension\` field from each \`user_columns[i]\` before passing — \`dimension\` is set by the user via the canvas UI and is preserved automatically across re-renders by the canvas merge layer; passing it from the agent will be rejected by the input schema.
+3. Call the same \`renderXForm\` tool again with the merged \`initialState\` (sans \`dimension\` per above). The render replaces the canvas spec, so any other field you don't pass will be dropped.
 4. Acknowledge briefly in prose (one sentence) what you changed.
 
 Only push back to the user if you genuinely cannot represent the change (e.g. the form schema doesn't support it).
+
+## Review Flow
+**Trigger:** any of these:
+- The user's message is exactly \`Review table\` (the canvas's "Review Table" button generates that string — treat it as a button click).
+- The user asks to review, audit, lint, or get feedback on the current definition.
+
+**Required behavior:** call \`reviewDefinition\` as your VERY NEXT tool call. The \`kind\` you pass is whichever \`renderXForm\` you most recently invoked: \`renderEntityForm\` → \`entity\`, \`renderDimensionForm\` → \`dimension\`, \`renderLoggerTableForm\` → \`logger_table\`, \`renderLattikTableForm\` → \`lattik_table\`, \`renderMetricForm\` → \`metric\`.
+
+**FORBIDDEN before calling \`reviewDefinition\`:**
+- ❌ Calling \`readCanvasState\`. \`reviewDefinition\` reads canvas state internally.
+- ❌ Dumping a markdown table of the form contents — the user already sees the canvas.
+- ❌ Asking "ready to proceed?" or "does this look good?" — \`reviewDefinition\` IS the answer.
+- ❌ Listing columns / retention / dedup window in prose.
+
+\`reviewDefinition\` returns suggestion cards rendered inline by the chat UI. Each card has its own accept/reject buttons. After the tool returns:
+- \`suggestions: []\` (clean review): one short sentence — "Looks clean. Ready to validate and submit?"
+- non-empty: one short sentence — "Here are some suggestions — accept any that look right." Then stop. Do NOT enumerate the suggestions; the cards already show them.
+
+Once the user has worked through the cards and signaled they're ready, continue to the PR Submission Flow below.
 
 ## PR Submission Flow
 After the user is happy with the form, the fixed sequence is:
@@ -244,7 +264,9 @@ After the user is happy with the form, the fixed sequence is:
 - \`listDefinitions\` and \`getDefinition\` for "show me my definitions" / "what's in X".
 - \`deleteDefinition\` for "delete the X definition" — note the YAML deletion is separate from dropping the warehouse table.
 
-Be concise.`,
+## General
+- Be concise.
+- **Never restate canvas content in prose.** The user can see the canvas; dumping form fields, column lists, or property tables back at them is noise. \`readCanvasState\` is for YOU to merge edits internally; its output should not appear verbatim in your reply.`,
     toolNames: [
       "readCanvasState",
       "renderEntityForm",
@@ -252,6 +274,7 @@ Be concise.`,
       "renderLoggerTableForm",
       "renderLattikTableForm",
       "renderMetricForm",
+      "reviewDefinition",
       "staticCheck",
       "updateDefinition",
       "generateYaml",
@@ -382,9 +405,9 @@ const TOOL_DEFINITIONS: Record<string, () => any> = {
   renderLoggerTableForm: () =>
     strictTool({
       description:
-        "Render a Logger Table definition form on the canvas. Pre-fill `initialState` with anything you can infer. User-defined columns go under the `user_columns` key (NOT `columns`); each item is { name, type, dimension?, description?, classification? }. Implicit columns (event_id, event_timestamp, ds, hour) are added automatically — do NOT include them.",
+        "Render a Logger Table definition form on the canvas. Pre-fill `initialState` with anything you can infer. User-defined columns go under the `user_columns` key (NOT `columns`); each item is { name, type, description?, classification? }. Implicit columns (event_id, event_timestamp, ds, hour) are added automatically — do NOT include them. Column-to-dimension bindings are set by the user via the canvas UI; you do NOT pass `dimension` on column items.",
       inputSchema: z.object({
-        initialState: loggerTableFormInitialStateSchema.optional(),
+        initialState: loggerTableFormAgentInputSchema.optional(),
       }),
     }),
   renderLattikTableForm: () =>
@@ -433,6 +456,22 @@ const TOOL_DEFINITIONS: Record<string, () => any> = {
       inputSchema: z.object({
         kind: definitionKindEnum,
         name: z.string(),
+      }),
+    }),
+  reviewDefinition: () =>
+    strictTool({
+      description:
+        "Run an AI review of the definition currently on the canvas. Reads the canvas state directly. Returns a list of one-click fixes rendered as cards in the chat. If the tool returns an empty suggestions list, the definition is clean — proceed to the next workflow step. Pass `userConstraints` to record any explicit user-stated requirements so the reviewer doesn't propose changes that contradict them.",
+      inputSchema: z.object({
+        kind: definitionKindEnum.describe(
+          "The type of definition currently on the canvas",
+        ),
+        userConstraints: z
+          .string()
+          .optional()
+          .describe(
+            "Optional short summary of explicit user-stated requirements from the conversation (e.g. 'Retention must stay at 90 days for compliance'). Populate this when the user has locked down a specific choice you want the reviewer to respect. Omit when the user hasn't stated anything binding — do NOT invent constraints.",
+          ),
       }),
     }),
   // DataArchitect — browse + delete (pure).
@@ -578,6 +617,10 @@ const TOOL_DISPATCHERS: Record<string, Dispatcher> = {
       input as never,
       {} as never,
     ),
+  reviewDefinition: (input, ctx) =>
+    createReviewDefinitionTool({
+      getCanvasState: () => ctx.canvasState,
+    }).execute!(input as never, {} as never),
   // DataArchitect — pure browse + delete.
   listDefinitions: (input) =>
     listDefinitionsTool.execute!(input as never, {} as never),

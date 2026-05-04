@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { defineRegistry, useStateStore } from "@json-render/react";
 import { Check, X, Plus, Trash2, Lock, Table2, Send, FileCode, PartyPopper, GitPullRequest, GitBranch, ExternalLink } from "lucide-react";
 import CodeMirror from "@uiw/react-codemirror";
+import { oneDark } from "@codemirror/theme-one-dark";
 import { yaml as yamlLanguage } from "@codemirror/lang-yaml";
 import { useCanvasActions } from "@/components/canvas/canvas-actions-context";
 import type { ScalarTypeKind } from "@eloquio/lattik-expression";
@@ -2242,11 +2243,12 @@ export const { registry, handlers } = defineRegistry(catalog, {
                 <span className="font-mono">{current.path}</span>
                 <span>{current.content.split("\n").length} lines</span>
               </div>
-              <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
+              <div className="overflow-hidden rounded-lg border border-stone-300">
                 <CodeMirror
                   value={current.content}
                   onChange={updateContent}
                   extensions={[yamlLanguage()]}
+                  theme={oneDark}
                   basicSetup={{
                     lineNumbers: true,
                     foldGutter: true,
