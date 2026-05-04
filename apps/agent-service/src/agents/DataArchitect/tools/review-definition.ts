@@ -1,4 +1,4 @@
-import { generateObject, gateway, tool, zodSchema } from "ai";
+import { generateText, gateway, tool, zodSchema, Output } from "ai";
 import { z } from "zod";
 import type { DefinitionKind } from "@eloquio/db-schema";
 import type {
@@ -42,6 +42,28 @@ You are the senior data architect reviewing a Lattik Studio definition that anot
 3. \`actions[].path\` is a JSON Pointer against the canvas form state shown to you below — use the field names exactly as they appear in that JSON, including \`/user_columns\` (not \`/columns\`) for logger tables.
 4. Limit yourself to the most important 3-5 fixes. Quality over quantity.
 5. If the definition has no actionable issues, return \`suggestions: []\`. Do not pad with filler.
+
+## Logger-table column field reference
+
+The form state for a logger column \`user_columns[i]\` accepts these fields and ONLY these fields:
+
+- \`name\` (string) — snake_case column name
+- \`type\` (enum: \`string\` | \`int32\` | \`int64\` | \`float\` | \`double\` | \`boolean\` | \`timestamp\` | \`date\` | \`bytes\` | \`json\`)
+- \`description\` (string, optional)
+- \`dimension\` (string, optional) — name of an existing dimension to link to
+- \`classification\` (object, optional) — sensitivity flags. Set ONE OR MORE of these booleans to mark the column:
+  - \`classification.pii\` — personally identifiable info (user IDs, names, emails, IPs, device IDs)
+  - \`classification.phi\` — protected health info
+  - \`classification.financial\` — payment, account, balance, transaction data
+  - \`classification.credentials\` — secrets, tokens, keys, passwords
+- \`tags\` (string array, optional) — free-form metadata only. NOT for classification.
+
+**For PII / PHI / financial / credentials, set the classification flag, NEVER \`tags\`.** The canvas renders classification flags as red/yellow/etc. badges next to the column name; \`tags\` are free-form metadata that don't appear in the column row. A suggestion that puts \`"pii"\` into \`tags\` is silently ineffective from the user's point of view.
+
+Action shape examples:
+- Tag a column as PII: \`{ "path": "/user_columns/0/classification/pii", "value": true }\`
+- Tag as both PII and credentials: two separate actions, one per flag.
+- Add a description: \`{ "path": "/user_columns/0/description", "value": "..." }\`
 
 ## What NOT to file as a suggestion
 
@@ -232,9 +254,9 @@ export function createReviewDefinitionTool(opts: CreateReviewDefinitionToolOptio
         : "";
 
       try {
-        const result = await generateObject({
+        const result = await generateText({
           model: gateway("anthropic/claude-sonnet-4.6"),
-          schema: reviewerOutputSchema,
+          output: Output.object({ schema: reviewerOutputSchema }),
           system: REVIEWING_DEFINITIONS_POLICY,
           prompt: `The user is authoring a ${input.kind} definition. The current canvas form state is:\n\n\`\`\`json\n${JSON.stringify(formState, null, 2)}\n\`\`\`\n\n${workspaceContext}${constraintsBlock}\n\nReview it and return actionable fixes. Use canvas form state JSON Pointer paths in your actions (the field names you see above). Remember: do NOT recommend column type changes based on convention — only flag a type if you can verify a conflict against the workspace context above. Return \`suggestions: []\` if there is nothing concrete to fix.`,
         });
@@ -243,7 +265,7 @@ export function createReviewDefinitionTool(opts: CreateReviewDefinitionToolOptio
           kind: "review-suggestions",
           data: {
             definitionKind: input.kind,
-            suggestions: result.object.suggestions,
+            suggestions: result.output.suggestions,
           },
         };
       } catch (error) {

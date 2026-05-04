@@ -8,7 +8,7 @@ import {
   type MetricFormIntent,
   entityFormInitialStateSchema,
   dimensionFormInitialStateSchema,
-  loggerTableFormInitialStateSchema,
+  loggerTableFormAgentInputSchema,
   lattikTableFormInitialStateSchema,
   metricFormInitialStateSchema,
 } from "@eloquio/render-intents";
@@ -70,10 +70,10 @@ export const renderDimensionFormTool = tool({
 
 export const renderLoggerTableFormTool = tool({
   description:
-    "Render the Logger Table definition form on the canvas. Pre-fill via initialState. The user-defined column list goes under the `user_columns` key (NOT `columns` or `customColumns`); each item is { name, type, dimension?, description?, classification? }. Implicit columns (event_id, event_timestamp, ds, hour) are added automatically — do NOT include them.",
-  inputSchema: makeInputSchema(loggerTableFormInitialStateSchema),
+    "Render the Logger Table definition form on the canvas. Pre-fill via initialState. The user-defined column list goes under the `user_columns` key (NOT `columns` or `customColumns`); each item is { name, type, description?, classification? }. Implicit columns (event_id, event_timestamp, ds, hour) are added automatically — do NOT include them. Column-to-dimension bindings are set by the user via the canvas UI; do NOT pass `dimension` on column items.",
+  inputSchema: makeInputSchema(loggerTableFormAgentInputSchema),
   execute: async (input: {
-    initialState?: z.infer<typeof loggerTableFormInitialStateSchema>;
+    initialState?: z.infer<typeof loggerTableFormAgentInputSchema>;
   }): Promise<LoggerTableFormIntent> => ({
     kind: "logger-table-form",
     surface: "form",

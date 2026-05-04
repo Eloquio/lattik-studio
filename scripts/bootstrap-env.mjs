@@ -1,11 +1,17 @@
 #!/usr/bin/env node
-// Creates apps/web/.env from apps/web/.env.example and apps/agent-worker/.env
-// on first run, auto-filling secrets and prompting for the AI Gateway key.
-// Idempotent: if both .env files already exist, this is a no-op.
+// Creates apps/web/.env (the source of truth for dev creds), plus
+// apps/agent-worker/.env and apps/agent-service/.env on first run.
+// Idempotent: each file is only created if missing.
+//
+// agent-service/.env carries ONLY agent-service-specific overrides.
+// Shared creds (AI Gateway key, Gitea token, DATABASE_URL, etc.) are
+// loaded at runtime from apps/web/.env via the with-env.mjs wrapper —
+// rotating a value in web/.env propagates automatically without a
+// re-bootstrap.
 
 import { createInterface } from "node:readline/promises";
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, copyFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,9 +20,21 @@ const EXAMPLE_PATH = resolve(SCRIPT_DIR, "../apps/web/.env.example");
 const ENV_PATH = resolve(SCRIPT_DIR, "../apps/web/.env");
 
 const AGENT_WORKER_ENV_PATH = resolve(SCRIPT_DIR, "../apps/agent-worker/.env");
+const AGENT_SERVICE_ENV_PATH = resolve(
+  SCRIPT_DIR,
+  "../apps/agent-service/.env",
+);
+const AGENT_SERVICE_ENV_EXAMPLE = resolve(
+  SCRIPT_DIR,
+  "../apps/agent-service/.env.example",
+);
 
-if (existsSync(ENV_PATH) && existsSync(AGENT_WORKER_ENV_PATH)) {
-  console.log("[env:bootstrap] apps/web/.env already exists — skipping.");
+if (
+  existsSync(ENV_PATH) &&
+  existsSync(AGENT_WORKER_ENV_PATH) &&
+  existsSync(AGENT_SERVICE_ENV_PATH)
+) {
+  console.log("[env:bootstrap] all dev .env files already exist — skipping.");
   process.exit(0);
 }
 
@@ -73,8 +91,17 @@ if (!existsSync(AGENT_WORKER_ENV_PATH)) {
   );
 }
 
+// And apps/agent-service/.env. Just a copy of the checked-in
+// .env.example — agent-specific overrides only (PORT, dev bypass flags).
+// Shared creds come from apps/web/.env at runtime via with-env.mjs.
+if (!existsSync(AGENT_SERVICE_ENV_PATH) && existsSync(AGENT_SERVICE_ENV_EXAMPLE)) {
+  copyFileSync(AGENT_SERVICE_ENV_EXAMPLE, AGENT_SERVICE_ENV_PATH);
+}
+
 console.log("");
-console.log("[env:bootstrap] Created apps/web/.env and apps/agent-worker/.env");
+console.log(
+  "[env:bootstrap] Created apps/web/.env, apps/agent-worker/.env, apps/agent-service/.env",
+);
 if (filled.length > 0) {
   console.log("[env:bootstrap] Auto-configured:");
   for (const key of filled) console.log(`              - ${key}`);

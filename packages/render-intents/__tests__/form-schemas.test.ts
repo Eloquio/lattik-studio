@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   loggerTableFormInitialStateSchema,
+  loggerTableFormAgentInputSchema,
   entityFormInitialStateSchema,
 } from "../src/index.js";
 
@@ -92,6 +93,49 @@ describe("loggerTableFormInitialStateSchema", () => {
     expect(
       loggerTableFormInitialStateSchema.safeParse({}).success,
     ).toBe(true);
+  });
+});
+
+describe("loggerTableFormAgentInputSchema (dimension-block)", () => {
+  it("rejects `dimension` on a user_columns item — agent cannot bind dimensions", () => {
+    // The whole point of the agent-input variant: the LLM cannot
+    // invent dimension links to non-existent definitions. Setting
+    // `dimension` on a column is a user action via the canvas UI,
+    // which uses a dropdown of dimensions that actually exist in the
+    // workspace. The canonical schema accepts dimension (so user-set
+    // values round-trip through the adapter), but the agent's input
+    // schema strips the field entirely — strict mode rejects it.
+    const parsed = loggerTableFormAgentInputSchema.safeParse({
+      user_columns: [
+        { name: "user_id", type: "int64", dimension: "user" },
+      ],
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("accepts the same column without `dimension`", () => {
+    const parsed = loggerTableFormAgentInputSchema.safeParse({
+      user_columns: [
+        { name: "user_id", type: "int64" },
+      ],
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("canonical schema still accepts dimension (for user-set state via UI)", () => {
+    // Defense-in-depth: confirm the canonical schema (used by the
+    // adapter when round-tripping spec state through safeFormSpec)
+    // still parses dimension. Without this, user-set bindings would
+    // get stripped on every re-render.
+    const parsed = loggerTableFormInitialStateSchema.safeParse({
+      user_columns: [
+        { name: "user_id", type: "int64", dimension: "user" },
+      ],
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.user_columns?.[0]?.dimension).toBe("user");
+    }
   });
 });
 

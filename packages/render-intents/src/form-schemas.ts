@@ -110,6 +110,28 @@ const loggerColumnInitialStateSchema = z
   .strict()
   .describe("A user-defined column on a logger table");
 
+// Agent-input variant of the logger column schema: same shape as the
+// canonical, MINUS the `dimension` field. Dimension binding links a
+// column to a Dimension definition in the workspace; that's a user
+// action via the canvas UI (with a dropdown of definitions that
+// actually exist). Letting the agent set `dimension` from the LLM side
+// produced invalid bindings — the agent invented dimensions like
+// "user_id" that didn't exist in the workspace, the canvas rendered
+// the chip anyway, and downstream tooling (static check, reviewer)
+// flagged the broken reference. Removing the field from the agent's
+// view cuts that whole class of bug at the source.
+//
+// The canonical `loggerColumnInitialStateSchema` (with dimension)
+// stays for the adapter side: when the user has bound a dimension via
+// the canvas UI and the spec round-trips through safeFormSpec, the
+// canonical schema parses it without stripping.
+export const loggerColumnAgentInputSchema = loggerColumnInitialStateSchema
+  .omit({ dimension: true })
+  .strict()
+  .describe(
+    "A user-defined column on a logger table (agent input). The `dimension` field is intentionally omitted — column-to-dimension bindings are set by the user via the canvas UI, not by the agent.",
+  );
+
 export const loggerTableFormInitialStateSchema = z
   .object({
     name: z
@@ -133,6 +155,24 @@ export const loggerTableFormInitialStateSchema = z
       .optional()
       .describe(
         "User-defined columns under the EXACT key name `user_columns`. Implicit columns (event_id, event_timestamp, ds, hour) are added automatically — do NOT include them here.",
+      ),
+  })
+  .strict();
+
+// Agent-facing version of the form schema. Identical to the canonical
+// except `user_columns` items use the agent-input column schema (no
+// `dimension` field). The agent-loop's TOOL_DEFINITIONS and the
+// renderLoggerTableFormTool both wire this in as the input schema, so
+// the LLM's JSON-schema view doesn't surface `dimension` and strict
+// mode rejects it if the agent tries to set one.
+export const loggerTableFormAgentInputSchema = loggerTableFormInitialStateSchema
+  .extend({
+    user_columns: z
+      .array(loggerColumnAgentInputSchema)
+      .max(50)
+      .optional()
+      .describe(
+        "User-defined columns. Implicit columns (event_id, event_timestamp, ds, hour) are added automatically — do NOT include them here. Column-to-dimension bindings are set by the user via the canvas UI; you do NOT pass `dimension` on column items.",
       ),
   })
   .strict();

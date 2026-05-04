@@ -1,7 +1,20 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import type { JSONSchema7 } from "@ai-sdk/provider-utils";
 import { TOOL_DEFINITIONS } from "../workflows/agent-loop.js";
+
+// Minimal JSON Schema shape for our walker — we only touch the fields
+// we recurse into. Avoids pulling in `@ai-sdk/provider-utils`'s
+// `JSONSchema7` re-export, which isn't a direct dep of agent-service.
+interface JsonSchemaProp {
+  type?: string | string[];
+  enum?: ReadonlyArray<unknown>;
+  properties?: Record<string, JsonSchemaProp>;
+  required?: string[];
+  items?: JsonSchemaProp | JsonSchemaProp[];
+  oneOf?: JsonSchemaProp[];
+  anyOf?: JsonSchemaProp[];
+  allOf?: JsonSchemaProp[];
+}
 
 /**
  * Regression catcher for the silent-key-strip class of bug.
@@ -34,16 +47,6 @@ const ALLOW_LOOSE: ReadonlySet<string> = new Set<string>([
 ]);
 
 const SENTINEL = "__strict_test_sentinel_42_DO_NOT_USE";
-
-interface JsonSchemaProp extends JSONSchema7 {
-  type?: JSONSchema7["type"];
-  enum?: JSONSchema7["enum"];
-  properties?: Record<string, JsonSchemaProp>;
-  required?: string[];
-  items?: JsonSchemaProp | JsonSchemaProp[];
-  oneOf?: JsonSchemaProp[];
-  anyOf?: JsonSchemaProp[];
-}
 
 function synthesize(schema: JsonSchemaProp): unknown {
   if (schema.enum && schema.enum.length > 0) return schema.enum[0];
@@ -85,7 +88,12 @@ describe("tool input schemas reject unknown keys at runtime", () => {
     it(`${name}: top-level z.object is .strict() (rejects extra keys)`, async () => {
       if (ALLOW_LOOSE.has(name)) return;
 
-      const tool = factory() as { inputSchema: { validate?: (v: unknown) => unknown; jsonSchema: JSONSchema7 | PromiseLike<JSONSchema7> } };
+      const tool = factory() as {
+        inputSchema: {
+          validate?: (v: unknown) => unknown;
+          jsonSchema: unknown | PromiseLike<unknown>;
+        };
+      };
       const validate = tool.inputSchema.validate;
       assert.ok(validate, `Tool "${name}" has no validate() — can't probe`);
 
