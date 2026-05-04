@@ -1,17 +1,15 @@
-import { tool, zodSchema } from "ai";
 import { z } from "zod";
+import { strictTool } from "../../../lib/strict-tool.js";
 import * as airflow from "../lib/airflow-client.js";
 
-export const getTaskInstancesTool = tool({
+export const getTaskInstancesTool = strictTool({
   description:
     "Get all task instances for a specific DAG run. Returns task ID, state, duration, try number, and operator type. Use this to see which tasks succeeded, failed, or are still running.",
-  inputSchema: zodSchema(
-    z.object({
-      dagId: z.string().describe("The Airflow DAG ID"),
-      dagRunId: z.string().describe("The DAG run ID (from listDagRuns)"),
-    }),
-  ),
-  execute: async (input: { dagId: string; dagRunId: string }) => {
+  inputSchema: z.object({
+    dagId: z.string().describe("The Airflow DAG ID"),
+    dagRunId: z.string().describe("The DAG run ID (from listDagRuns)"),
+  }),
+  execute: async (input) => {
     try {
       const result = await airflow.listTaskInstances(input.dagId, input.dagRunId);
       return {

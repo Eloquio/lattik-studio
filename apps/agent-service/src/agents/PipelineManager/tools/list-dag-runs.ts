@@ -1,20 +1,18 @@
-import { tool, zodSchema } from "ai";
 import { z } from "zod";
+import { strictTool } from "../../../lib/strict-tool.js";
 import * as airflow from "../lib/airflow-client.js";
 
-export const listDagRunsTool = tool({
+export const listDagRunsTool = strictTool({
   description:
     "List recent runs for a specific DAG. Returns run ID, logical date, state (queued/running/success/failed), start/end times, and duration. Newest first by default.",
-  inputSchema: zodSchema(
-    z.object({
-      dagId: z.string().describe("The Airflow DAG ID"),
-      limit: z
-        .number()
-        .optional()
-        .describe("Max number of runs to return (default 10)"),
-    }),
-  ),
-  execute: async (input: { dagId: string; limit?: number }) => {
+  inputSchema: z.object({
+    dagId: z.string().describe("The Airflow DAG ID"),
+    limit: z
+      .number()
+      .optional()
+      .describe("Max number of runs to return (default 10)"),
+  }),
+  execute: async (input) => {
     try {
       const result = await airflow.listDagRuns(input.dagId, {
         limit: input.limit ?? 10,

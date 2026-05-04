@@ -42,6 +42,13 @@ export {
   lattikTableFormToSpec,
   metricFormToSpec,
 } from "./forms.js";
+export {
+  entityFormInitialStateSchema,
+  dimensionFormInitialStateSchema,
+  loggerTableFormInitialStateSchema,
+  lattikTableFormInitialStateSchema,
+  metricFormInitialStateSchema,
+} from "./form-builders.js";
 
 /**
  * Per-kind dispatcher. The adapter is currently complete only for
