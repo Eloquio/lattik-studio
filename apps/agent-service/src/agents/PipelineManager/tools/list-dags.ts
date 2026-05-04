@@ -1,19 +1,17 @@
-import { tool, zodSchema } from "ai";
 import { z } from "zod";
+import { strictTool } from "../../../lib/strict-tool.js";
 import * as airflow from "../lib/airflow-client.js";
 
-export const listDagsTool = tool({
+export const listDagsTool = strictTool({
   description:
     "List all Lattik-managed Airflow DAGs. Returns DAG ID, description, schedule, paused status, and tags. Only shows DAGs tagged 'lattik' — unrelated DAGs are filtered out.",
-  inputSchema: zodSchema(
-    z.object({
-      limit: z
-        .number()
-        .optional()
-        .describe("Max number of DAGs to return (default 50)"),
-    }),
-  ),
-  execute: async (input: { limit?: number }) => {
+  inputSchema: z.object({
+    limit: z
+      .number()
+      .optional()
+      .describe("Max number of DAGs to return (default 50)"),
+  }),
+  execute: async (input) => {
     try {
       const result = await airflow.listDags({
         tags: ["lattik"],

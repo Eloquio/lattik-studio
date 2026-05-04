@@ -1,10 +1,10 @@
-import { tool, zodSchema } from "ai";
 import { z } from "zod";
 import type {
   DagOverviewIntent,
   DagRunState,
   DagSummary,
 } from "@eloquio/render-intents";
+import { strictTool } from "../../../lib/strict-tool.js";
 import * as airflow from "../lib/airflow-client.js";
 
 /**
@@ -36,10 +36,10 @@ function asRunState(state: string | null | undefined): DagRunState | null {
   return null;
 }
 
-export const renderDagOverviewTool = tool({
+export const renderDagOverviewTool = strictTool({
   description:
     "Render the DAG overview on the canvas. Shows all Lattik-managed DAGs as cards with status badges, schedule, last run result, and visual run history. This is the starting point for any monitoring workflow. Call this BEFORE writing prose.",
-  inputSchema: zodSchema(z.object({})),
+  inputSchema: z.object({}),
   execute: async (): Promise<DagOverviewIntent | { error: string }> => {
     try {
       const dagResult = await airflow.listDags({

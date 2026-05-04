@@ -1,10 +1,10 @@
-import { tool, zodSchema } from "ai";
 import { z } from "zod";
 import type {
   DagRunDetailIntent,
   DagRunState,
   TaskInstanceSummary,
 } from "@eloquio/render-intents";
+import { strictTool } from "../../../lib/strict-tool.js";
 import * as airflow from "../lib/airflow-client.js";
 
 /**
@@ -29,19 +29,14 @@ function asRunState(state: string | null | undefined): DagRunState | null {
   return null;
 }
 
-export const renderDagRunDetailTool = tool({
+export const renderDagRunDetailTool = strictTool({
   description:
     "Render the detail view for a specific DAG run on the canvas. Shows a header with run metadata and each task as a row with status indicator, duration, and type. Call this after the user selects a run to inspect.",
-  inputSchema: zodSchema(
-    z.object({
-      dagId: z.string().describe("The Airflow DAG ID"),
-      dagRunId: z.string().describe("The DAG run ID to show detail for"),
-    }),
-  ),
-  execute: async (input: {
-    dagId: string;
-    dagRunId: string;
-  }): Promise<DagRunDetailIntent | { error: string }> => {
+  inputSchema: z.object({
+    dagId: z.string().describe("The Airflow DAG ID"),
+    dagRunId: z.string().describe("The DAG run ID to show detail for"),
+  }),
+  execute: async (input): Promise<DagRunDetailIntent | { error: string }> => {
     try {
       const [runsResult, tasksResult] = await Promise.all([
         airflow.listDagRuns(input.dagId, { limit: 50 }),

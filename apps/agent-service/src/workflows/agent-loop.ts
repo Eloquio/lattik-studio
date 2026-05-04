@@ -2,13 +2,19 @@ import { getWritable } from "workflow";
 import {
   streamText,
   gateway,
-  tool,
-  zodSchema,
   convertToModelMessages,
   type ModelMessage,
   type UIMessage,
 } from "ai";
 import { z } from "zod";
+import {
+  entityFormInitialStateSchema,
+  dimensionFormInitialStateSchema,
+  loggerTableFormInitialStateSchema,
+  lattikTableFormInitialStateSchema,
+  metricFormInitialStateSchema,
+} from "@eloquio/render-intents";
+import { strictTool } from "../lib/strict-tool.js";
 
 // PipelineManager tools (pure)
 import { listDagsTool } from "../agents/PipelineManager/tools/list-dags.js";
@@ -47,6 +53,10 @@ import { renderSqlEditorTool } from "../agents/DataAnalyst/tools/render-tools.js
 
 // Assistant (concierge) — handoff is its only tool.
 import { createHandoffTool } from "../tools/handoff.js";
+
+// Shared tool — exposes the live canvas state to the agent so it can
+// reason about user edits before re-rendering a form.
+import { createReadCanvasStateTool } from "../tools/read-canvas-state.js";
 
 // Conversation persistence
 import { eq } from "drizzle-orm";
@@ -190,6 +200,7 @@ After calling a render tool, acknowledge briefly in prose (one sentence) and let
 ## Investigating a DAG
 Use \`getDagDetail\` / \`listDagRuns\` / \`getTaskInstances\` / \`getTaskLogs\` to dig into specifics after the canvas is rendered. Use \`listDags\` only when the user asks about something the canvas doesn't already show (e.g. raw schedule strings, owners, etc.). Be concise.`,
     toolNames: [
+      "readCanvasState",
       "renderDagOverview",
       "renderDagRunDetail",
       "listDags",
@@ -211,7 +222,16 @@ Use \`getDagDetail\` / \`listDagRuns\` / \`getTaskInstances\` / \`getTaskLogs\` 
 - \`renderLattikTableForm\` for lattik tables
 - \`renderMetricForm\` for metrics
 
-Pre-fill every field you can reasonably infer from the user's message — name, description, columns, retention, grain, etc. The form fields ARE the questions; never ask in chat first. The user fills in the rest on the canvas.
+Pre-fill every field you can reasonably infer from the user's message — name, description, columns, retention, grain, etc. The form fields ARE the questions; never ask in chat first. **Pre-fill columns proactively when the user's domain hints at them**: a logger table for ad impressions probably wants \`user_id\`, \`impression_id\`, \`ad_slot\`, \`campaign_id\`; an order events logger probably wants \`order_id\`, \`user_id\`, \`amount\`, \`currency\`; etc. Better to render a fully-filled-in draft the user can refine than an empty shell they have to populate from scratch.
+
+## Modifying an already-rendered form
+**When the user asks to add, change, rename, or remove fields on an existing form** ("add user_id and ad_slot", "rename amount to revenue", "drop the country column", "set retention to 90d"), apply the change YOURSELF. Do NOT tell the user to edit the canvas manually. The flow is:
+1. Call \`readCanvasState\` to get the current form state (preserves anything the user has already filled in).
+2. Merge the user's requested change into that state — keep every other field intact.
+3. Call the same \`renderXForm\` tool again with the FULL merged \`initialState\`. The render replaces the canvas spec, so passing a partial state would drop the rest.
+4. Acknowledge briefly in prose (one sentence) what you changed.
+
+Only push back to the user if you genuinely cannot represent the change (e.g. the form schema doesn't support it).
 
 ## PR Submission Flow
 After the user is happy with the form, the fixed sequence is:
@@ -226,6 +246,7 @@ After the user is happy with the form, the fixed sequence is:
 
 Be concise.`,
     toolNames: [
+      "readCanvasState",
       "renderEntityForm",
       "renderDimensionForm",
       "renderLoggerTableForm",
@@ -244,7 +265,13 @@ Be concise.`,
   DataAnalyst: {
     system:
       "You are the Data Analyst spike agent. You explore data using SQL. Use listTables to see what's available, describeTable to understand schemas, runQuery to execute SQL, and renderSqlEditor when the user wants to compose a query interactively. Be concise.",
-    toolNames: ["listTables", "describeTable", "runQuery", "renderSqlEditor"],
+    toolNames: [
+      "readCanvasState",
+      "listTables",
+      "describeTable",
+      "runQuery",
+      "renderSqlEditor",
+    ],
     maxLoopSteps: 6,
   },
 };
@@ -264,241 +291,236 @@ const definitionKindEnum = z.enum([
 ]);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+// Every entry uses `strictTool` instead of the AI SDK's `tool`. That
+// runs `.strict()` on the top-level zod object before wrapping it in
+// the SDK's Schema, so unknown keys cause an `InvalidToolInputError`
+// that propagates back to the model as a tool-result instead of
+// silently stripping (the regression that turned `columns` vs
+// `user_columns` into an empty form).
+//
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const TOOL_DEFINITIONS: Record<string, () => any> = {
   // PipelineManager
   listDags: () =>
-    tool({
+    strictTool({
       description:
         "Fetch raw DAG metadata as JSON (DAG ID, description, schedule cron, paused status, tags) for follow-up questions about specific properties. Do NOT call this for the user's initial 'list / show / what DAGs do I have' question — that question is answered by `renderDagOverview` rendering the canvas. Use this only when the user asks for something the canvas doesn't show (raw schedule strings, owners, etc.).",
-      inputSchema: zodSchema(
-        z.object({
-          limit: z.number().optional().describe("Max number of DAGs (default 50)"),
-        }),
-      ),
+      inputSchema: z.object({
+        limit: z
+          .number()
+          .optional()
+          .describe("Max number of DAGs (default 50)"),
+      }),
     }),
   getDagDetail: () =>
-    tool({
+    strictTool({
       description:
         "Get full detail for a specific DAG: schedule, paused status, tags, owners, and a structured task list.",
-      inputSchema: zodSchema(
-        z.object({ dagId: z.string().describe("The DAG ID to fetch detail for") }),
-      ),
+      inputSchema: z.object({
+        dagId: z.string().describe("The DAG ID to fetch detail for"),
+      }),
     }),
   listDagRuns: () =>
-    tool({
+    strictTool({
       description:
         "List recent runs for a DAG. Each entry includes run id, start/end times, state, and external trigger flag.",
-      inputSchema: zodSchema(
-        z.object({
-          dagId: z.string(),
-          limit: z.number().optional(),
-        }),
-      ),
+      inputSchema: z.object({
+        dagId: z.string(),
+        limit: z.number().optional(),
+      }),
     }),
   getTaskInstances: () =>
-    tool({
+    strictTool({
       description:
         "List task instances for a specific DAG run, with state, start/end, duration, and try number.",
-      inputSchema: zodSchema(
-        z.object({ dagId: z.string(), dagRunId: z.string() }),
-      ),
+      inputSchema: z.object({ dagId: z.string(), dagRunId: z.string() }),
     }),
   getTaskLogs: () =>
-    tool({
+    strictTool({
       description:
         "Fetch the log output for a specific task try (1-indexed), used to investigate failures.",
-      inputSchema: zodSchema(
-        z.object({
-          dagId: z.string(),
-          dagRunId: z.string(),
-          taskId: z.string(),
-          tryNumber: z.number(),
-        }),
-      ),
+      inputSchema: z.object({
+        dagId: z.string(),
+        dagRunId: z.string(),
+        taskId: z.string(),
+        tryNumber: z.number(),
+      }),
     }),
   renderDagOverview: () =>
-    tool({
+    strictTool({
       description:
         "Render the DAG overview on the canvas. Shows all Lattik-managed DAGs as cards with status badges, schedule, last run result, and visual run history. This is the starting point for any monitoring workflow. Call this BEFORE writing prose.",
-      inputSchema: zodSchema(z.object({})),
+      inputSchema: z.object({}),
     }),
   renderDagRunDetail: () =>
-    tool({
+    strictTool({
       description:
         "Render a specific DAG run's task graph on the canvas — task nodes, dependencies, per-task state. Use when the user wants to inspect a particular run.",
-      inputSchema: zodSchema(
-        z.object({ dagId: z.string(), dagRunId: z.string() }),
-      ),
+      inputSchema: z.object({ dagId: z.string(), dagRunId: z.string() }),
     }),
   // DataArchitect — render-form tools (one per definition kind).
+  // The render-form tools' `initialState` shape uses the typed per-kind
+  // schemas from `@eloquio/render-intents`. Each per-kind schema is itself
+  // strict, and `strictTool` makes the wrapping `{ initialState }` object
+  // strict too.
   renderEntityForm: () =>
-    tool({
+    strictTool({
       description:
         "Render an Entity definition form on the canvas. Pre-fill `initialState` with whatever the user said (name, description, attributes). The form is editable on the canvas afterwards.",
-      inputSchema: zodSchema(
-        z.object({
-          initialState: z
-            .object({
-              name: z.string().optional(),
-              description: z.string().optional(),
-            })
-            .optional(),
-        }),
-      ),
+      inputSchema: z.object({
+        initialState: entityFormInitialStateSchema.optional(),
+      }),
     }),
   renderDimensionForm: () =>
-    tool({
+    strictTool({
       description:
         "Render a Dimension definition form on the canvas. Pre-fill `initialState` with anything you can infer (name, description, entity it belongs to, value column).",
-      inputSchema: zodSchema(
-        z.object({ initialState: z.record(z.string(), z.unknown()).optional() }),
-      ),
+      inputSchema: z.object({
+        initialState: dimensionFormInitialStateSchema.optional(),
+      }),
     }),
   renderLoggerTableForm: () =>
-    tool({
+    strictTool({
       description:
-        "Render a Logger Table definition form on the canvas. Pre-fill `initialState` with anything you can infer (name, description, columns with types, retention, dedup).",
-      inputSchema: zodSchema(
-        z.object({ initialState: z.record(z.string(), z.unknown()).optional() }),
-      ),
+        "Render a Logger Table definition form on the canvas. Pre-fill `initialState` with anything you can infer. User-defined columns go under the `user_columns` key (NOT `columns`); each item is { name, type, dimension?, description?, classification? }. Implicit columns (event_id, event_timestamp, ds, hour) are added automatically — do NOT include them.",
+      inputSchema: z.object({
+        initialState: loggerTableFormInitialStateSchema.optional(),
+      }),
     }),
   renderLattikTableForm: () =>
-    tool({
+    strictTool({
       description:
-        "Render a Lattik Table (materialized view) form on the canvas. Pre-fill `initialState` with anything you can infer (name, description, source tables, grain, schedule).",
-      inputSchema: zodSchema(
-        z.object({ initialState: z.record(z.string(), z.unknown()).optional() }),
-      ),
+        "Render a Lattik Table (materialized view) form on the canvas. Pre-fill `initialState` with anything you can infer (name, description, primary_key, column_families, derived_columns, backfill).",
+      inputSchema: z.object({
+        initialState: lattikTableFormInitialStateSchema.optional(),
+      }),
     }),
   renderMetricForm: () =>
-    tool({
+    strictTool({
       description:
-        "Render a Metric definition form on the canvas. Pre-fill `initialState` with anything you can infer (name, description, source table, expression, aggregation).",
-      inputSchema: zodSchema(
-        z.object({ initialState: z.record(z.string(), z.unknown()).optional() }),
-      ),
+        "Render a Metric definition form on the canvas. Pre-fill `initialState` with anything you can infer (name, description, calculations).",
+      inputSchema: z.object({
+        initialState: metricFormInitialStateSchema.optional(),
+      }),
     }),
   // DataArchitect — PR-flow factory tools (need canvasState; updateDefinition
   // additionally needs the verified userId).
   staticCheck: () =>
-    tool({
+    strictTool({
       description:
         "Run static validation against the current canvas form state for the given definition kind. Returns errors keyed by field path. Always call this before `updateDefinition`.",
-      inputSchema: zodSchema(z.object({ kind: definitionKindEnum })),
+      inputSchema: z.object({ kind: definitionKindEnum }),
     }),
   updateDefinition: () =>
-    tool({
+    strictTool({
       description:
         "Save the current canvas draft as a definition the user owns. Use after `staticCheck` passes.",
-      inputSchema: zodSchema(
-        z.object({
-          kind: definitionKindEnum,
-          name: z.string().describe("The canonical name (snake_case)"),
-        }),
-      ),
+      inputSchema: z.object({
+        kind: definitionKindEnum,
+        name: z.string().describe("The canonical name (snake_case)"),
+      }),
     }),
   generateYaml: () =>
-    tool({
+    strictTool({
       description:
         "Render the YAML preview for the current canvas draft on the canvas. STOP after calling and ask whether to create the PR — the user may edit the YAML before answering.",
-      inputSchema: zodSchema(z.object({ kind: definitionKindEnum })),
+      inputSchema: z.object({ kind: definitionKindEnum }),
     }),
   submitPR: () =>
-    tool({
+    strictTool({
       description:
         "Open a Gitea PR for the YAML currently shown on the canvas. Returns `{ status: 'submitted', prUrl }` on success — share the prUrl as a clickable markdown link in your reply.",
-      inputSchema: zodSchema(
-        z.object({
-          kind: definitionKindEnum,
-          name: z.string(),
-        }),
-      ),
+      inputSchema: z.object({
+        kind: definitionKindEnum,
+        name: z.string(),
+      }),
     }),
   // DataArchitect — browse + delete (pure).
   listDefinitions: () =>
-    tool({
+    strictTool({
       description:
         "List the user's saved definitions, optionally filtered by kind.",
-      inputSchema: zodSchema(
-        z.object({ kind: definitionKindEnum.optional() }),
-      ),
+      inputSchema: z.object({ kind: definitionKindEnum.optional() }),
     }),
   getDefinition: () =>
-    tool({
+    strictTool({
       description:
         "Fetch a previously-saved definition by name (any kind), returning the YAML spec body.",
-      inputSchema: zodSchema(
-        z.object({ name: z.string().describe("Definition name") }),
-      ),
+      inputSchema: z.object({
+        name: z.string().describe("Definition name"),
+      }),
     }),
   deleteDefinition: () =>
-    tool({
+    strictTool({
       description:
         "Open a Gitea PR that deletes a definition's YAML file. NOTE: this only stops the pipeline going forward; it does not drop the warehouse table. Tell the user that part is manual.",
-      inputSchema: zodSchema(
-        z.object({
-          name: z.string(),
-          kind: definitionKindEnum.optional(),
-        }),
-      ),
+      inputSchema: z.object({
+        name: z.string(),
+        kind: definitionKindEnum.optional(),
+      }),
     }),
   // DataAnalyst
   listTables: () =>
-    tool({
+    strictTool({
       description:
         "List queryable tables in the data lake, optionally filtered by catalog or schema.",
-      inputSchema: zodSchema(
-        z.object({
-          catalog: z.string().optional(),
-          schema: z.string().optional(),
-        }),
-      ),
+      inputSchema: z.object({
+        catalog: z.string().optional(),
+        schema: z.string().optional(),
+      }),
     }),
   describeTable: () =>
-    tool({
+    strictTool({
       description: "Describe a table's columns and types.",
-      inputSchema: zodSchema(
-        z.object({
-          catalog: z.string(),
-          schema: z.string(),
-          table: z.string(),
-        }),
-      ),
+      inputSchema: z.object({
+        catalog: z.string(),
+        schema: z.string(),
+        table: z.string(),
+      }),
     }),
   runQuery: () =>
-    tool({
+    strictTool({
       description:
         "Execute a SQL query against the data lake (read-only — SELECT/SHOW/DESCRIBE only). Returns column metadata + row data.",
-      inputSchema: zodSchema(
-        z.object({
-          sql: z.string().describe("The SQL to execute"),
-          limit: z.number().optional(),
-        }),
-      ),
+      inputSchema: z.object({
+        sql: z.string().describe("The SQL to execute"),
+        limit: z.number().optional(),
+      }),
     }),
   renderSqlEditor: () =>
-    tool({
+    strictTool({
       description:
         "Render a SQL editor on the canvas, optionally pre-filled with starter SQL.",
-      inputSchema: zodSchema(
-        z.object({ initialSql: z.string().optional() }),
-      ),
+      inputSchema: z.object({ initialSql: z.string().optional() }),
     }),
   // Assistant — concierge handoff. The actual stack-depth check lives in
   // the `createHandoffTool` factory at dispatch time (it needs the live
   // taskStack from per-request context).
   handoff: () =>
-    tool({
+    strictTool({
       description:
         "Hand off the conversation to a specialized agent. Use this when the user's request matches an available agent.",
-      inputSchema: zodSchema(
-        z.object({
-          agentId: z.string().describe("The id of the agent to hand off to"),
-          reason: z.string().describe("Brief reason for the handoff"),
-        }),
-      ),
+      inputSchema: z.object({
+        agentId: z.string().describe("The id of the agent to hand off to"),
+        reason: z.string().describe("Brief reason for the handoff"),
+      }),
+    }),
+  // Shared — read the live canvas state so the agent can reason about
+  // user edits (form fields the user already filled in, current YAML,
+  // etc.) before deciding what to re-render.
+  readCanvasState: () =>
+    strictTool({
+      description:
+        "Read the current canvas state. Use this BEFORE re-rendering a form to preserve fields the user has already filled in. Returns the canvas's current state object exactly as the user sees it.",
+      inputSchema: z.object({}),
     }),
 };
+
+// Exposed so the strictness CI test (apps/agent-service/src/lib/
+// tool-strictness.test.ts) can enumerate every tool the LLM sees and
+// walk its emitted JSON Schema. Production callers go through
+// `runModelStep` / `TOOL_DISPATCHERS`; this export exists for tests.
+export { TOOL_DEFINITIONS };
 
 // ---------------------------------------------------------------------------
 // Tool dispatchers — map a tool name + per-request context to its actual
@@ -571,6 +593,14 @@ const TOOL_DISPATCHERS: Record<string, Dispatcher> = {
   // enforce the depth-1 stack limit and detect resume-of-paused.
   handoff: (input, ctx) =>
     createHandoffTool({ taskStack: ctx.taskStack }).execute!(
+      input as never,
+      {} as never,
+    ),
+  // Shared — readCanvasState factory captures the live canvasState
+  // closure so the tool returns exactly what the user sees on the
+  // canvas at this point in the loop.
+  readCanvasState: (input, ctx) =>
+    createReadCanvasStateTool({ getCanvasState: () => ctx.canvasState }).execute!(
       input as never,
       {} as never,
     ),

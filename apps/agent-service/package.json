@@ -14,7 +14,7 @@
     "prepare": "nitropack prepare",
     "preview": "node .output/server/index.mjs",
     "typecheck": "nitropack prepare && tsc --noEmit",
-    "test": "tsx --test src/lib/loop-event-to-ui-chunk.test.ts src/workflows/agent-loop.helpers.test.ts"
+    "test": "tsx --test src/lib/loop-event-to-ui-chunk.test.ts src/workflows/agent-loop.helpers.test.ts src/lib/tool-strictness.test.ts"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^3.0.83",

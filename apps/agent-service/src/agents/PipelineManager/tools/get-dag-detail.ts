@@ -1,19 +1,19 @@
-import { tool, zodSchema } from "ai";
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import { definitions } from "@eloquio/db-schema";
+import { strictTool } from "../../../lib/strict-tool.js";
 import * as airflow from "../lib/airflow-client.js";
 import { getDb } from "../../../lib/db.js";
 
-export const getDagDetailTool = tool({
+export const getDagDetailTool = strictTool({
   description:
     "Get detailed info about a specific DAG: schedule, pause state, task count, max active runs. Also fetches the linked Lattik Table definition (column families, sources) if one exists.",
-  inputSchema: zodSchema(
-    z.object({
-      dagId: z.string().describe("The Airflow DAG ID, e.g. 'lattik__user_activity'"),
-    }),
-  ),
-  execute: async (input: { dagId: string }) => {
+  inputSchema: z.object({
+    dagId: z
+      .string()
+      .describe("The Airflow DAG ID, e.g. 'lattik__user_activity'"),
+  }),
+  execute: async (input) => {
     // The Airflow fetch is the load-bearing call — if it fails, the
     // tool fails. The Lattik-Table definition lookup is supplementary
     // (it enriches the DAG with column families etc.); a DB outage or

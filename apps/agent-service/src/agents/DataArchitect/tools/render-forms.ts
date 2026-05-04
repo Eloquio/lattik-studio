@@ -1,11 +1,16 @@
 import { tool, zodSchema } from "ai";
 import { z } from "zod";
-import type {
-  EntityFormIntent,
-  DimensionFormIntent,
-  LoggerTableFormIntent,
-  LattikTableFormIntent,
-  MetricFormIntent,
+import {
+  type EntityFormIntent,
+  type DimensionFormIntent,
+  type LoggerTableFormIntent,
+  type LattikTableFormIntent,
+  type MetricFormIntent,
+  entityFormInitialStateSchema,
+  dimensionFormInitialStateSchema,
+  loggerTableFormInitialStateSchema,
+  lattikTableFormInitialStateSchema,
+  metricFormInitialStateSchema,
 } from "@eloquio/render-intents";
 
 /**
@@ -15,31 +20,34 @@ import type {
  * Spec composition (with per-kind initial-state schema validation
  * as the trust boundary).
  *
- * The agent passes initial-state values it can glean from the
- * user's request as a loose `Record<string, unknown>` — the
- * adapter validates against each kind's typed schema. Untyped on
- * the agent side keeps the tool input schemas simple (Anthropic's
- * tool-use API doesn't accept top-level `anyOf` so per-kind unions
- * don't serialize cleanly).
+ * Each tool's input schema is the *exact* per-kind initialState
+ * schema from `@eloquio/render-intents`. That way the LLM sees the
+ * accepted field names + value enums via JSON schema, and the AI SDK
+ * rejects shape-mismatched tool calls before execution. Previously
+ * we used a loose `Record<string, unknown>` and validated only on
+ * the adapter side — when validation failed the canvas silently
+ * fell back to an empty form. Strict input schemas catch the bug
+ * up-front and let the model self-correct on the next iteration.
  */
 
-const initialStateInputSchema = zodSchema(
-  z.object({
-    initialState: z
-      .record(z.string(), z.unknown())
-      .optional()
-      .describe(
-        "Partial form state to pre-fill. Pass any names, columns, retention, grain, or other values you can glean from the user's request — every field is optional. The user fills in the rest.",
-      ),
-  }),
-);
+function makeInputSchema<S extends z.ZodTypeAny>(initialStateSchema: S) {
+  return zodSchema(
+    z.object({
+      initialState: initialStateSchema
+        .optional()
+        .describe(
+          "Partial form state to pre-fill. Pass any fields you can glean from the user's request — every field is optional. The user fills in the rest.",
+        ),
+    }),
+  );
+}
 
 export const renderEntityFormTool = tool({
   description:
     "Render the Entity definition form on the canvas. Pre-fill via initialState (name, description, id_field, id_type).",
-  inputSchema: initialStateInputSchema,
+  inputSchema: makeInputSchema(entityFormInitialStateSchema),
   execute: async (input: {
-    initialState?: Record<string, unknown>;
+    initialState?: z.infer<typeof entityFormInitialStateSchema>;
   }): Promise<EntityFormIntent> => ({
     kind: "entity-form",
     surface: "form",
@@ -50,9 +58,9 @@ export const renderEntityFormTool = tool({
 export const renderDimensionFormTool = tool({
   description:
     "Render the Dimension definition form on the canvas. Pre-fill via initialState (name, description, entity, source_table, source_column, data_type).",
-  inputSchema: initialStateInputSchema,
+  inputSchema: makeInputSchema(dimensionFormInitialStateSchema),
   execute: async (input: {
-    initialState?: Record<string, unknown>;
+    initialState?: z.infer<typeof dimensionFormInitialStateSchema>;
   }): Promise<DimensionFormIntent> => ({
     kind: "dimension-form",
     surface: "form",
@@ -62,10 +70,10 @@ export const renderDimensionFormTool = tool({
 
 export const renderLoggerTableFormTool = tool({
   description:
-    "Render the Logger Table definition form on the canvas. Pre-fill via initialState (name, description, retention, dedup_window, user_columns).",
-  inputSchema: initialStateInputSchema,
+    "Render the Logger Table definition form on the canvas. Pre-fill via initialState. The user-defined column list goes under the `user_columns` key (NOT `columns` or `customColumns`); each item is { name, type, dimension?, description?, classification? }. Implicit columns (event_id, event_timestamp, ds, hour) are added automatically — do NOT include them.",
+  inputSchema: makeInputSchema(loggerTableFormInitialStateSchema),
   execute: async (input: {
-    initialState?: Record<string, unknown>;
+    initialState?: z.infer<typeof loggerTableFormInitialStateSchema>;
   }): Promise<LoggerTableFormIntent> => ({
     kind: "logger-table-form",
     surface: "form",
@@ -76,9 +84,9 @@ export const renderLoggerTableFormTool = tool({
 export const renderLattikTableFormTool = tool({
   description:
     "Render the Lattik Table definition form on the canvas. Pre-fill via initialState (name, description, primary_key, column_families, derived_columns, backfill).",
-  inputSchema: initialStateInputSchema,
+  inputSchema: makeInputSchema(lattikTableFormInitialStateSchema),
   execute: async (input: {
-    initialState?: Record<string, unknown>;
+    initialState?: z.infer<typeof lattikTableFormInitialStateSchema>;
   }): Promise<LattikTableFormIntent> => ({
     kind: "lattik-table-form",
     surface: "form",
@@ -89,9 +97,9 @@ export const renderLattikTableFormTool = tool({
 export const renderMetricFormTool = tool({
   description:
     "Render the Metric definition form on the canvas. Pre-fill via initialState (name, description, calculations).",
-  inputSchema: initialStateInputSchema,
+  inputSchema: makeInputSchema(metricFormInitialStateSchema),
   execute: async (input: {
-    initialState?: Record<string, unknown>;
+    initialState?: z.infer<typeof metricFormInitialStateSchema>;
   }): Promise<MetricFormIntent> => ({
     kind: "metric-form",
     surface: "form",

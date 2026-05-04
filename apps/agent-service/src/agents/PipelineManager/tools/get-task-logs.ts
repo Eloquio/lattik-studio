@@ -1,29 +1,22 @@
-import { tool, zodSchema } from "ai";
 import { z } from "zod";
+import { strictTool } from "../../../lib/strict-tool.js";
 import * as airflow from "../lib/airflow-client.js";
 
 const MAX_LOG_LINES = 200;
 
-export const getTaskLogsTool = tool({
+export const getTaskLogsTool = strictTool({
   description:
     "Fetch stdout/stderr logs for a specific task instance. Useful for diagnosing why a task failed. Returns the last 200 lines by default — for Spark tasks, the error is usually near the end.",
-  inputSchema: zodSchema(
-    z.object({
-      dagId: z.string().describe("The Airflow DAG ID"),
-      dagRunId: z.string().describe("The DAG run ID"),
-      taskId: z.string().describe("The task ID (e.g. 'build__user_activity')"),
-      tryNumber: z
-        .number()
-        .optional()
-        .describe("Which try to fetch logs for (default: latest)"),
-    }),
-  ),
-  execute: async (input: {
-    dagId: string;
-    dagRunId: string;
-    taskId: string;
-    tryNumber?: number;
-  }) => {
+  inputSchema: z.object({
+    dagId: z.string().describe("The Airflow DAG ID"),
+    dagRunId: z.string().describe("The DAG run ID"),
+    taskId: z.string().describe("The task ID (e.g. 'build__user_activity')"),
+    tryNumber: z
+      .number()
+      .optional()
+      .describe("Which try to fetch logs for (default: latest)"),
+  }),
+  execute: async (input) => {
     try {
       const logs = await airflow.getTaskLogs(
         input.dagId,
