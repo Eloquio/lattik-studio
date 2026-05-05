@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { Cpu, GitBranch, Inbox, LogOut, MessageSquare } from "lucide-react";
+import { GitBranch, LogOut, MessageSquare } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -17,8 +17,6 @@ interface NavPanelProps {
 export function NavPanel({ historyOpen = false, onChatClick }: NavPanelProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const onRequests = pathname.startsWith("/requests");
-  const onWorkers = pathname.startsWith("/settings/workers");
   const onHome = pathname === "/";
 
   const handleChatClick = () => {
@@ -40,34 +38,6 @@ export function NavPanel({ historyOpen = false, onChatClick }: NavPanelProps) {
           <MessageSquare className="h-5 w-5" />
         </TooltipTrigger>
         <TooltipContent side="right">Chat History</TooltipContent>
-      </Tooltip>
-
-      <Tooltip>
-        <TooltipTrigger
-          className={`flex h-10 w-10 items-center justify-center rounded-md transition-colors ${
-            onRequests
-              ? "bg-white/15 text-[#e0a96e]"
-              : "text-white/70 hover:bg-white/10 hover:text-white"
-          }`}
-          onClick={() => router.push("/requests")}
-        >
-          <Inbox className="h-5 w-5" />
-        </TooltipTrigger>
-        <TooltipContent side="right">Requests</TooltipContent>
-      </Tooltip>
-
-      <Tooltip>
-        <TooltipTrigger
-          className={`flex h-10 w-10 items-center justify-center rounded-md transition-colors ${
-            onWorkers
-              ? "bg-white/15 text-[#e0a96e]"
-              : "text-white/70 hover:bg-white/10 hover:text-white"
-          }`}
-          onClick={() => router.push("/settings/workers")}
-        >
-          <Cpu className="h-5 w-5" />
-        </TooltipTrigger>
-        <TooltipContent side="right">Workers</TooltipContent>
       </Tooltip>
 
       <Tooltip>

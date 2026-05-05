@@ -10,7 +10,7 @@
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { tool, zodSchema } from "ai";
@@ -30,9 +30,13 @@ const outputSchema = toolOutputSchema(
 );
 type Output = z.infer<typeof outputSchema>;
 
-// Walk up from this file: apps/agent-worker/src/tools/ → repo root.
-const HERE = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_REPO_ROOT = resolve(HERE, "../../../..");
+// Resolve the repo root via `process.cwd()` instead of `import.meta.url`.
+// Nitropack bundles this file into `.output/server/chunks/...`, where the
+// import.meta walk-up lands somewhere meaningless. The with-env wrapper
+// launches the process with cwd = `apps/agent-service`, so two levels
+// up is the workspace root.
+void fileURLToPath; // kept import for future test-friendly resolution
+const DEFAULT_REPO_ROOT = resolve(process.cwd(), "../..");
 const REPO_ROOT = process.env.LATTIK_REPO_ROOT ?? DEFAULT_REPO_ROOT;
 
 const PROTO_DIR = resolve(

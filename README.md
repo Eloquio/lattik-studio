@@ -45,7 +45,7 @@ Sign in with **admin / admin** — no Google OAuth setup required for local deve
 |---|---|
 | `pnpm dev:bootstrap` | Preflight checks, `.env` generation, cluster + Postgres + schema + seed |
 | `pnpm dev:up` | Background services + dev server (run bootstrap first) |
-| `pnpm dev:web` | Dev server only (Next.js + agent-worker via Turbo) |
+| `pnpm dev:web` | Dev servers only (Next.js + agent-service via Turbo) |
 | `pnpm dev:services` | Build images, start Gitea, Trino, Kafka, Spark, Airflow, etc. |
 | `pnpm dev:status` | Check the status of all services |
 | `pnpm dev:down` | Delete the kind cluster (all data is wiped) |

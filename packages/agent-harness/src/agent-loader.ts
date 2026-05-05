@@ -7,9 +7,8 @@
  * reset the cache via `resetAgentCacheForTests`.
  *
  * Unlike SKILL.md, agents do NOT live inside this package — they live in
- * each consuming app (`apps/agent-service/src/agents/...`,
- * `apps/agent-worker/src/agents/...`). The caller passes `agentsDir`
- * explicitly; there is no useful in-package default.
+ * the consuming app (`apps/agent-service/src/agents/...`). The caller
+ * passes `agentsDir` explicitly; there is no useful in-package default.
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";

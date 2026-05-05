@@ -4,6 +4,12 @@
  * matching `apps/ingest/main.go`.
  *
  * Idempotent: if the topic exists, succeed.
+ *
+ * Ported from `apps/agent-worker/src/tools/create-kafka-topic.ts` as part
+ * of the agent-worker → Vercel Workflow migration. Behavior identical.
+ * The `KAFKA_BROKERS` default differs at the env layer — workers running
+ * inside kind hit `kafka.kafka:9092` (in-cluster DNS); agent-service
+ * runs on the host and hits `localhost:9094` (NodePort). Set via env.
  */
 
 import { z } from "zod";
@@ -23,13 +29,9 @@ const outputSchema = toolOutputSchema(
 type Output = z.infer<typeof outputSchema>;
 
 const KAFKA_BROKERS = (
-  process.env.KAFKA_BROKERS ?? "kafka.kafka:9092"
+  process.env.KAFKA_BROKERS ?? "localhost:9094"
 ).split(",");
 
-// Default to 1 partition — most logger tables are low-volume, and one
-// partition is plenty. Increase per-table via env when a specific table
-// proves it needs more parallelism for either Kafka throughput or
-// downstream writer scaling.
 const TOPIC_NUM_PARTITIONS = parseInt(
   process.env.LATTIK_TOPIC_NUM_PARTITIONS ?? "1",
   10,
@@ -38,9 +40,6 @@ const TOPIC_REPLICATION_FACTOR = parseInt(
   process.env.LATTIK_TOPIC_REPLICATION_FACTOR ?? "1",
   10,
 );
-// 7 days in ms — local default. The Logger Table's `retention` (e.g. "30d")
-// governs Iceberg storage, not Kafka topic retention; Kafka is just a
-// transport buffer between ingest and the Iceberg writer.
 const TOPIC_RETENTION_MS = parseInt(
   process.env.LATTIK_TOPIC_RETENTION_MS ?? `${7 * 24 * 60 * 60 * 1000}`,
   10,
@@ -63,7 +62,7 @@ export const createKafkaTopicTool = tool({
   execute: async (input: { table_name: string }): Promise<Output> => {
     const topicName = `logger.${input.table_name}`;
     const kafka = new Kafka({
-      clientId: "lattik-agent-worker",
+      clientId: "lattik-agent-service",
       brokers: KAFKA_BROKERS,
     });
     const admin = kafka.admin();
@@ -72,7 +71,12 @@ export const createKafkaTopicTool = tool({
       await admin.connect();
       const existing = await admin.listTopics();
       if (existing.includes(topicName)) {
-        return { ok: true, topic: topicName, created: false, note: "already existed" };
+        return {
+          ok: true,
+          topic: topicName,
+          created: false,
+          note: "already existed",
+        };
       }
 
       const topicConfig: ITopicConfig = {

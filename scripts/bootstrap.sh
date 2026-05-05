@@ -22,7 +22,7 @@ step() {
 step "check-deps" node scripts/preflight.mjs
 
 log "init-env"
-if [ ! -f apps/web/.env ] || [ ! -f apps/agent-worker/.env ]; then
+if [ ! -f apps/web/.env ] || [ ! -f apps/agent-service/.env ]; then
   node scripts/bootstrap-env.mjs
 fi
 
@@ -45,6 +45,5 @@ step "cluster" pnpm --silent cluster:up
 step "postgres" pnpm --silent db:start
 step "schema" pnpm --silent db:push
 step "seed" pnpm --silent db:seed
-step "worker" pnpm --silent worker:bootstrap
 
 log "ready"
