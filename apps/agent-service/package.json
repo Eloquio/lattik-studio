@@ -21,11 +21,13 @@
     "@eloquio/agent-harness": "workspace:*",
     "@eloquio/db-schema": "workspace:*",
     "@eloquio/lattik-expression": "workspace:*",
+    "@eloquio/lattik-logger": "workspace:*",
     "@eloquio/render-intents": "workspace:*",
     "ai": "^6.0.141",
     "drizzle-orm": "^0.45.2",
     "h3": "^1.15.0",
     "jose": "^6.0.0",
+    "kafkajs": "^2.2.4",
     "postgres": "^3.4.8",
     "workflow": "^4.2.4",
     "zod": "^4.3.6"

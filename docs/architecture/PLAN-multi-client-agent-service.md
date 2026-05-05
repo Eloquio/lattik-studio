@@ -1,12 +1,16 @@
 # PLAN: Multi-client agent service
 
-> **Status:** Forward-looking architecture plan. Not yet implemented. Move to `docs/archive/` when shipped.
+> **Status:** Forward-looking architecture plan. Partially implemented — the chat-runtime agents now live in `apps/agent-service`. Move to `docs/archive/` when render-intents are end-to-end. The worker-node concept was deprecated in a separate cutover (see "Worker-node deprecation" below).
 
 ## Goal
 
 Extract the chat-runtime agents (Assistant + Specialists) out of `apps/web` into a standalone backend service so multiple chat clients — the web app, a Slack bot, a Discord bot, a CLI, etc. — can share the same agent backend. The web app becomes one consumer of the service, not the home of the agents.
 
-The worker-node agents (Planner, Executor) already live in their own service (`apps/agent-worker`); this plan does not change them.
+## Worker-node deprecation (post-script to original plan)
+
+This document originally framed worker-node agents (Planner, Executor) as a separate, untouched service in `apps/agent-worker`. That has changed: skill-driven background work — the Executor's job — now runs as Vercel Workflow runs inside `apps/agent-service` (see `src/workflows/skill-run.ts` and `routes/__wf-skill-run.post.ts`). The webhook handler in `apps/web/src/app/api/webhooks/gitea/route.ts` triggers a workflow per merged PR; the run-queue / claim-and-poll mechanism, the agent-worker pod, and the Planner/Executor split are all gone. The skill catalog (`post-pipeline-pr-merge` and friends) is unchanged — only the runtime that hosts it.
+
+The Planner agent did not survive the cutover: every production "request" today decomposes to exactly one skill (`post-pipeline-pr-merge`), so the LLM-decomposition step was dead code. If a real multi-skill request shows up, reintroduce it as a workflow that orchestrates child skill-run workflows.
 
 ## The actual hard part
 
@@ -282,7 +286,7 @@ Resolve before Phase 3 (web migration):
 
 ## What this plan does NOT change
 
-- **Worker-node agents** (Planner, Executor) stay in `apps/agent-worker`. They don't render — they take action — and their outputs go to postgres / Iceberg / Gitea, not to a chat surface.
+- ~~**Worker-node agents** (Planner, Executor) stay in `apps/agent-worker`.~~ Superseded — see "Worker-node deprecation" at the top of this doc. Agent-worker is gone; skill execution lives in `apps/agent-service` as a workflow.
 - **Skill model.** SKILL.md format, owners gating, and the loader are unchanged. They live in `packages/agent-harness`. AGENT.md introduces the same convention (frontmatter + Markdown body) for agent definitions.
 - **AI Gateway.** Vercel AI Gateway (`gateway('anthropic/claude-sonnet-4.6')`) keeps powering model calls. The service uses the same SDK.
 - **Definitions DB / Gitea PR flow.** Unchanged. The service writes to the same postgres and Gitea that `apps/web` does today.

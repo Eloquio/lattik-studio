@@ -8,7 +8,8 @@
  * about this at startup so authors notice.
  *
  * These are stub Sets — real handler functions live wherever the runtime
- * wires them (chat tools in the web app, worker tools in apps/agent-worker).
+ * wires them (chat tools and worker/skill tools both live in
+ * apps/agent-service after the agent-worker deprecation).
  */
 
 import type { Runtime } from "./agents.js";
@@ -27,23 +28,18 @@ export const CHAT_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Tool ids registered in the worker node (apps/agent-worker).
- * Loaded by Planner + Executor agents.
+ * Tool ids registered in the skill-run runtime (`apps/agent-service`'s
+ * `runSkillWorkflow`). Loaded by ExecutorAgent. Names match the
+ * `tools:` lists in `packages/agent-harness/skills/<id>/SKILL.md`.
  */
 export const WORKER_TOOLS: ReadonlySet<string> = new Set([
-  "list_skills",
-  "emit_task",
-  "finish_planning",
+  "create_kafka_topic",
+  "emit_logger_proto",
+  "register_protobuf_schema",
+  "create_iceberg_table",
+  "start_logger_writer",
   "loadSkill",
   "finishSkill",
-  // Skill-grantable tools — declared here so the preflight knows they're
-  // wired on the worker side. Real handlers land alongside the skills that
-  // need them.
-  "kafka:write",
-  "s3:write",
-  "trino:query",
-  "http:post",
-  "sr:register",
 ]);
 
 const REGISTRIES: Record<Runtime, ReadonlySet<string>> = {

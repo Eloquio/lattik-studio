@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { requireBearer, requireLattikAuth, requireTaskAuth } from "./bearer-auth";
+import { requireBearer, requireLattikAuth } from "./bearer-auth";
 
 function reqWith(header: string | null): Request {
   const headers = new Headers();
@@ -59,29 +59,19 @@ describe("requireBearer", () => {
   });
 });
 
-describe("requireLattikAuth / requireTaskAuth", () => {
-  it("wire to LATTIK_API_TOKEN and TASK_AGENT_SECRET respectively", () => {
+describe("requireLattikAuth", () => {
+  it("wires to LATTIK_API_TOKEN", () => {
     process.env.LATTIK_API_TOKEN = "lattik-secret";
-    process.env.TASK_AGENT_SECRET = "task-secret";
     try {
       assert.strictEqual(
         requireLattikAuth(reqWith("Bearer lattik-secret")),
         null,
       );
-      assert.strictEqual(
-        requireTaskAuth(reqWith("Bearer task-secret")),
-        null,
-      );
-      // Cross-use fails (wrong env var for each).
       assert.ok(
-        requireLattikAuth(reqWith("Bearer task-secret")) instanceof Response,
-      );
-      assert.ok(
-        requireTaskAuth(reqWith("Bearer lattik-secret")) instanceof Response,
+        requireLattikAuth(reqWith("Bearer wrong")) instanceof Response,
       );
     } finally {
       delete process.env.LATTIK_API_TOKEN;
-      delete process.env.TASK_AGENT_SECRET;
     }
   });
 });

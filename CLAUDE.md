@@ -84,7 +84,7 @@ portless proxy start --tld dev
 
 # First-time setup (or after `pnpm dev:down`): bootstrap, then start.
 # `dev:up` does NOT run bootstrap — run it explicitly first.
-pnpm dev:bootstrap   # Preflight + .env + cluster + Postgres + schema + seed + worker creds
+pnpm dev:bootstrap   # Preflight + .env + cluster + Postgres + schema + seed
 pnpm dev:up          # Background services (`dev:services`) + dev server (`dev:web`)
 
 # Day-to-day, when the cluster is already bootstrapped:

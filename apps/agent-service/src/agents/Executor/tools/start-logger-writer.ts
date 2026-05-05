@@ -9,7 +9,7 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { tool, zodSchema } from "ai";
@@ -21,9 +21,10 @@ const KAFKA_BROKERS = (
   process.env.KAFKA_BROKERS ?? "kafka.kafka:9092"
 ).split(",");
 
-// Walk up: apps/agent-worker/src/tools/ → repo root.
-const HERE = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_REPO_ROOT = resolve(HERE, "../../../..");
+// Resolve repo root via process.cwd() rather than import.meta.url —
+// Nitropack bundling breaks the latter (see emit-logger-proto.ts).
+void fileURLToPath; // kept import for future test-friendly resolution
+const DEFAULT_REPO_ROOT = resolve(process.cwd(), "../..");
 const REPO_ROOT = process.env.LATTIK_REPO_ROOT ?? DEFAULT_REPO_ROOT;
 const TEMPLATE_PATH = resolve(
   REPO_ROOT,

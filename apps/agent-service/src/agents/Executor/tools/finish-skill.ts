@@ -1,21 +1,34 @@
 /**
  * `finishSkill` — close out the loaded skill for a run.
  *
- * Runs the skill's `done[]` checks. If all pass, marks the run `done` via
- * /api/runs/:id/complete. If any fail, marks the run `failed` with the
- * first failure's reason — programmatic verification disagreed with the
- * runbook's claim of completion, so the work isn't actually done.
+ * Runs the skill's `done[]` checks. Returns a structured payload the
+ * workflow can pick up via `agent.generate()`'s last tool call. Unlike
+ * the agent-worker version (`apps/agent-worker/src/tools/finish-skill.ts`),
+ * this does NOT POST back to apps/web's run-queue endpoints — the
+ * workflow itself is the run, and its return value is the result.
+ *
+ * The agent still calls finishSkill exactly once per the post-merge
+ * skill's runbook, even though strictly speaking the workflow could
+ * derive completion from the agent's last text. Keeping the explicit
+ * call gives the LLM a clear stopping signal and exercises the
+ * `done[]` programmatic checks (a safety net against the LLM lying
+ * about what it accomplished).
  */
 
 import { z } from "zod";
 import { tool, zodSchema } from "ai";
 import type { DoneCheck } from "@eloquio/agent-harness";
-import { apiFetch } from "../runtime.js";
 import { runDoneChecks } from "../done-checks.js";
 
 export interface FinishSkillContext {
   runId: string;
   doneChecks: DoneCheck[];
+}
+
+export interface FinishSkillResult {
+  runStatus: "done" | "failed";
+  result?: string;
+  error?: string;
 }
 
 export function createFinishSkillTool(ctx: FinishSkillContext) {
@@ -38,46 +51,24 @@ export function createFinishSkillTool(ctx: FinishSkillContext) {
           ),
       }),
     ),
-    execute: async (input: { result: string; status?: "done" | "failed" }) => {
+    execute: async (input: {
+      result: string;
+      status?: "done" | "failed";
+    }): Promise<FinishSkillResult> => {
+      void ctx.runId; // Reserved for future per-run logging.
+
       // LLM said failed — honor it without bothering with done[] checks.
       if (input.status === "failed") {
-        try {
-          await apiFetch(`/api/runs/${ctx.runId}/fail`, {
-            method: "POST",
-            body: { error: input.result },
-          });
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return { error: `failRun call failed: ${msg}; original failure: ${input.result}` };
-        }
         return { runStatus: "failed", error: input.result };
       }
 
-      // LLM said done — verify with done[] checks before marking complete.
+      // LLM said done — verify with done[] checks before reporting complete.
       const failure = await runDoneChecks(ctx.doneChecks);
       if (failure) {
         const error = `done check #${failure.index} (${failure.kind}) failed: ${failure.reason}`;
-        try {
-          await apiFetch(`/api/runs/${ctx.runId}/fail`, {
-            method: "POST",
-            body: { error },
-          });
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return { error: `failRun call failed: ${msg}; original failure: ${error}` };
-        }
         return { runStatus: "failed", error };
       }
 
-      try {
-        await apiFetch(`/api/runs/${ctx.runId}/complete`, {
-          method: "POST",
-          body: { result: input.result },
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return { error: `completeRun call failed: ${msg}` };
-      }
       return { runStatus: "done", result: input.result };
     },
   });

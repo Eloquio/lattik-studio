@@ -14,7 +14,12 @@ export type ChatAgentId =
   | "DataAnalyst"
   | "PipelineManager";
 
-export type WorkerAgentId = "PlannerAgent" | "ExecutorAgent";
+// `ExecutorAgent` survives as a skill-ownership identifier even after
+// the agent-worker deprecation: skill files list it under `owners:` and
+// the workflow that runs them (apps/agent-service/src/workflows/skill-run.ts)
+// passes it as the caller id to `getSkill(...)`. Planner is gone because
+// the demo's only request decomposes to a single skill.
+export type WorkerAgentId = "ExecutorAgent";
 
 export type AgentId = ChatAgentId | WorkerAgentId;
 
@@ -29,7 +34,6 @@ export const AGENT_RUNTIME: Record<AgentId, Runtime> = {
   DataArchitect: "chat",
   DataAnalyst: "chat",
   PipelineManager: "chat",
-  PlannerAgent: "worker",
   ExecutorAgent: "worker",
 };
 

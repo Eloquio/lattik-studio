@@ -2,9 +2,11 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
-import { createRequest } from "@/lib/run-queue";
 
 const WORKFLOW_SKILL_ID = "post-pipeline-pr-merge";
+
+const AGENT_SERVICE_URL =
+  process.env.AGENT_SERVICE_URL ?? "http://localhost:3939";
 
 interface MergedDefinition {
   id: string;
@@ -183,22 +185,39 @@ export async function POST(req: Request) {
       receivedAt: receivedAt.toISOString(),
     };
 
-    requestId = await db.transaction(async (tx) => {
-      const request = await createRequest(
-        "webhook",
-        `PR merged: ${prUrl}`,
-        context,
-        { status: "approved", skillId: WORKFLOW_SKILL_ID, client: tx },
+    // Trigger the post-merge skill via agent-service's workflow
+    // endpoint. Replaces the old run-queue path (insert Request +
+    // Run; agent-worker pod polls and claims). Fire-and-forget — the
+    // workflow runs durably inside Vercel Workflow's runtime and
+    // doesn't need this response to wait on it. We capture the
+    // workflowRunId from the synchronous response purely for the
+    // webhook's audit log.
+    requestId = `wh_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const skillRunBody = {
+      runId: requestId,
+      skillId: WORKFLOW_SKILL_ID,
+      args: { pr_url: prUrl, definitions: mergedDefs },
+    };
+    void context; // assembled above for the audit context but no longer persisted
+    fetch(`${AGENT_SERVICE_URL}/__wf-skill-run`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        // Trusted-client auth — agent-service's middleware validates the
+        // X-Client-Id is in LATTIK_DEV_TRUSTED_CLIENTS. No user identity
+        // is needed for skill runs (they're system-triggered).
+        "X-Client-Id": "web",
+        "X-User-Id": "system:webhook",
+      },
+      body: JSON.stringify(skillRunBody),
+    }).catch((err) => {
+      // Non-blocking — log and move on. The webhook's job is to
+      // acknowledge Gitea's delivery, not to wait on the workflow.
+      console.error(
+        `[gitea-webhook] failed to dispatch skill run for ${prUrl}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
       );
-      await tx.insert(schema.runs).values({
-        requestId: request.id,
-        skillId: WORKFLOW_SKILL_ID,
-        description: `Post-merge actions for ${prUrl}`,
-        doneCriteria: "All matched per-kind actions completed for the merged definitions.",
-        args: { pr_url: prUrl, definitions: mergedDefs },
-        status: "pending" as const,
-      });
-      return request.id;
     });
   }
 

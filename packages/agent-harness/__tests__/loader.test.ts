@@ -150,7 +150,7 @@ describe("preflightSkills", () => {
 description: All tools resolved
 version: "0.1"
 owners: [ExecutorAgent]
-tools: [s3:write, kafka:write]`,
+tools: [create_kafka_topic, create_iceberg_table]`,
     );
     const issues = preflightSkills({ skillsDir: tmp });
     expect(issues).toEqual([]);
@@ -177,18 +177,19 @@ tools: [renderCanvas]`,
   });
 
   it("reports issues per (skill, owner) pair when a tool is missing in some runtimes", () => {
-    // s3:write is worker-only. With both owners, the chat owner gets flagged.
+    // create_kafka_topic is worker-only. With both owners, the chat
+    // owner (DataArchitect) gets flagged for missing it.
     writeSkill(
       "cross",
       `name: cross
 description: Cross-runtime skill
 version: "0.1"
 owners: [ExecutorAgent, DataArchitect]
-tools: [s3:write]`,
+tools: [create_kafka_topic]`,
     );
     const issues = preflightSkills({ skillsDir: tmp });
     expect(issues).toHaveLength(1);
     expect(issues[0]?.owner).toBe("DataArchitect");
-    expect(issues[0]?.toolId).toBe("s3:write");
+    expect(issues[0]?.toolId).toBe("create_kafka_topic");
   });
 });
