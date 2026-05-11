@@ -11,6 +11,16 @@ export const DEV_ADMIN_EMAIL = "admin@lattik.local";
 export const DEV_ADMIN_NAME = "Lattik Admin";
 
 export async function upsertDevAdmin(db: ReturnType<typeof getDb>) {
+  // Belt-and-suspenders: this function must never run in production builds —
+  // the dev admin uses a fixed UUID + a known email and must never end up in
+  // a real user table. The existing call site in `auth/index.ts` is already
+  // gated on `NODE_ENV === "development"`; this guard catches accidental
+  // new callers before they do any damage. (The check lives in the function
+  // body, not at module load, because Next.js statically imports this file
+  // for the dev Credentials provider — only the *call* needs to be guarded.)
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("upsertDevAdmin() must not be called in production");
+  }
   const existing = await db
     .select()
     .from(schema.users)

@@ -26,6 +26,14 @@ export interface CatalogColumn {
 export interface CatalogTableResult {
   exists: boolean;
   columns: CatalogColumn[];
+  /**
+   * Populated when the catalog couldn't be reached or returned an unexpected
+   * response. `exists: false` alone means "the catalog answered, the table
+   * isn't there"; `exists: false` + `error` means "we couldn't tell." UI
+   * callers that want to distinguish "blank because new table" from "blank
+   * because catalog is down" should check this field.
+   */
+  error?: "fetch_failed" | "invalid_response";
 }
 
 /**
@@ -43,30 +51,39 @@ export async function lookupCatalogTable(
   const namespace = qualifiedName.slice(0, dot);
   const table = qualifiedName.slice(dot + 1);
 
+  let res: Response;
   try {
-    const res = await fetch(
+    res = await fetch(
       `${ICEBERG_REST_URL}/v1/namespaces/${encodeURIComponent(namespace)}/tables/${encodeURIComponent(table)}`,
       { method: "GET", headers: { Accept: "application/json" }, next: { revalidate: 0 } }
     );
-    if (!res.ok) return { exists: false, columns: [] };
-
-    const data = (await res.json()) as IcebergTableResponse;
-    const schemaId = data.metadata["current-schema-id"];
-    const schema = data.metadata.schemas.find(
-      (s) => s["schema-id"] === schemaId
-    );
-    if (!schema) return { exists: true, columns: [] };
-
-    const columns: CatalogColumn[] = schema.fields.map((f) => ({
-      name: f.name,
-      type: normalizeIcebergType(f.type),
-    }));
-
-    return { exists: true, columns };
   } catch {
-    // Catalog unreachable — don't fail the UI
-    return { exists: false, columns: [] };
+    return { exists: false, columns: [], error: "fetch_failed" };
   }
+
+  // 404 is a real "not found"; anything else non-2xx is a catalog problem.
+  if (res.status === 404) return { exists: false, columns: [] };
+  if (!res.ok) return { exists: false, columns: [], error: "fetch_failed" };
+
+  let data: IcebergTableResponse;
+  try {
+    data = (await res.json()) as IcebergTableResponse;
+  } catch {
+    return { exists: false, columns: [], error: "invalid_response" };
+  }
+
+  const schemaId = data.metadata["current-schema-id"];
+  const schema = data.metadata.schemas.find(
+    (s) => s["schema-id"] === schemaId
+  );
+  if (!schema) return { exists: true, columns: [] };
+
+  const columns: CatalogColumn[] = schema.fields.map((f) => ({
+    name: f.name,
+    type: normalizeIcebergType(f.type),
+  }));
+
+  return { exists: true, columns };
 }
 
 /**

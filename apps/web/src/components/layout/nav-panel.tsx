@@ -30,7 +30,7 @@ export function NavPanel({ historyOpen = false, onChatClick }: NavPanelProps) {
         <TooltipTrigger
           className={`flex h-10 w-10 items-center justify-center rounded-md transition-colors ${
             onHome && historyOpen
-              ? "bg-white/15 text-[#e0a96e]"
+              ? "bg-white/15 text-brand"
               : "text-white/70 hover:bg-white/10 hover:text-white"
           }`}
           onClick={handleChatClick}

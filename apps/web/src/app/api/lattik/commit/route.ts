@@ -67,7 +67,7 @@ export async function POST(request: Request) {
   } catch {
     log.warn("lattik.commit.invalid_json", {});
     return Response.json(
-      { status: "error", message: "Request body is not valid JSON" },
+      { error: "Request body is not valid JSON" },
       { status: 400 },
     );
   }
@@ -82,8 +82,7 @@ export async function POST(request: Request) {
     });
     return Response.json(
       {
-        status: "error",
-        message: "Invalid request body",
+        error: "Invalid request body",
         issues: parsed.error.issues,
       },
       { status: 400 },
@@ -170,7 +169,7 @@ export async function POST(request: Request) {
         error: err instanceof Error ? err.message : String(err),
       });
       return Response.json(
-        { status: "error", message: "Base manifest is unreadable" },
+        { error: "Base manifest is unreadable" },
         { status: 503 },
       );
     }
@@ -303,7 +302,7 @@ export async function GET(request: Request) {
   if (!tableName || !tableNameRe.test(tableName)) {
     log.warn("lattik.commit.read.invalid_request", { mode, tableName });
     return Response.json(
-      { status: "error", message: "Missing or invalid 'table' parameter" },
+      { error: "Missing or invalid 'table' parameter" },
       { status: 400 },
     );
   }
@@ -315,7 +314,7 @@ export async function GET(request: Request) {
       reason: "unknown_mode",
     });
     return Response.json(
-      { status: "error", message: `Unknown mode: ${mode}` },
+      { error: `Unknown mode: ${mode}` },
       { status: 400 },
     );
   }
@@ -342,7 +341,7 @@ export async function GET(request: Request) {
         duration_ms: Date.now() - startedAt,
       });
       return Response.json(
-        { status: "error", message: `No commits for table '${tableName}'` },
+        { error: `No commits for table '${tableName}'` },
         { status: 404 },
       );
     }
@@ -370,7 +369,7 @@ export async function GET(request: Request) {
         reason: ts ? "invalid_ts" : "missing_ts",
       });
       return Response.json(
-        { status: "error", message: "Missing or invalid 'ts' parameter for wall_time mode" },
+        { error: "Missing or invalid 'ts' parameter for wall_time mode" },
         { status: 400 },
       );
     }
@@ -395,7 +394,7 @@ export async function GET(request: Request) {
         duration_ms: Date.now() - startedAt,
       });
       return Response.json(
-        { status: "error", message: `No commits for '${tableName}' before ${ts}` },
+        { error: `No commits for '${tableName}' before ${ts}` },
         { status: 404 },
       );
     }
@@ -427,7 +426,7 @@ export async function GET(request: Request) {
         ds: dsParam,
       });
       return Response.json(
-        { status: "error", message: "Missing or invalid 'ds' parameter (YYYY-MM-DD)" },
+        { error: "Missing or invalid 'ds' parameter (YYYY-MM-DD)" },
         { status: 400 },
       );
     }
@@ -443,7 +442,7 @@ export async function GET(request: Request) {
           hour: hourParam,
         });
         return Response.json(
-          { status: "error", message: "'hour' must be an integer in [0, 23]" },
+          { error: "'hour' must be an integer in [0, 23]" },
           { status: 400 },
         );
       }
@@ -490,8 +489,7 @@ export async function GET(request: Request) {
           duration_ms: Date.now() - startedAt,
         });
         return Response.json({
-          status: "error",
-          message: `Columns not loaded for ds=${dsParam}: ${missing.join(", ")}`,
+          error: `Columns not loaded for ds=${dsParam}: ${missing.join(", ")}`,
           available: Object.keys(columnLoads),
           missing,
         }, { status: 404 });
@@ -524,7 +522,7 @@ export async function GET(request: Request) {
     reason: "unknown_mode",
   });
   return Response.json(
-    { status: "error", message: `Unknown mode: ${mode}` },
+    { error: `Unknown mode: ${mode}` },
     { status: 400 },
   );
 }

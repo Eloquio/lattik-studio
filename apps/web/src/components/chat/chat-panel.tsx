@@ -559,14 +559,18 @@ export function ChatPanel({
       {/* Chat title */}
       <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-5" style={{ height: "49px" }}>
         <div className="flex items-center gap-2">
-          <Bot className="h-4 w-4 text-[#e0a96e]" />
+          <Bot className="h-4 w-4 text-brand" />
           <span className="text-sm font-medium text-white/70">
             {activeExtensionId ? extensionDisplayName(activeExtensionId) : "Lattik Studio Assistant"}
           </span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="text-sm text-white/50 truncate max-w-[200px]">{displayTitle}</span>
-          <button className="flex h-7 w-7 items-center justify-center rounded-md text-white/30 transition-colors hover:bg-white/10 hover:text-white/60" title="Edit title">
+          <button
+            className="flex h-7 w-7 items-center justify-center rounded-md text-white/30 transition-colors hover:bg-white/10 hover:text-white/60"
+            title="Edit title"
+            aria-label="Edit title"
+          >
             <Pencil className="h-3 w-3" />
           </button>
           {messages.length > 0 && (
@@ -575,6 +579,7 @@ export function ChatPanel({
                 onClick={onNewChat}
                 className="flex h-7 w-7 items-center justify-center rounded-md text-white/30 transition-colors hover:bg-white/10 hover:text-white/60"
                 title="New Chat"
+                aria-label="New chat"
               >
                 <Plus className="h-3.5 w-3.5" />
               </button>
@@ -582,6 +587,7 @@ export function ChatPanel({
                 onClick={handleDelete}
                 className="flex h-7 w-7 items-center justify-center rounded-md text-white/30 transition-colors hover:bg-white/10 hover:text-red-400"
                 title="Delete conversation"
+                aria-label="Delete conversation"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
@@ -595,7 +601,7 @@ export function ChatPanel({
         {messages.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3">
             <h2 className="text-2xl font-bold text-white tracking-tight">
-              <span style={{ fontFamily: "var(--font-display), cursive" }}>Lattik<span className="text-[#e0a96e]"> Studio</span></span>
+              <span style={{ fontFamily: "var(--font-display), cursive" }}>Lattik<span className="text-brand"> Studio</span></span>
             </h2>
             <p className="text-sm text-white/50">Start a conversation...</p>
           </div>
@@ -626,10 +632,10 @@ export function ChatPanel({
                   </div>
                 ) : (
                   <div className="w-full">
-                    <span className="text-xs font-semibold text-[#e0a96e]">
+                    <span className="text-xs font-semibold text-brand">
                       {getAgentLabel(message.id)}
                     </span>
-                    <div className="mt-1 border-l-2 border-[#e0a96e]/40 pl-4 text-sm text-white/90 prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-headings:text-white prose-strong:text-white prose-code:text-[#e0a96e] prose-code:bg-white/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-pre:bg-white/5 prose-pre:border prose-pre:border-white/10 prose-a:text-[#e0a96e] prose-a:font-medium prose-a:underline prose-a:decoration-[#e0a96e]/50 prose-a:underline-offset-2 hover:prose-a:text-[#f0bb84] hover:prose-a:decoration-[#e0a96e] prose-table:border-collapse prose-table:w-full prose-table:text-xs prose-th:border prose-th:border-white/20 prose-th:bg-white/5 prose-th:px-2 prose-th:py-1 prose-th:text-left prose-th:text-white/80 prose-td:border prose-td:border-white/10 prose-td:px-2 prose-td:py-1">
+                    <div className="mt-1 border-l-2 border-brand/40 pl-4 text-sm text-white/90 prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-headings:text-white prose-strong:text-white prose-code:text-brand prose-code:bg-white/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-pre:bg-white/5 prose-pre:border prose-pre:border-white/10 prose-a:text-brand prose-a:font-medium prose-a:underline prose-a:decoration-brand/50 prose-a:underline-offset-2 hover:prose-a:text-brand-hover hover:prose-a:decoration-brand prose-table:border-collapse prose-table:w-full prose-table:text-xs prose-th:border prose-th:border-white/20 prose-th:bg-white/5 prose-th:px-2 prose-th:py-1 prose-th:text-left prose-th:text-white/80 prose-td:border prose-td:border-white/10 prose-td:px-2 prose-td:py-1">
                       {message.parts.map((part, i) => {
                         if (part.type === "text") {
                           // Streamdown is the AI-Elements-recommended

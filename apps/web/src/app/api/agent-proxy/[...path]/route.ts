@@ -29,10 +29,7 @@ async function proxy(req: Request, path: string[]): Promise<Response> {
   const session = await auth();
   const userId = session?.user?.id;
   if (!userId) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const upstreamUrl = `${AGENT_SERVICE_URL}/${path.join("/")}`;

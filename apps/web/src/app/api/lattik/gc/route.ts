@@ -70,7 +70,7 @@ export async function POST(request: Request) {
   if (!tableName) {
     log.warn("lattik.gc.invalid_request", { reason: "missing_table" });
     return Response.json(
-      { status: "error", message: "Missing 'table' parameter" },
+      { error: "Missing 'table' parameter" },
       { status: 400 },
     );
   }

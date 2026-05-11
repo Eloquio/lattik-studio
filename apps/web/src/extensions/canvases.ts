@@ -8,6 +8,12 @@ type CanvasComponent = ComponentType<{
   spec: Spec | null;
   loading?: boolean;
   onStateChange?: (changes: Array<{ path: string; value: unknown }>) => void;
+  /**
+   * Optional handler the canvas component can call to send a follow-up
+   * message into the chat on the user's behalf (e.g. a "submit" button on
+   * a confirmation panel). Currently only data-architect's canvas uses it;
+   * other extensions accept the prop but don't.
+   */
   onSendMessage?: (text: string) => void;
 }>;
 

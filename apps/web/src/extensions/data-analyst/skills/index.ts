@@ -1,13 +1,9 @@
 import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import type { BaseSkillMeta } from "../../types";
 
-export interface SkillMeta {
-  id: string;
-  title: string;
-  description: string;
-  filename: string;
-}
+export type SkillMeta = BaseSkillMeta;
 
 export const skills: SkillMeta[] = [
   {

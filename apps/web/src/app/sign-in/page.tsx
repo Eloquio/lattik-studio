@@ -57,14 +57,14 @@ function DevSignIn() {
           type="text"
           defaultValue="admin"
           placeholder="Username"
-          className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder:text-white/30 focus:border-[#e0a96e]/50 focus:outline-none"
+          className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder:text-white/30 focus:border-brand/50 focus:outline-none"
         />
         <input
           name="password"
           type="password"
           defaultValue="admin"
           placeholder="Password"
-          className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder:text-white/30 focus:border-[#e0a96e]/50 focus:outline-none"
+          className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder:text-white/30 focus:border-brand/50 focus:outline-none"
         />
       </div>
       <button
@@ -95,7 +95,7 @@ export default function SignInPage() {
         <div className="flex flex-col items-center gap-3">
           <h1 className="text-3xl font-bold text-white tracking-tight">
             <span style={{ fontFamily: "var(--font-display), cursive" }}>
-              Lattik<span className="text-[#e0a96e]"> Studio</span>
+              Lattik<span className="text-brand"> Studio</span>
             </span>
           </h1>
           <p className="text-sm text-white/50">Sign in to continue</p>

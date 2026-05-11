@@ -1,12 +1,9 @@
 import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import type { BaseSkillMeta } from "../../types";
 
-export interface SkillMeta {
-  id: string;
-  title: string;
-  description: string;
-  filename: string;
+export interface SkillMeta extends BaseSkillMeta {
   // "agent" skills are workflow runbooks the data architect agent loads via
   // `getSkill`. "reviewer" skills are policy docs consumed by internal tools
   // (e.g. the review LLM) and are NOT listed in the agent's skill menu.
