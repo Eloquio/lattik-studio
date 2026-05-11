@@ -1,6 +1,11 @@
 import { zodSchema } from "ai";
 import { z } from "zod";
-import { executeQuery, TrinoQueryError } from "../lib/trino-client";
+import {
+  executeQuery,
+  quoteIdent,
+  TrinoIdentifierError,
+  TrinoQueryError,
+} from "../lib/trino-client";
 
 export const listTablesTool = {
   description:
@@ -28,10 +33,10 @@ export const listTablesTool = {
         sql = "SHOW CATALOGS";
         level = "catalogs";
       } else if (!input.schema) {
-        sql = `SHOW SCHEMAS FROM "${input.catalog}"`;
+        sql = `SHOW SCHEMAS FROM ${quoteIdent(input.catalog)}`;
         level = "schemas";
       } else {
-        sql = `SHOW TABLES FROM "${input.catalog}"."${input.schema}"`;
+        sql = `SHOW TABLES FROM ${quoteIdent(input.catalog)}.${quoteIdent(input.schema)}`;
         level = "tables";
       }
 
@@ -40,6 +45,9 @@ export const listTablesTool = {
 
       return { level, items, count: items.length };
     } catch (err) {
+      if (err instanceof TrinoIdentifierError) {
+        return { error: err.message, code: "INVALID_IDENTIFIER" };
+      }
       if (err instanceof TrinoQueryError) {
         return { error: err.message, code: err.code };
       }

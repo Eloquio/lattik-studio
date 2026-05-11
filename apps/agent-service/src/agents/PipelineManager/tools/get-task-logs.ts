@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { strictTool } from "../../../lib/strict-tool.js";
 import * as airflow from "../lib/airflow-client.js";
+import { assertLattikDagId } from "../lib/airflow-client.js";
 
 const MAX_LOG_LINES = 200;
 
@@ -18,6 +19,7 @@ export const getTaskLogsTool = strictTool({
   }),
   execute: async (input) => {
     try {
+      assertLattikDagId(input.dagId);
       const logs = await airflow.getTaskLogs(
         input.dagId,
         input.dagRunId,

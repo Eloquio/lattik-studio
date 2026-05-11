@@ -5,6 +5,36 @@ import { getDb } from "@/db";
 import * as schema from "@/db/schema";
 import { requireUser } from "@/lib/auth-guard";
 
+/**
+ * Conversation payloads are persisted to a `jsonb` column and reloaded on
+ * page refresh. Without an upper bound a runaway agent (or a malicious
+ * client driving this server action) could grow a single row to many
+ * megabytes — bloating Postgres, slowing the chat panel's initial
+ * render, and giving us a write amplification vector against the DB. Cap
+ * each component independently so the failure mode is informative.
+ */
+const MAX_MESSAGES_JSON_BYTES = 2 * 1024 * 1024;
+const MAX_CANVAS_STATE_JSON_BYTES = 1 * 1024 * 1024;
+const MAX_TASK_STACK_JSON_BYTES = 256 * 1024;
+
+class ConversationPayloadTooLarge extends Error {
+  constructor(field: string, size: number, limit: number) {
+    super(
+      `Conversation field ${field} is too large: ${size} bytes > ${limit} byte limit`,
+    );
+    this.name = "ConversationPayloadTooLarge";
+  }
+}
+
+function assertSize(field: string, value: unknown, limit: number): void {
+  if (value === undefined || value === null) return;
+  // JSON.stringify cost on the cap-sized blobs is microseconds; cheaper than
+  // adding a Buffer round-trip just to measure. The DB driver is about to
+  // serialize this anyway.
+  const bytes = Buffer.byteLength(JSON.stringify(value), "utf8");
+  if (bytes > limit) throw new ConversationPayloadTooLarge(field, bytes, limit);
+}
+
 export async function saveConversation(data: {
   id: string;
   title: string;
@@ -15,6 +45,10 @@ export async function saveConversation(data: {
 }) {
   const user = await requireUser();
   const db = getDb();
+
+  assertSize("messages", data.messages, MAX_MESSAGES_JSON_BYTES);
+  assertSize("canvasState", data.canvasState, MAX_CANVAS_STATE_JSON_BYTES);
+  assertSize("taskStack", data.taskStack, MAX_TASK_STACK_JSON_BYTES);
 
   // Single atomic UPSERT instead of read-then-write — both prevents the race
   // (concurrent saves of the same chat) and removes the redundant SELECT.

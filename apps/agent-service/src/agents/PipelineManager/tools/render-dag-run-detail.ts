@@ -6,6 +6,7 @@ import type {
 } from "@eloquio/render-intents";
 import { strictTool } from "../../../lib/strict-tool.js";
 import * as airflow from "../lib/airflow-client.js";
+import { assertLattikDagId } from "../lib/airflow-client.js";
 
 /**
  * `renderDagRunDetail` returns a typed `DagRunDetailIntent` (Phase 2
@@ -38,6 +39,7 @@ export const renderDagRunDetailTool = strictTool({
   }),
   execute: async (input): Promise<DagRunDetailIntent | { error: string }> => {
     try {
+      assertLattikDagId(input.dagId);
       const [runsResult, tasksResult] = await Promise.all([
         airflow.listDagRuns(input.dagId, { limit: 50 }),
         airflow.listTaskInstances(input.dagId, input.dagRunId),

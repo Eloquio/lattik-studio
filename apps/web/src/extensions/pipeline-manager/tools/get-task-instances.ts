@@ -1,6 +1,7 @@
 import { zodSchema } from "ai";
 import { z } from "zod";
 import * as airflow from "../lib/airflow-client";
+import { assertLattikDagId } from "../lib/airflow-client";
 
 export const getTaskInstancesTool = {
   description:
@@ -15,6 +16,7 @@ export const getTaskInstancesTool = {
   ),
   execute: async (input: { dagId: string; dagRunId: string }) => {
     try {
+      assertLattikDagId(input.dagId);
       const result = await airflow.listTaskInstances(
         input.dagId,
         input.dagRunId

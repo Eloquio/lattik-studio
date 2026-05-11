@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { strictTool } from "../../../lib/strict-tool.js";
 import * as airflow from "../lib/airflow-client.js";
+import { assertLattikDagId } from "../lib/airflow-client.js";
 
 export const listDagRunsTool = strictTool({
   description:
@@ -14,6 +15,7 @@ export const listDagRunsTool = strictTool({
   }),
   execute: async (input) => {
     try {
+      assertLattikDagId(input.dagId);
       const result = await airflow.listDagRuns(input.dagId, {
         limit: input.limit ?? 10,
         orderBy: "-start_date",

@@ -1,6 +1,11 @@
 import { signIn } from "@/auth";
 
-const isDev = process.env.NODE_ENV === "development";
+// Mirrors the gating in src/auth/index.ts so the dev sign-in form NEVER
+// renders on a production deployment, even if someone (or a misconfigured
+// host) sets NODE_ENV=development on a Vercel prod environment.
+const isDev =
+  process.env.NODE_ENV === "development" &&
+  process.env.VERCEL_ENV !== "production";
 
 function GoogleSignIn() {
   return (
@@ -55,15 +60,13 @@ function DevSignIn() {
         <input
           name="username"
           type="text"
-          defaultValue="admin"
-          placeholder="Username"
+          placeholder="admin"
           className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder:text-white/30 focus:border-brand/50 focus:outline-none"
         />
         <input
           name="password"
           type="password"
-          defaultValue="admin"
-          placeholder="Password"
+          placeholder="admin"
           className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder:text-white/30 focus:border-brand/50 focus:outline-none"
         />
       </div>

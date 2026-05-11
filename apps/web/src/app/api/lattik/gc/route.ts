@@ -16,6 +16,17 @@ const S3_BUCKET = process.env.S3_DAG_BUCKET ?? "warehouse";
 // time to finish. Callers can override via `min_age_seconds`.
 const DEFAULT_MIN_AGE_SECONDS = 3600;
 
+/**
+ * `table_name` is interpolated into S3 key prefixes (`lattik/<table>/...`)
+ * for both list and delete operations. Without this regex an attacker
+ * holding the API token could pass `../airflow-dags` (or worse) and have
+ * the GC walk and delete unrelated objects in the warehouse bucket.
+ *
+ * Same pattern as the commit route: schema.table, lowercase identifiers
+ * up to 63 chars each.
+ */
+const tableNameRe = /^[a-z_][a-z0-9_]{0,62}\.[a-z_][a-z0-9_]{0,62}$/;
+
 type LoadManifest = {
   version: number;
   columns: Record<string, string>; // column_name → load_id
@@ -71,6 +82,20 @@ export async function POST(request: Request) {
     log.warn("lattik.gc.invalid_request", { reason: "missing_table" });
     return Response.json(
       { error: "Missing 'table' parameter" },
+      { status: 400 },
+    );
+  }
+
+  if (!tableNameRe.test(tableName)) {
+    log.warn("lattik.gc.invalid_request", {
+      reason: "invalid_table",
+      tableName,
+    });
+    return Response.json(
+      {
+        error:
+          "table must be in 'schema.table' format (lowercase letters, digits, underscore)",
+      },
       { status: 400 },
     );
   }

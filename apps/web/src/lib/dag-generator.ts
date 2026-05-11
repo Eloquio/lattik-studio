@@ -5,10 +5,66 @@
  */
 
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
+import { log } from "./log";
 import { toYaml } from "./yaml";
 import { putObject, listObjects, deleteObject } from "./s3-client";
+
+// Identifier regex shared with the wait/build task names below. Matches what
+// Airflow accepts as a task_id and what Trino accepts as an unquoted
+// identifier (alphanumeric + underscore, leading letter/underscore). Anything
+// that doesn't match — a spec carrying punctuation, whitespace, or
+// path-traversal sequences — would corrupt the rendered YAML or smuggle
+// metacharacters into the Spark driver, so reject specs containing such
+// values rather than try to escape them downstream.
+const TABLE_IDENT = /^[a-z_][a-z0-9_]{0,63}$/;
+// Fully-qualified Trino-style source name: `schema.table` (each segment
+// must match TABLE_IDENT). Used for column_families[].source.
+const SOURCE_IDENT = /^[a-z_][a-z0-9_]{0,63}\.[a-z_][a-z0-9_]{0,63}$/;
+
+const COLUMN_STRATEGY = z.enum([
+  "lifetime_window",
+  "prepend_list",
+  "bitmap_activity",
+]);
+
+const familySchema = z.object({
+  name: z.string().regex(TABLE_IDENT).optional(),
+  source: z.string().regex(SOURCE_IDENT),
+  columns: z
+    .array(
+      z.object({
+        name: z.string().regex(TABLE_IDENT),
+        strategy: COLUMN_STRATEGY,
+      }),
+    )
+    .default([]),
+});
+
+const lattikTableSpecSchema = z
+  .object({
+    name: z.string().regex(TABLE_IDENT).optional(),
+    description: z.string().max(1024).optional(),
+    column_families: z.array(familySchema).default([]),
+    backfill: z
+      .object({
+        lookback: z.string().max(64).optional(),
+        parallelism: z.number().int().positive().max(64).optional(),
+      })
+      .optional(),
+  })
+  .passthrough();
+
+class InvalidDagSpecError extends Error {
+  constructor(definitionName: string, issues: string) {
+    super(
+      `Refusing to generate DAG for definition ${JSON.stringify(definitionName)}: ${issues}`,
+    );
+    this.name = "InvalidDagSpecError";
+  }
+}
 
 const S3_BUCKET = process.env.S3_DAG_BUCKET ?? "warehouse";
 const S3_DAG_PREFIX = process.env.S3_DAG_PREFIX ?? "airflow-dags/";
@@ -237,8 +293,37 @@ export async function generateDags(): Promise<string[]> {
   const writtenKeys: string[] = [];
 
   for (const table of lattikTables) {
-    const spec = table.spec as Record<string, unknown>;
-    const tableName = (spec.name as string) ?? table.name;
+    // The spec was authored by an LLM agent and persisted in the DB. Treat
+    // it as untrusted at this boundary: validate the structure before any of
+    // its values land in YAML, task IDs, S3 keys, or Spark driver args.
+    // A malformed spec is logged and skipped — we don't fail the whole run
+    // because we still want the rest of the merged definitions to deploy.
+    const parsed = lattikTableSpecSchema.safeParse(table.spec);
+    if (!parsed.success) {
+      const issues = parsed.error.issues
+        .map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`)
+        .join("; ");
+      log.error("dag_generator.invalid_spec", {
+        definitionId: table.id,
+        definitionName: table.name,
+        issues,
+      });
+      continue;
+    }
+
+    const tableName = parsed.data.name ?? table.name;
+    // Belt-and-suspenders: the schema bounds spec.name, but `definition.name`
+    // also lands in the dag_id and S3 key. Re-check at this final junction.
+    if (!TABLE_IDENT.test(tableName)) {
+      log.error("dag_generator.invalid_name", {
+        definitionId: table.id,
+        definitionName: table.name,
+        resolvedName: tableName,
+      });
+      throw new InvalidDagSpecError(table.name, "table name does not match required pattern");
+    }
+
+    const spec = parsed.data as unknown as Record<string, unknown>;
 
     // Forward-run DAG
     const dagSpec = dagSpecForLattikTable(tableName, spec);

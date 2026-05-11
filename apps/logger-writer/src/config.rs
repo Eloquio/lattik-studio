@@ -20,6 +20,11 @@ pub struct Config {
     pub consumer_group: String,
     /// Confluent Schema Registry base URL.
     pub schema_registry_url: String,
+    /// Pinned Schema Registry schema version (1, 2, …) or `None` to fetch
+    /// `latest`. Pinning prevents a malicious or accidental registry update
+    /// from rolling out to all running writers automatically — the operator
+    /// must bump the env var to opt into a new schema.
+    pub schema_version: Option<u32>,
     /// Iceberg REST catalog URL.
     pub iceberg_rest_url: String,
     /// S3 endpoint (MinIO in local dev).
@@ -55,6 +60,13 @@ impl Config {
                 "SCHEMA_REGISTRY_URL",
                 "http://sr.schema-registry:8081",
             ),
+            schema_version: match std::env::var("SCHEMA_VERSION") {
+                Ok(s) if !s.is_empty() && s != "latest" => Some(
+                    s.parse()
+                        .context("SCHEMA_VERSION must be a positive integer or \"latest\"")?,
+                ),
+                _ => None,
+            },
             iceberg_rest_url: env_or(
                 "ICEBERG_REST_URL",
                 "http://iceberg-rest.iceberg:8181",

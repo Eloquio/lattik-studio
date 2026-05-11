@@ -1,6 +1,7 @@
 import { zodSchema } from "ai";
 import { z } from "zod";
 import * as airflow from "../lib/airflow-client";
+import { assertLattikDagId } from "../lib/airflow-client";
 import { getDb } from "@/db";
 import { definitions } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
@@ -15,6 +16,7 @@ export const getDagDetailTool = {
   ),
   execute: async (input: { dagId: string }) => {
     try {
+      assertLattikDagId(input.dagId);
       const dag = await airflow.getDag(input.dagId);
 
       // Try to find the linked Lattik Table definition.

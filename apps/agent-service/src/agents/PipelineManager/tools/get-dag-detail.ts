@@ -3,6 +3,7 @@ import { eq, and } from "drizzle-orm";
 import { definitions } from "@eloquio/db-schema";
 import { strictTool } from "../../../lib/strict-tool.js";
 import * as airflow from "../lib/airflow-client.js";
+import { assertLattikDagId } from "../lib/airflow-client.js";
 import { getDb } from "../../../lib/db.js";
 
 export const getDagDetailTool = strictTool({
@@ -14,6 +15,13 @@ export const getDagDetailTool = strictTool({
       .describe("The Airflow DAG ID, e.g. 'lattik__user_activity'"),
   }),
   execute: async (input) => {
+    try {
+      assertLattikDagId(input.dagId);
+    } catch (err) {
+      return {
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
     // The Airflow fetch is the load-bearing call — if it fails, the
     // tool fails. The Lattik-Table definition lookup is supplementary
     // (it enriches the DAG with column families etc.); a DB outage or
