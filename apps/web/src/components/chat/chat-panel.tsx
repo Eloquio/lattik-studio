@@ -743,7 +743,7 @@ export function ChatPanel({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Type something..."
-            className="w-full resize-none bg-transparent px-4 pt-3 pb-10 text-sm text-white placeholder:text-white/40 focus:outline-none"
+            className="field-sizing-content max-h-48 w-full resize-none bg-transparent px-4 pt-3 pb-10 text-sm text-white placeholder:text-white/40 focus:outline-none"
             rows={1}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
