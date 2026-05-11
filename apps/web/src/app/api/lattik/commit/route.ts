@@ -119,22 +119,32 @@ export async function POST(request: Request) {
 
   const db = getDb();
 
-  // Idempotency: if we already committed this exact (table_name, load_id),
-  // return the existing result instead of creating a second manifest. The
-  // driver may legitimately retry after a network error between sending the
-  // request and receiving the response; without this check the retry would
-  // either succeed with a bumped version (duplicate data) or fail with a
-  // 23505 conflict against itself.
-  const existing = await db
-    .select()
-    .from(schema.lattikTableCommits)
-    .where(
-      and(
-        eq(schema.lattikTableCommits.tableName, table_name),
-        eq(schema.lattikTableCommits.manifestLoadId, load_id),
-      ),
-    )
-    .limit(1);
+  // Idempotency check + base-commit lookup are independent. Fire them in
+  // parallel so the common (non-replay) case pays one round-trip instead of
+  // two. The rare replay path does one wasted query — cheap on an indexed
+  // (table_name, manifest_version) lookup.
+  const [existing, baseCommit] = await Promise.all([
+    db
+      .select()
+      .from(schema.lattikTableCommits)
+      .where(
+        and(
+          eq(schema.lattikTableCommits.tableName, table_name),
+          eq(schema.lattikTableCommits.manifestLoadId, load_id),
+        ),
+      )
+      .limit(1),
+    db
+      .select()
+      .from(schema.lattikTableCommits)
+      .where(
+        and(
+          eq(schema.lattikTableCommits.tableName, table_name),
+          eq(schema.lattikTableCommits.manifestVersion, base_version),
+        ),
+      )
+      .limit(1),
+  ]);
 
   if (existing.length > 0) {
     log.info("lattik.commit.idempotent_replay", {
@@ -150,18 +160,6 @@ export async function POST(request: Request) {
       replayed: true,
     });
   }
-
-  // Read the current base manifest from S3
-  const baseCommit = await db
-    .select()
-    .from(schema.lattikTableCommits)
-    .where(
-      and(
-        eq(schema.lattikTableCommits.tableName, table_name),
-        eq(schema.lattikTableCommits.manifestVersion, base_version),
-      ),
-    )
-    .limit(1);
 
   let baseColumns: Record<string, string> = {};
 
@@ -216,32 +214,34 @@ export async function POST(request: Request) {
         manifestLoadId: load_id,
       });
 
-      // 2. UPSERT per-column ETL time tracking
-      for (const [columnName, colLoadId] of Object.entries(columns)) {
-        await tx
-          .insert(schema.lattikColumnLoads)
-          .values({
-            tableName: table_name,
-            columnName,
-            ds,
-            hour,
-            loadId: colLoadId,
-            manifestVersion: newVersion,
-          })
-          .onConflictDoUpdate({
-            target: [
-              schema.lattikColumnLoads.tableName,
-              schema.lattikColumnLoads.columnName,
-              schema.lattikColumnLoads.ds,
-              schema.lattikColumnLoads.hour,
-            ],
-            set: {
-              loadId: sql`excluded.load_id`,
-              manifestVersion: sql`excluded.manifest_version`,
-              committedAt: sql`now()`,
-            },
-          });
-      }
+      // 2. UPSERT per-column ETL time tracking. A single multi-row insert
+      // turns N round-trips (one per column) into one — row locks are held
+      // for milliseconds instead of scaling with column count, which matters
+      // for Lattik Tables with hundreds of columns.
+      const columnRows = Object.entries(columns).map(([columnName, colLoadId]) => ({
+        tableName: table_name,
+        columnName,
+        ds,
+        hour,
+        loadId: colLoadId,
+        manifestVersion: newVersion,
+      }));
+      await tx
+        .insert(schema.lattikColumnLoads)
+        .values(columnRows)
+        .onConflictDoUpdate({
+          target: [
+            schema.lattikColumnLoads.tableName,
+            schema.lattikColumnLoads.columnName,
+            schema.lattikColumnLoads.ds,
+            schema.lattikColumnLoads.hour,
+          ],
+          set: {
+            loadId: sql`excluded.load_id`,
+            manifestVersion: sql`excluded.manifest_version`,
+            committedAt: sql`now()`,
+          },
+        });
     });
 
     log.info("lattik.commit.committed", {

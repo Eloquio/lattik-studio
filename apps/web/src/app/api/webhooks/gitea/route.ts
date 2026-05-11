@@ -200,25 +200,30 @@ export async function POST(req: Request) {
 
   let requestId: string | undefined;
   if (toMerge.length > 0) {
-    await db
-      .update(schema.definitions)
-      .set({
-        status: "merged",
-        prMergedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(inArray(schema.definitions.id, toMerge.map((d) => d.id)));
-
-    await db.insert(schema.webhookAuditLog).values(
-      toMerge.map((d) => ({
-        prUrl,
-        definitionId: d.id,
-        action: "definition_merged" as const,
-        status: "success" as const,
-        detail: `${d.kind} "${d.name}" marked as merged`,
-        receivedAt,
-      }))
-    );
+    // Status-update and audit-insert are independent — neither references
+    // the other and the audit's `definitionId` captures the id by value, so
+    // ordering doesn't matter for correctness. Fire them in parallel so the
+    // hot post-merge webhook latency is one round-trip, not two.
+    await Promise.all([
+      db
+        .update(schema.definitions)
+        .set({
+          status: "merged",
+          prMergedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(inArray(schema.definitions.id, toMerge.map((d) => d.id))),
+      db.insert(schema.webhookAuditLog).values(
+        toMerge.map((d) => ({
+          prUrl,
+          definitionId: d.id,
+          action: "definition_merged" as const,
+          status: "success" as const,
+          detail: `${d.kind} "${d.name}" marked as merged`,
+          receivedAt,
+        })),
+      ),
+    ]);
 
     // Webhook fan-out: register one request + one run pointing at the
     // `post-pipeline-pr-merge` workflow skill. The Executor Agent reads

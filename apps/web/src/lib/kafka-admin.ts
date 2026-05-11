@@ -1,4 +1,4 @@
-import { Kafka } from "kafkajs";
+import { Kafka, type Admin } from "kafkajs";
 
 const KAFKA_BROKERS = (process.env.KAFKA_BROKERS ?? "kafka.kafka:9092").split(
   ","
@@ -8,6 +8,32 @@ const kafka = new Kafka({
   clientId: "lattik-studio",
   brokers: KAFKA_BROKERS,
 });
+
+// Lazily-connected singleton. Webhook fan-outs that create N topics for one
+// merged PR were previously reopening the TCP+SASL handshake N times in
+// series. The admin client is process-local and safe to reuse across calls;
+// connectPromise dedupes concurrent first connections.
+let adminClient: Admin | null = null;
+let connectPromise: Promise<void> | null = null;
+
+async function getAdmin(): Promise<Admin> {
+  if (adminClient) return adminClient;
+  if (!connectPromise) {
+    adminClient = kafka.admin();
+    connectPromise = adminClient.connect().catch((err) => {
+      // Failed connect — drop the singleton so the next caller retries
+      // cleanly instead of inheriting a half-connected client.
+      adminClient = null;
+      connectPromise = null;
+      throw err;
+    });
+  }
+  await connectPromise;
+  if (!adminClient) {
+    throw new Error("kafka admin connect raced to null");
+  }
+  return adminClient;
+}
 
 /**
  * Derives the Kafka topic name from a Logger Table name.
@@ -32,25 +58,20 @@ export async function createLoggerTopic(
   tableName: string,
   retention: string = "30d"
 ): Promise<void> {
-  const admin = kafka.admin();
-  try {
-    await admin.connect();
-    await admin.createTopics({
-      topics: [
-        {
-          topic: topicName(tableName),
-          numPartitions: 1,
-          replicationFactor: 1,
-          configEntries: [
-            {
-              name: "retention.ms",
-              value: String(retentionMs(retention)),
-            },
-          ],
-        },
-      ],
-    });
-  } finally {
-    await admin.disconnect();
-  }
+  const admin = await getAdmin();
+  await admin.createTopics({
+    topics: [
+      {
+        topic: topicName(tableName),
+        numPartitions: 1,
+        replicationFactor: 1,
+        configEntries: [
+          {
+            name: "retention.ms",
+            value: String(retentionMs(retention)),
+          },
+        ],
+      },
+    ],
+  });
 }

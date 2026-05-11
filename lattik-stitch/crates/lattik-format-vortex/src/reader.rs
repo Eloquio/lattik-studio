@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use arrow::datatypes::Schema;
 use arrow::record_batch::RecordBatch;
@@ -14,11 +15,17 @@ use crate::session::make_session;
 
 /// Vortex bucket reader — supports both sequential scan and PK index-based
 /// random access for point lookups.
+///
+/// Listing results are cached on first lookup. The bucket files are immutable
+/// (Vortex writes happen once and the bucket is sealed), so re-listing on
+/// every scan/probe/fetch was pure waste — the listing was already shown to
+/// fire three times per session in the stitcher fast path.
 pub struct VortexBucketReader {
     bucket_path: String,
     schema: Schema,
     pk_columns: Vec<String>,
     s3_config: S3Config,
+    listing_cache: Mutex<std::collections::HashMap<String, Arc<Vec<Path>>>>,
 }
 
 impl VortexBucketReader {
@@ -33,6 +40,7 @@ impl VortexBucketReader {
             schema,
             pk_columns,
             s3_config,
+            listing_cache: Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -63,6 +71,16 @@ impl VortexBucketReader {
     }
 
     fn list_vortex_files(&self, file_name: &str) -> Result<Vec<Path>> {
+        // Cache by file_name suffix — separate caches for `data.vortex` vs
+        // `index.vortex`. Bucket contents are immutable for the session
+        // lifetime, so one list call per suffix is enough.
+        {
+            let cache = self.listing_cache.lock().expect("listing_cache poisoned");
+            if let Some(hit) = cache.get(file_name) {
+                return Ok((**hit).clone());
+            }
+        }
+
         let prefix = Path::from(self.bucket_path.clone());
         let store = self.build_store()?;
 
@@ -82,6 +100,11 @@ impl VortexBucketReader {
         .map_err(StitchError::ObjectStore)?;
 
         paths.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
+
+        {
+            let mut cache = self.listing_cache.lock().expect("listing_cache poisoned");
+            cache.insert(file_name.to_string(), Arc::new(paths.clone()));
+        }
         Ok(paths)
     }
 

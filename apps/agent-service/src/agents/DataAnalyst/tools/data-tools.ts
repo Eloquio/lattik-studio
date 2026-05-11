@@ -1,6 +1,9 @@
 import { tool, zodSchema } from "ai";
 import { z } from "zod";
-import type { QueryResultIntent } from "@eloquio/render-intents";
+import type {
+  QueryResultColumn,
+  QueryResultIntent,
+} from "@eloquio/render-intents";
 import {
   executeQuery,
   quoteIdent,
@@ -130,11 +133,15 @@ export const runQueryTool = tool({
   execute: async (
     input: { sql: string },
   ): Promise<
-    | (QueryResultIntent & { sampleRows: unknown[][] })
+    | (QueryResultIntent & {
+        sampleRows: unknown[][];
+        __modelOutput: ModelRunQueryOutput;
+      })
     | { error: string; code?: string }
   > => {
     try {
       const result = await executeQuery(input.sql);
+      const sampleRows = result.rows.slice(0, SAMPLE_ROWS_FOR_AGENT);
       return {
         kind: "query-result",
         surface: "results",
@@ -145,10 +152,21 @@ export const runQueryTool = tool({
           truncated: result.truncated,
           durationMs: result.durationMs,
         },
-        // The agent reasons over the small sample inline rather than
-        // pulling the full row set into context. The intent's `data.rows`
-        // carries the full set the canvas renders.
-        sampleRows: result.rows.slice(0, SAMPLE_ROWS_FOR_AGENT),
+        sampleRows,
+        // What the LLM sees on its next turn. The full `data.rows` payload
+        // is intentionally excluded — it can be megabytes for an unbounded
+        // SELECT and the agent reasons fine from the sample + summary. The
+        // canvas reads the full payload from the unstripped output via the
+        // tool-output stream chunk, separately. See `runToolStep` in
+        // workflows/agent-loop.ts for the split.
+        __modelOutput: {
+          kind: "query-result-summary",
+          columns: result.columns,
+          rowCount: result.rowCount,
+          truncated: result.truncated,
+          durationMs: result.durationMs,
+          sampleRows,
+        },
       };
     } catch (err) {
       if (err instanceof TrinoQueryError) {
@@ -158,3 +176,12 @@ export const runQueryTool = tool({
     }
   },
 });
+
+interface ModelRunQueryOutput {
+  kind: "query-result-summary";
+  columns: QueryResultColumn[];
+  rowCount: number;
+  truncated: boolean;
+  durationMs: number;
+  sampleRows: unknown[][];
+}

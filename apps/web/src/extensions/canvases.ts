@@ -1,8 +1,6 @@
 import type { ComponentType } from "react";
+import dynamic from "next/dynamic";
 import type { Spec } from "@json-render/core";
-import { DataArchitectCanvas } from "./data-architect/canvas/data-architect-canvas";
-import { DataAnalystCanvas } from "./data-analyst/canvas/data-analyst-canvas";
-import { PipelineManagerCanvas } from "./pipeline-manager/canvas/pipeline-manager-canvas";
 
 type CanvasComponent = ComponentType<{
   spec: Spec | null;
@@ -16,6 +14,37 @@ type CanvasComponent = ComponentType<{
    */
   onSendMessage?: (text: string) => void;
 }>;
+
+// Each canvas registry transitively pulls in heavy editor/chart deps —
+// @uiw/react-codemirror + @codemirror/lang-{yaml,sql} + recharts + the
+// 2000+-line Data Architect registry — and only one extension's canvas can
+// be on screen at a time. Splitting them into separate chunks shaves
+// hundreds of KB off the initial JS payload for the first paint. SSR is
+// off because the canvases are entirely client-side (CodeMirror et al.
+// need `document`).
+const DataArchitectCanvas = dynamic(
+  () =>
+    import("./data-architect/canvas/data-architect-canvas").then((m) => ({
+      default: m.DataArchitectCanvas,
+    })),
+  { ssr: false },
+) as CanvasComponent;
+
+const DataAnalystCanvas = dynamic(
+  () =>
+    import("./data-analyst/canvas/data-analyst-canvas").then((m) => ({
+      default: m.DataAnalystCanvas,
+    })),
+  { ssr: false },
+) as CanvasComponent;
+
+const PipelineManagerCanvas = dynamic(
+  () =>
+    import("./pipeline-manager/canvas/pipeline-manager-canvas").then((m) => ({
+      default: m.PipelineManagerCanvas,
+    })),
+  { ssr: false },
+) as CanvasComponent;
 
 const canvases: Record<string, CanvasComponent> = {
   "data-architect": DataArchitectCanvas,

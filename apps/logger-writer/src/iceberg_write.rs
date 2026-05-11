@@ -125,11 +125,14 @@ pub async fn write_batch(
     // timestamp. The kafka_timestamp_ms is always set (caller falls back to
     // wall-clock time at consume if the broker reports NotAvailable), so
     // grouping is infallible and we never drop rows here.
-    let mut groups: HashMap<(String, String), Vec<&Row>> = HashMap::new();
+    //
+    // Key on packed-int (year/month/day/hour) instead of (String, String) so
+    // the per-row allocation cost is zero. Format once per group when
+    // building partition keys downstream.
+    let mut groups: HashMap<DsHourKey, Vec<&Row>> = HashMap::new();
     for row in &rows {
-        let ds = derive_ds(row.kafka_timestamp_ms);
-        let hour = derive_hour(row.kafka_timestamp_ms);
-        groups.entry((ds, hour)).or_default().push(row);
+        let key = ds_hour_key(row.kafka_timestamp_ms);
+        groups.entry(key).or_default().push(row);
     }
     if groups.is_empty() {
         return Ok(table);
@@ -150,7 +153,7 @@ pub async fn write_batch(
 async fn write_partitioned(
     table: &Table,
     arrow_schema: &arrow_schema::Schema,
-    groups: HashMap<(String, String), Vec<&Row<'_>>>,
+    groups: HashMap<DsHourKey, Vec<&Row<'_>>>,
 ) -> Result<Vec<DataFile>> {
     let file_io = table.file_io().clone();
     let location_generator = DefaultLocationGenerator::new(table.metadata().clone())
@@ -184,7 +187,9 @@ async fn write_partitioned(
     let partition_spec = table.metadata().default_partition_spec().clone();
     let table_schema = table.metadata().current_schema().clone();
 
-    for ((ds, hour), rows) in groups {
+    for (key, rows) in groups {
+        let ds = format_ds(key);
+        let hour = format_hour(key);
         let partition_struct = Struct::from_iter([
             Some(Literal::string(&ds)),
             Some(Literal::string(&hour)),
@@ -321,14 +326,29 @@ fn parse_timestamp_micros(ts: &str) -> Option<i64> {
         .map(|dt| dt.with_timezone(&Utc).timestamp_micros())
 }
 
-fn derive_ds(ts_ms: i64) -> String {
+/// Packed (ds, hour) used as a per-row HashMap key. Bit layout doesn't matter
+/// — we only need cheap `Eq+Hash`. Year/month/day/hour each fit in a small
+/// int, well under 32 bits combined.
+type DsHourKey = u32;
+
+fn ds_hour_key(ts_ms: i64) -> DsHourKey {
     let dt = ms_to_utc(ts_ms);
-    format!("{:04}-{:02}-{:02}", dt.year(), dt.month(), dt.day())
+    // year ≤ 9999 → 14 bits, month ≤ 12 → 4 bits, day ≤ 31 → 5 bits, hour ≤ 23 → 5 bits.
+    ((dt.year() as u32) << 14)
+        | ((dt.month() & 0xF) << 10)
+        | ((dt.day() & 0x1F) << 5)
+        | (dt.hour() & 0x1F)
 }
 
-fn derive_hour(ts_ms: i64) -> String {
-    let dt = ms_to_utc(ts_ms);
-    format!("{:02}", dt.hour())
+fn format_ds(key: DsHourKey) -> String {
+    let year = (key >> 14) & 0x3FFF;
+    let month = (key >> 10) & 0xF;
+    let day = (key >> 5) & 0x1F;
+    format!("{:04}-{:02}-{:02}", year, month, day)
+}
+
+fn format_hour(key: DsHourKey) -> String {
+    format!("{:02}", key & 0x1F)
 }
 
 fn ms_to_utc(ts_ms: i64) -> DateTime<Utc> {

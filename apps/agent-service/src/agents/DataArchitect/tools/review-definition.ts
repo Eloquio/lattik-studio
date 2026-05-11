@@ -257,7 +257,15 @@ export function createReviewDefinitionTool(opts: CreateReviewDefinitionToolOptio
         const result = await generateText({
           model: gateway("anthropic/claude-sonnet-4.6"),
           output: Output.object({ schema: reviewerOutputSchema }),
-          system: REVIEWING_DEFINITIONS_POLICY,
+          system: [
+            {
+              role: "system",
+              content: REVIEWING_DEFINITIONS_POLICY,
+              providerOptions: {
+                anthropic: { cacheControl: { type: "ephemeral" } },
+              },
+            },
+          ],
           prompt: `The user is authoring a ${input.kind} definition. The current canvas form state is:\n\n\`\`\`json\n${JSON.stringify(formState, null, 2)}\n\`\`\`\n\n${workspaceContext}${constraintsBlock}\n\nReview it and return actionable fixes. Use canvas form state JSON Pointer paths in your actions (the field names you see above). Remember: do NOT recommend column type changes based on convention — only flag a type if you can verify a conflict against the workspace context above. Return \`suggestions: []\` if there is nothing concrete to fix.`,
         });
 

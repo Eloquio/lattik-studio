@@ -25,9 +25,14 @@ pub fn write_parquet_bucket(
         return Ok(());
     }
 
+    // 8K-row groups (the old default here) pay ~10× the metadata + ZSTD
+    // dictionary overhead per row group vs. a more typical 128K-row group.
+    // For Lattik-Table buckets that easily reach hundreds of thousands of
+    // rows, this is one of the cheapest wins available — bigger row groups
+    // also let the reader skip more data via row-group statistics.
     let props = WriterProperties::builder()
         .set_compression(Compression::ZSTD(ZstdLevel::try_new(3).unwrap()))
-        .set_max_row_group_size(8192)
+        .set_max_row_group_size(128 * 1024)
         .build();
 
     let mut buf: Vec<u8> = Vec::new();

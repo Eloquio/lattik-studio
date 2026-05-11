@@ -22,6 +22,26 @@ import {
   agentIdToExtensionId,
 } from "@/lib/chat/agent-id";
 
+// Streamdown components map. Hoisted to module scope so every render of every
+// assistant text part passes the same object reference and Streamdown's
+// internal memo holds across token updates — otherwise it sees a new
+// `components` literal each render and reflows the markdown tree per token.
+const STREAMDOWN_COMPONENTS: StreamdownComponents = {
+  a: ({ href, children, node: _node, ...props }) => (
+    <a {...props} href={href} target="_blank" rel="noopener noreferrer">
+      {children}
+    </a>
+  ),
+};
+
+const STREAMDOWN_DISALLOWED = [
+  "script",
+  "iframe",
+  "object",
+  "embed",
+  "form",
+] as const;
+
 /** Map extensionId → human-readable display name for the chat header and
  *  per-message agent labels. Keeps the client component free of server-only
  *  registry imports. Falls back to a formatted version of the ID. */
@@ -451,13 +471,35 @@ export function ChatPanel({
   // (each JSONL patch produces a new spec — without throttling this can exceed
   // React's maximum update depth).
   const prevSpecJsonRef = useRef<string>("");
+  const prevFingerprintRef = useRef<string>("");
   const pendingSpecRef = useRef<{ spec: unknown; json: string } | null>(null);
   const rafIdRef = useRef<number>(0);
   useEffect(() => {
+    // Cheap structural fingerprint — message count plus the last assistant
+    // message's part count and last-part text length. During streaming, only
+    // the trailing message grows; this skips the O(history) flatMap +
+    // buildSpecFromParts + JSON.stringify when nothing has changed.
+    let assistantCount = 0;
+    let lastAssistant: UIMessage | undefined;
+    for (const m of messages) {
+      if (m.role === "assistant") {
+        assistantCount++;
+        lastAssistant = m;
+      }
+    }
+    if (!lastAssistant) return;
+    const lastPart = lastAssistant.parts[lastAssistant.parts.length - 1];
+    const tail =
+      lastPart && lastPart.type === "text" && "text" in lastPart
+        ? (lastPart as { text: string }).text.length
+        : 0;
+    const fingerprint = `${messages.length}:${assistantCount}:${lastAssistant.parts.length}:${tail}`;
+    if (fingerprint === prevFingerprintRef.current) return;
+    prevFingerprintRef.current = fingerprint;
+
     const allParts = messages
       .filter((m) => m.role === "assistant")
       .flatMap((m) => m.parts);
-    if (allParts.length === 0) return;
     const spec = buildSpecFromParts(allParts);
     if (!spec) return;
     const json = JSON.stringify(spec);
@@ -487,50 +529,53 @@ export function ChatPanel({
   // This effect must run after the JSONL stream-rebuild effect above so its
   // setCanvasSpec call wins on conflict (in practice there is no conflict —
   // an agent that uses these tools doesn't emit data-spec parts at all).
-  const prevRenderFormSpecJsonRef = useRef<string>("");
+  const prevRenderToolCallIdRef = useRef<string>("");
   useEffect(() => {
+    // The newest qualifying tool-output wins; render tools replace the canvas
+    // spec rather than composing onto it. Walk in reverse and break on the
+    // first match so we don't pay O(history × parts) on every messages
+    // update. Dedupe by `toolCallId` — the AI SDK reuses the same id for the
+    // streaming part lifecycle, so a fingerprint of `toolCallId + state` is
+    // enough; we don't need to stringify the (potentially megabyte) spec.
     let latestSpec: unknown = null;
-    for (const msg of messages) {
+    let latestKey: string | null = null;
+    outer: for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
       if (msg.role !== "assistant") continue;
-      for (const part of msg.parts) {
-        const isRenderPart = part.type.startsWith("tool-render");
-        const isGenerateYamlPart = part.type === "tool-generateYaml";
-        const isSubmitPRPart = part.type === "tool-submitPR";
-        const isRunQueryPart = part.type === "tool-runQuery";
-        const isUpdateLayoutPart = part.type === "tool-updateLayout";
-        if (
-          (isRenderPart || isGenerateYamlPart || isSubmitPRPart || isRunQueryPart || isUpdateLayoutPart) &&
-          "state" in part &&
-          (part as { state: string }).state === "output-available" &&
-          "output" in part
-        ) {
-          const output = (part as { output?: unknown }).output;
-          if (output && typeof output === "object") {
-            // Legacy path: tool returns a server-built json-render Spec wrapped
-            // in `{ spec }`. Used by apps/web's in-process render tools (per-
-            // extension) that haven't migrated to the render-intent protocol.
-            if ("spec" in output) {
-              latestSpec = (output as { spec: unknown }).spec;
-            } else if ("kind" in output && "surface" in output && "data" in output) {
-              // Render-intent path: tool returns a typed RenderIntent (Phase 2
-              // protocol). Validate at this trust boundary — once the chat
-              // hook routes to agent-service over the wire, this is where
-              // shape integrity gets enforced. Pipe through intentToSpec to
-              // get the json-render Spec the canvas registry already
-              // understands.
-              const parsed = renderIntentSchema.safeParse(output);
-              if (parsed.success) {
-                latestSpec = intentToSpec(parsed.data);
-              }
-            }
+      for (let j = msg.parts.length - 1; j >= 0; j--) {
+        const part = msg.parts[j];
+        const isCandidate =
+          part.type.startsWith("tool-render") ||
+          part.type === "tool-generateYaml" ||
+          part.type === "tool-submitPR" ||
+          part.type === "tool-runQuery" ||
+          part.type === "tool-updateLayout";
+        if (!isCandidate) continue;
+        if (!("state" in part) || (part as { state: string }).state !== "output-available") continue;
+        if (!("output" in part)) continue;
+        const output = (part as { output?: unknown }).output;
+        if (!output || typeof output !== "object") continue;
+        // Legacy in-process tool path: `{ spec }`.
+        if ("spec" in output) {
+          latestSpec = (output as { spec: unknown }).spec;
+          latestKey = `spec:${(part as { toolCallId?: string }).toolCallId ?? `${i}:${j}`}`;
+          break outer;
+        }
+        // Render-intent path: typed intent → spec. Validate at the trust
+        // boundary (output crosses the wire from agent-service).
+        if ("kind" in output && "surface" in output && "data" in output) {
+          const parsed = renderIntentSchema.safeParse(output);
+          if (parsed.success) {
+            latestSpec = intentToSpec(parsed.data);
+            latestKey = `intent:${(part as { toolCallId?: string }).toolCallId ?? `${i}:${j}`}`;
+            break outer;
           }
         }
       }
     }
-    if (latestSpec === null) return;
-    const json = JSON.stringify(latestSpec);
-    if (json === prevRenderFormSpecJsonRef.current) return;
-    prevRenderFormSpecJsonRef.current = json;
+    if (latestSpec === null || latestKey === null) return;
+    if (latestKey === prevRenderToolCallIdRef.current) return;
+    prevRenderToolCallIdRef.current = latestKey;
     onCanvasStateChange(latestSpec);
   }, [messages, onCanvasStateChange]);
 
@@ -651,19 +696,8 @@ export function ChatPanel({
                             <Streamdown
                               key={i}
                               skipHtml
-                              disallowedElements={["script", "iframe", "object", "embed", "form"]}
-                              components={{
-                                a: ({ href, children, node: _node, ...props }) => (
-                                  <a
-                                    {...props}
-                                    href={href}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                  >
-                                    {children}
-                                  </a>
-                                ),
-                              } satisfies StreamdownComponents}
+                              disallowedElements={STREAMDOWN_DISALLOWED}
+                              components={STREAMDOWN_COMPONENTS}
                             >
                               {part.text}
                             </Streamdown>

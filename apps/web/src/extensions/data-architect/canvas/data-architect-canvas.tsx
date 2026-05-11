@@ -55,25 +55,30 @@ export function DataArchitectCanvas({ spec, loading, onStateChange, onSendMessag
     sendChatMessage: (text: string) => sendRef.current?.(text),
   }), []);
 
-  if (!spec) return null;
+  // Memoize sanitize + stringify on the spec.state reference. The parent
+  // (chat-panel) re-renders on every token; without this guard the entire
+  // form state stringified on every keystroke during streaming. Pre-empts
+  // both the sanitize walk and the JSON.stringify, which together scale
+  // linearly with column count and dominate render time on wide tables.
+  const stableState = useMemo(() => {
+    if (!spec) return null;
+    const sanitized = sanitizeState(spec.state ?? EMPTY_STATE);
+    const json = JSON.stringify(sanitized);
+    if (json !== prevStateJsonRef.current) {
+      prevStateJsonRef.current = json;
+      prevStateRef.current = sanitized;
+    }
+    return prevStateRef.current;
+  }, [spec?.state]);
 
-  // Stabilize initialState: keep the same reference when content hasn't changed,
-  // preventing the StateProvider from re-syncing state on every parent render.
-  // Also deduplicate user_columns by _key to guard against the agent streaming
-  // spec patches that repeatedly append the same column entries.
-  const stateObj = sanitizeState(spec.state ?? EMPTY_STATE);
-  const stateJson = JSON.stringify(stateObj);
-  if (stateJson !== prevStateJsonRef.current) {
-    prevStateJsonRef.current = stateJson;
-    prevStateRef.current = stateObj;
-  }
+  if (!spec || !stableState) return null;
 
   return (
     <EntityRegistryProvider>
       <CanvasActionsContext value={actions}>
         <JSONUIProvider
           registry={registry}
-          initialState={prevStateRef.current}
+          initialState={stableState}
           onStateChange={onStateChange}
         >
           <div className="relative flex min-h-0 flex-1 flex-col gap-4 p-5">
