@@ -81,6 +81,26 @@ export async function listMergedDefinitions(
     .limit(take);
 }
 
+/**
+ * Project just the `name` column for merged definitions. Skips loading the
+ * heavy `spec` jsonb and any downstream Zod parse the caller would do — for
+ * pure existence checks (does this entity/dimension/table exist?) that's
+ * pure waste.
+ */
+export async function listMergedDefinitionNames(
+  kind?: DefinitionKind,
+  limit = 1000,
+) {
+  const wheres = [eq(definitions.status, "merged" as const)];
+  if (kind) wheres.push(eq(definitions.kind, kind));
+  const take = Math.min(Math.max(limit, 1), 1000);
+  return getDb()
+    .select({ name: definitions.name })
+    .from(definitions)
+    .where(and(...wheres))
+    .limit(take);
+}
+
 export async function createDefinition(data: {
   kind: DefinitionKind;
   name: string;

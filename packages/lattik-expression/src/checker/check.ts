@@ -13,7 +13,7 @@ import {
   isComparable,
 } from "../ast/data-types.js";
 import type { Expr, Loc } from "../ast/nodes.js";
-import { mapExpr } from "../ast/visitor.js";
+import { walkExpr } from "../ast/visitor.js";
 import type { SchemaContext, FunctionSignature, ColumnInfo } from "./schema.js";
 
 // ---------------------------------------------------------------------------
@@ -371,51 +371,82 @@ class TypeChecker {
   }
 
   infer(expr: Expr): Expr {
-    return mapExpr(expr, (node) => this.inferNode(node));
+    // Post-order, in-place. The checker only needs to attach `dataType` to
+    // every node — there's no need to rebuild the AST. Previously this used
+    // `mapExpr` which spread every node + children on every check call;
+    // walkExpr with a deferred visit gives the same post-order traversal
+    // without the per-node allocation. Callers replace `expr` with the
+    // returned value, so the in-place mutation is safe.
+    walkExpr(expr, (node, recurse) => {
+      recurse();
+      this.attachType(node);
+    });
+    return expr;
   }
 
-  private inferNode(node: Expr): Expr {
+  private attachType(node: Expr): void {
     switch (node.kind) {
       case "IntLiteral":
-        return { ...node, dataType: dataType("int64", false) };
+        node.dataType = dataType("int64", false);
+        return;
       case "FloatLiteral":
-        return { ...node, dataType: dataType("double", false) };
+        node.dataType = dataType("double", false);
+        return;
       case "StringLiteral":
-        return { ...node, dataType: dataType("string", false) };
+        node.dataType = dataType("string", false);
+        return;
       case "BoolLiteral":
-        return { ...node, dataType: dataType("boolean", false) };
+        node.dataType = dataType("boolean", false);
+        return;
       case "NullLiteral":
-        return { ...node, dataType: dataType("null", true) };
+        node.dataType = dataType("null", true);
+        return;
       case "Star":
-        return { ...node, dataType: dataType("int64", false) };
+        node.dataType = dataType("int64", false);
+        return;
       case "ColumnRef":
-        return this.inferColumnRef(node);
+        this.inferColumnRef(node);
+        return;
       case "BinaryExpr":
-        return this.inferBinary(node);
+        this.inferBinary(node);
+        return;
       case "UnaryExpr":
-        return this.inferUnary(node);
+        this.inferUnary(node);
+        return;
       case "BetweenExpr":
-        return { ...node, dataType: dataType("boolean", false) };
+        node.dataType = dataType("boolean", false);
+        return;
       case "InExpr":
-        return { ...node, dataType: dataType("boolean", false) };
+        node.dataType = dataType("boolean", false);
+        return;
       case "IsNullExpr":
-        return { ...node, dataType: dataType("boolean", false) };
+        node.dataType = dataType("boolean", false);
+        return;
       case "LikeExpr":
-        return { ...node, dataType: dataType("boolean", false) };
+        node.dataType = dataType("boolean", false);
+        return;
       case "CaseExpr":
-        return this.inferCase(node);
+        this.inferCase(node);
+        return;
       case "CastExpr":
-        return { ...node, dataType: dataType(node.targetType, node.expr.dataType?.nullable ?? false) };
+        node.dataType = dataType(
+          node.targetType,
+          node.expr.dataType?.nullable ?? false,
+        );
+        return;
       case "FunctionCall":
-        return this.inferFunction(node);
+        this.inferFunction(node);
+        return;
       case "AggregateCall":
-        return this.inferAggregate(node);
+        this.inferAggregate(node);
+        return;
       case "WindowExpr":
-        return { ...node, dataType: node.func.dataType };
+        node.dataType = node.func.dataType;
+        return;
     }
   }
 
-  private inferColumnRef(node: Expr & { kind: "ColumnRef" }): Expr {
+  private inferColumnRef(node: Expr & { kind: "ColumnRef" }): void {
     const match = this.resolveColumn(node.table, node.column);
     if (!match) {
       const ref = node.table ? `${node.table}.${node.column}` : node.column;
@@ -424,9 +455,10 @@ class TypeChecker {
         code: "UNKNOWN_COLUMN",
         message: `Unknown column '${ref}'`,
       });
-      return { ...node, dataType: dataType("unknown", true) };
+      node.dataType = dataType("unknown", true);
+      return;
     }
-    return { ...node, dataType: match.dataType };
+    node.dataType = match.dataType;
   }
 
   private resolveColumn(
@@ -450,7 +482,7 @@ class TypeChecker {
     return matches[0];
   }
 
-  private inferBinary(node: Expr & { kind: "BinaryExpr" }): Expr {
+  private inferBinary(node: Expr & { kind: "BinaryExpr" }): void {
     const lt = node.left.dataType;
     const rt = node.right.dataType;
     const nullable = (lt?.nullable ?? false) || (rt?.nullable ?? false);
@@ -469,14 +501,18 @@ class TypeChecker {
               code: "TYPE_MISMATCH",
               message: `Cannot apply '${node.op}' to ${lt.scalar} and ${rt.scalar}`,
             });
-            return { ...node, dataType: dataType("unknown", nullable) };
+            node.dataType = dataType("unknown", nullable);
+            return;
           }
-          return { ...node, dataType: dataType(promoted, nullable) };
+          node.dataType = dataType(promoted, nullable);
+          return;
         }
-        return { ...node, dataType: dataType("unknown", nullable) };
+        node.dataType = dataType("unknown", nullable);
+        return;
       }
       case "||":
-        return { ...node, dataType: dataType("string", nullable) };
+        node.dataType = dataType("string", nullable);
+        return;
       case "=":
       case "!=":
       case "<>":
@@ -500,15 +536,17 @@ class TypeChecker {
             });
           }
         }
-        return { ...node, dataType: dataType("boolean", false) };
+        node.dataType = dataType("boolean", false);
+        return;
       }
       case "AND":
       case "OR":
-        return { ...node, dataType: dataType("boolean", false) };
+        node.dataType = dataType("boolean", false);
+        return;
     }
   }
 
-  private inferUnary(node: Expr & { kind: "UnaryExpr" }): Expr {
+  private inferUnary(node: Expr & { kind: "UnaryExpr" }): void {
     if (node.op === "-") {
       const t = node.operand.dataType;
       if (t && t.scalar !== "null" && t.scalar !== "unknown" && !isNumeric(t.scalar)) {
@@ -518,13 +556,14 @@ class TypeChecker {
           message: `Cannot apply unary '-' to ${t.scalar}`,
         });
       }
-      return { ...node, dataType: node.operand.dataType };
+      node.dataType = node.operand.dataType;
+      return;
     }
     // NOT
-    return { ...node, dataType: dataType("boolean", false) };
+    node.dataType = dataType("boolean", false);
   }
 
-  private inferCase(node: Expr & { kind: "CaseExpr" }): Expr {
+  private inferCase(node: Expr & { kind: "CaseExpr" }): void {
     let resultType: ScalarTypeKind = "null";
     let nullable = false;
 
@@ -554,10 +593,10 @@ class TypeChecker {
       nullable = true;
     }
 
-    return { ...node, dataType: dataType(resultType, nullable) };
+    node.dataType = dataType(resultType, nullable);
   }
 
-  private inferFunction(node: Expr & { kind: "FunctionCall" }): Expr {
+  private inferFunction(node: Expr & { kind: "FunctionCall" }): void {
     const sig = this.functions.get(node.name);
     if (!sig) {
       this.errors.push({
@@ -565,7 +604,8 @@ class TypeChecker {
         code: "UNKNOWN_FUNCTION",
         message: `Unknown function '${node.name}'`,
       });
-      return { ...node, dataType: dataType("unknown", true) };
+      node.dataType = dataType("unknown", true);
+      return;
     }
     if (node.args.length < sig.minArgs || node.args.length > sig.maxArgs) {
       this.errors.push({
@@ -577,11 +617,10 @@ class TypeChecker {
     const argTypes = node.args
       .map((a) => a.dataType)
       .filter((t): t is DataType => t !== undefined);
-    const resolved = sig.resolve(argTypes);
-    return { ...node, dataType: resolved };
+    node.dataType = sig.resolve(argTypes);
   }
 
-  private inferAggregate(node: Expr & { kind: "AggregateCall" }): Expr {
+  private inferAggregate(node: Expr & { kind: "AggregateCall" }): void {
     const argType =
       node.args.length > 0 && node.args[0].kind !== "Star"
         ? node.args[0].dataType ?? null
@@ -653,7 +692,6 @@ class TypeChecker {
       }
     }
 
-    const dt = aggregateReturnType(node.name, argType);
-    return { ...node, dataType: dt };
+    node.dataType = aggregateReturnType(node.name, argType);
   }
 }
