@@ -8,8 +8,8 @@
  * about this at startup so authors notice.
  *
  * These are stub Sets — real handler functions live wherever the runtime
- * wires them (chat tools and worker/skill tools both live in
- * apps/agent-service after the agent-worker deprecation).
+ * wires them. Both runtimes (chat and skill-run executor) live in
+ * apps/agent-service.
  */
 
 import type { Runtime } from "./agents.js";
@@ -28,11 +28,12 @@ export const CHAT_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Tool ids registered in the skill-run runtime (`apps/agent-service`'s
- * `runSkillWorkflow`). Loaded by ExecutorAgent. Names match the
- * `tools:` lists in `packages/agent-harness/skills/<id>/SKILL.md`.
+ * Tool ids registered in the skill-run (executor) runtime
+ * (`apps/agent-service`'s `runSkillWorkflow`). Loaded by ExecutorAgent.
+ * Names match the `tools:` lists in
+ * `packages/agent-harness/skills/<id>/SKILL.md`.
  */
-export const WORKER_TOOLS: ReadonlySet<string> = new Set([
+export const EXECUTOR_TOOLS: ReadonlySet<string> = new Set([
   "create_kafka_topic",
   "emit_logger_proto",
   "register_protobuf_schema",
@@ -44,7 +45,7 @@ export const WORKER_TOOLS: ReadonlySet<string> = new Set([
 
 const REGISTRIES: Record<Runtime, ReadonlySet<string>> = {
   chat: CHAT_TOOLS,
-  worker: WORKER_TOOLS,
+  executor: EXECUTOR_TOOLS,
 };
 
 export function isToolRegistered(runtime: Runtime, toolId: string): boolean {

@@ -1,6 +1,4 @@
-import { sql } from "drizzle-orm";
 import {
-  check,
   date,
   index,
   integer,
@@ -110,37 +108,6 @@ export const definitions = pgTable(
     index("idx_definitions_prUrl").on(t.prUrl),
     index("idx_definitions_createdBy").on(t.createdBy),
   ]
-);
-
-/**
- * Workers are fungible processes that execute tasks. Each task carries a
- * `skill_id`; the worker loads that skill (instructions + tool grants) and
- * follows it. Each worker has its own bearer secret so a compromised process
- * can be revoked without disturbing the fleet, and ownership of in-flight
- * claims is tracked via `task.claimed_by`.
- *
- * Auth: workers present `Authorization: Bearer <workerId>:<secret>`; the
- * server looks up the row and compares sha256(secret) to `tokenHash`.
- */
-export type WorkerMode = "cluster" | "host";
-
-export const workers = pgTable(
-  "worker",
-  {
-    id: text("id").primaryKey(),
-    name: text("name").notNull(),
-    tokenHash: text("token_hash").notNull(),
-    // "cluster" → a k8s Deployment in kind owns the process; revoke tears it down.
-    // "host"    → a developer runs the process manually; revoke just deletes the row.
-    mode: text("mode").$type<WorkerMode>().notNull().default("cluster"),
-    // Updated on every claim poll. A worker is "live" if this is within the
-    // heartbeat threshold (30s). Null means the worker has never polled.
-    // Uses timestamptz so JS Date values round-trip cleanly across server tz.
-    lastSeenAt: timestamp("last_seen_at", { mode: "date", withTimezone: true }),
-    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
-  },
-  (t) => [index("idx_worker_last_seen_at").on(t.lastSeenAt)],
 );
 
 /**
@@ -256,160 +223,6 @@ export const lattikColumnLoads = pgTable(
   ]
 );
 
-// ---------------------------------------------------------------------------
-// Task queue — request/task model for async agent work
-// ---------------------------------------------------------------------------
-
-export type RequestSource = "webhook" | "human";
-export type RequestStatus =
-  | "pending"
-  | "planning"
-  | "awaiting_approval"
-  | "approved"
-  | "done"
-  | "failed";
-
-/**
- * Raw work orders from webhooks or humans. The Worker Node's Planner Agent
- * claims a pending request, decides which skills to schedule, and emits one
- * task per skill. Human approval is required before the Executor begins
- * (unless the matched skill has auto_approve enabled).
- */
-export const requests = pgTable(
-  "request",
-  {
-    id: text("id")
-      .primaryKey()
-      .$defaultFn(() => crypto.randomUUID()),
-    source: text("source").$type<RequestSource>().notNull(),
-    description: text("description").notNull(),
-    context: jsonb("context").$type<unknown>(),
-    messages: jsonb("messages")
-      .$type<{ role: "planner" | "human"; content: string; timestamp: string }[]>()
-      .notNull()
-      .default([]),
-    skillId: text("skill_id"),
-    /**
-     * Worker id that currently holds this request. Set atomically during
-     * claim (FOR UPDATE SKIP LOCKED in claimRequest). Null means the
-     * request is free — either pending (not yet claimed) or the claim was
-     * released. Used for ownership checks on downstream mutations.
-     */
-    claimedBy: text("claimed_by"),
-    status: text("status").$type<RequestStatus>().notNull().default("pending"),
-    /**
-     * Set on successful claim to `now() + stale_timeout`. The cron pass in
-     * /api/cron/process-tasks resets any `planning` request whose `stale_at`
-     * has passed back to `pending`, releasing claims held by dead workers.
-     * Uses timestamptz so JS Date values round-trip cleanly across server tz.
-     */
-    staleAt: timestamp("stale_at", { mode: "date", withTimezone: true }),
-    createdAt: timestamp("created_at", { mode: "date", withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    updatedAt: timestamp("updated_at", { mode: "date", withTimezone: true })
-      .notNull()
-      .defaultNow()
-      .$onUpdate(() => new Date()),
-  },
-  (t) => [
-    index("idx_requests_status").on(t.status),
-    index("idx_requests_stale_at").on(t.staleAt),
-    index("idx_requests_claimed_by").on(t.claimedBy),
-    check(
-      "request_status_check",
-      sql`${t.status} IN ('pending', 'planning', 'awaiting_approval', 'approved', 'done', 'failed')`
-    ),
-  ]
-);
-
-export type RunStatus = "draft" | "pending" | "claimed" | "done" | "failed";
-
-/**
- * Units of work emitted by a Request. Each run carries a `skill_id` pointing
- * at a runbook the Executor Agent loads when it claims the run, plus
- * verifiable done criteria. Runs start as "draft" until the human approves
- * the request's plan (or "pending" directly when auto_approve).
- */
-export const runs = pgTable(
-  "run",
-  {
-    id: text("id")
-      .primaryKey()
-      .$defaultFn(() => crypto.randomUUID()),
-    requestId: text("request_id")
-      .notNull()
-      .references(() => requests.id, { onDelete: "cascade" }),
-    skillId: text("skill_id").notNull(),
-    description: text("description").notNull(),
-    doneCriteria: text("done_criteria").notNull(),
-    status: text("status").$type<RunStatus>().notNull().default("draft"),
-    args: jsonb("args").$type<Record<string, unknown>>(),
-    claimedBy: text("claimed_by"),
-    result: jsonb("result").$type<unknown>(),
-    error: text("error"),
-    // Per-run metrics (filled by the worker on completion). Aggregated from
-    // the step-event stream so per-run summaries are queryable without
-    // scanning every step row.
-    model: text("model"),
-    inputTokens: integer("input_tokens"),
-    outputTokens: integer("output_tokens"),
-    toolCallCount: integer("tool_call_count"),
-    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
-    claimedAt: timestamp("claimed_at", { mode: "date" }),
-    staleAt: timestamp("stale_at", { mode: "date", withTimezone: true }),
-    completedAt: timestamp("completed_at", { mode: "date" }),
-  },
-  (t) => [
-    index("idx_runs_status").on(t.status),
-    index("idx_runs_skill_status").on(t.skillId, t.status),
-    index("idx_runs_stale_at").on(t.staleAt),
-    index("idx_runs_request_id").on(t.requestId),
-  ]
-);
-
-export type StepKind =
-  | "text"
-  | "reasoning"
-  | "tool_call"
-  | "tool_result"
-  | "finish"
-  | "error";
-
-/**
- * Per-step events captured from the Executor Agent's LLM iterations.
- * Each `onStepFinish` (one per LLM call) writes one or more rows here:
- *   - one `text` / `reasoning` row per emitted block,
- *   - one `tool_call` row per tool invocation,
- *   - one `tool_result` row per tool result,
- *   - finally a `finish` row carrying the step's usage and finishReason.
- *
- * Sequence is monotonic per run, assigned by the worker. Used for the
- * flowchart UI in the run detail and for SSE live-streaming.
- */
-export const steps = pgTable(
-  "run_step",
-  {
-    id: text("id")
-      .primaryKey()
-      .$defaultFn(() => crypto.randomUUID()),
-    runId: text("run_id")
-      .notNull()
-      .references(() => runs.id, { onDelete: "cascade" }),
-    sequence: integer("sequence").notNull(),
-    kind: text("kind").$type<StepKind>().notNull(),
-    payload: jsonb("payload").$type<unknown>(),
-    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
-  },
-  (t) => [
-    // The unique constraint creates its own backing btree index on
-    // (run_id, sequence), so a separate `idx_run_step_run_seq` would be
-    // a redundant duplicate. The DB historically had both; the standalone
-    // index is dropped via DDL alongside this commit.
-    unique("uq_run_step_run_seq").on(t.runId, t.sequence),
-  ]
-);
-
 export const verificationTokens = pgTable(
   "verificationToken",
   {
@@ -433,7 +246,7 @@ export const verificationTokens = pgTable(
  * the auth-wiring slice flagged.
  *
  * conversationId is optional — most runs come from chat turns and
- * carry it, but spike + worker-driven runs may not.
+ * carry it, but system-triggered skill runs (webhook fan-out, etc.) may not.
  */
 export const workflowRuns = pgTable(
   "workflow_run",

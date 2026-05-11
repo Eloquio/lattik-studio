@@ -26,13 +26,13 @@ Iceberg REST catalog + MinIO
 
 ## Deployment shape
 
-One `Deployment` per Logger Table in the `workloads` namespace, applied by the [`start_logger_writer`](../../apps/agent-worker/src/tools/start-logger-writer.ts) tool as part of the `post-pipeline-pr-merge` workflow skill. Manifest template: [k8s/logger-writer/deployment-template.yaml](../../k8s/logger-writer/deployment-template.yaml).
+One `Deployment` per Logger Table in the `workloads` namespace, applied by the [`start_logger_writer`](../../apps/agent-service/src/agents/Executor/tools/start-logger-writer.ts) tool as part of the `post-pipeline-pr-merge` workflow skill. Manifest template: [k8s/logger-writer/deployment-template.yaml](../../k8s/logger-writer/deployment-template.yaml).
 
 ### Replicas track partitions
 
 The writer's replica count auto-tracks the topic's partition count. The `start_logger_writer` tool queries Kafka admin for `logger.<table>` and uses that as `replicas` when rendering the Deployment. Single source of truth: bump partitions, the next apply rolls the Deployment to the new replica count automatically.
 
-Default `numPartitions = 1` for new topics ([create_kafka_topic](../../apps/agent-worker/src/tools/create-kafka-topic.ts)) → default `replicas = 1`. To scale a hot table: bump `LATTIK_TOPIC_NUM_PARTITIONS` and re-fire the post-merge workflow (or call `start_logger_writer` manually).
+Default `numPartitions = 1` for new topics ([create_kafka_topic](../../apps/agent-service/src/agents/Executor/tools/create-kafka-topic.ts)) → default `replicas = 1`. To scale a hot table: bump `LATTIK_TOPIC_NUM_PARTITIONS` and re-fire the post-merge workflow (or call `start_logger_writer` manually).
 
 ## Exactly-once via snapshot properties
 
@@ -60,7 +60,7 @@ Both bounds are env-overridable: `FLUSH_INTERVAL_SECONDS`, `FLUSH_ROWS`.
 
 The envelope schema (`lattik.logger.v1.Envelope { table, event_id, event_timestamp, payload bytes }`) is **static**, compiled into the writer image at build time via prost-build.
 
-The per-table **payload schema** is registered in Confluent Schema Registry under subject `logger.<table>-value` by the [`register_protobuf_schema`](../../apps/agent-worker/src/tools/register-protobuf-schema.ts) tool during the post-merge workflow. The writer fetches it once at startup and uses it to decode each envelope's `payload` bytes into typed fields.
+The per-table **payload schema** is registered in Confluent Schema Registry under subject `logger.<table>-value` by the [`register_protobuf_schema`](../../apps/agent-service/src/agents/Executor/tools/register-protobuf-schema.ts) tool during the post-merge workflow. The writer fetches it once at startup and uses it to decode each envelope's `payload` bytes into typed fields.
 
 Storage layout:
 - Iceberg implicit columns: `event_id` varchar, `event_timestamp` timestamp(6), `ds` varchar, `hour` varchar.

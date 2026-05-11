@@ -14,16 +14,17 @@ export type ChatAgentId =
   | "DataAnalyst"
   | "PipelineManager";
 
-// `ExecutorAgent` survives as a skill-ownership identifier even after
-// the agent-worker deprecation: skill files list it under `owners:` and
-// the workflow that runs them (apps/agent-service/src/workflows/skill-run.ts)
-// passes it as the caller id to `getSkill(...)`. Planner is gone because
-// the demo's only request decomposes to a single skill.
-export type WorkerAgentId = "ExecutorAgent";
+// `ExecutorAgent` is the sole skill-run-runtime agent: skill files list it
+// under `owners:` and the workflow that runs them
+// (apps/agent-service/src/workflows/skill-run.ts) passes it as the caller id
+// to `getSkill(...)`. The Planner was removed in the agent-worker → Vercel
+// Workflow migration because every production trigger decomposes to a single
+// skill.
+export type ExecutorAgentId = "ExecutorAgent";
 
-export type AgentId = ChatAgentId | WorkerAgentId;
+export type AgentId = ChatAgentId | ExecutorAgentId;
 
-export type Runtime = "chat" | "worker";
+export type Runtime = "chat" | "executor";
 
 /**
  * Static runtime mapping. Agents are runtime-bound by definition; this is the
@@ -34,7 +35,7 @@ export const AGENT_RUNTIME: Record<AgentId, Runtime> = {
   DataArchitect: "chat",
   DataAnalyst: "chat",
   PipelineManager: "chat",
-  ExecutorAgent: "worker",
+  ExecutorAgent: "executor",
 };
 
 export const ALL_AGENT_IDS: readonly AgentId[] = Object.keys(

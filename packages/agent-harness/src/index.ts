@@ -5,13 +5,13 @@ export {
   runtimeOf,
   type AgentId,
   type ChatAgentId,
-  type WorkerAgentId,
+  type ExecutorAgentId,
   type Runtime,
 } from "./agents.js";
 
 export {
   CHAT_TOOLS,
-  WORKER_TOOLS,
+  EXECUTOR_TOOLS,
   isToolRegistered,
   toolsForRuntime,
 } from "./tools.js";

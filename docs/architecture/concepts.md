@@ -1,41 +1,37 @@
 # Core concepts
 
-Lattik Studio has one shared abstraction for LLM-driven work: an **Agent**. Agents run in two **runtimes** (chat and worker node), use **tools** to take action, and load **skills** as on-demand runbooks. Agents are runtime-bound by definition; skills and tools are runtime-neutral and bind to a runtime by being owned/registered there.
+Lattik Studio has one shared abstraction for LLM-driven work: an **Agent**. Agents run in two **runtimes** (chat and skill-run workflow), use **tools** to take action, and load **skills** as on-demand runbooks. Agents are runtime-bound by definition; skills and tools are runtime-neutral and bind to a runtime by being owned/registered there.
 
 ---
 
 ## Agent
 
-An agent is an instance of a `ToolLoopAgent`: a system prompt + a base tool list + access to the skill registry. Each agent is bound to **exactly one runtime** by definition (e.g. Data Architect lives in chat; the Executor Agent lives on the Worker Node). The runtime supplies tool implementations and owns the lifecycle — long-lived streaming response in chat, one-shot tool loop on the worker.
+An agent is an instance of a `ToolLoopAgent`: a system prompt + a base tool list + access to the skill registry. Each agent is bound to **exactly one runtime** by definition (e.g. Data Architect lives in chat; the Executor Agent runs as a Vercel Workflow). The runtime supplies tool implementations and owns the lifecycle — long-lived streaming response in chat, one-shot durable run in the workflow.
 
 There are a small number of named agents.
 
 ### Chat-runtime agents
 
-Live in-process inside the Next.js app, stream to the chat panel + canvas, persist conversation state on the `conversations` row.
+Live in-process inside `apps/agent-service` (proxied from the Next.js app), stream to the chat panel + canvas, persist conversation state on the `conversations` row.
 
 - **Assistant** (concierge) — base tools: `handoff`. Triages every new conversation, routes to a specialist, knows about the paused-task stack.
 - **Specialist** (Data Architect, Data Analyst, Pipeline Manager, …) — base tools: `handback`, `loadSkill`, `renderCanvas`. Handles a domain; loads skills from its domain library on demand (e.g. Data Architect loads `entity`, `metric`, `logger-table` as the user names them — gated by the skill's `owners:` list).
 
 Routing between Assistant and Specialists uses `handoff`/`handback` with a depth-1 task stack — see [agent-handoff.md](agent-handoff.md).
 
-### Worker-node agents
+### Skill-run-runtime agents
 
-Exactly two, dispatched by request state. Each runs to completion per claim, then the Worker Node loops.
+One agent only:
 
-- **Planner Agent** — base tools: `list_skills`, `emit_task`, `finish_planning`. **No `loadSkill`** — the Planner cannot execute work, only schedule it. `list_skills()` returns skills owned by the Executor (the only agent that can act on them).
-- **Executor Agent** — base tools: `finishSkill`. Claims one pending task; the runtime pre-loads `task.skill_id` (validating `owners.includes("ExecutorAgent")`) before invoking the LLM, so the agent's instructions are the skill body and its tools are the skill's declared `tools:` plus `finishSkill`. Runs the runbook, calls `finishSkill` to trigger `done[]`, releases. (`loadSkill` returns as an LLM-callable tool when sub-skill loading mid-execution becomes a real need; v0.1 has one task = one skill.)
+- **Executor Agent** — runs inside a Vercel Workflow (`apps/agent-service/src/workflows/skill-run.ts`). Each run is HTTP-triggered with a `skillId` + args, loads `SKILL.md` (validating `owners.includes("ExecutorAgent")`), executes the runbook with the skill's declared `tools:` plus `finishSkill`, and returns the result. No claim-and-poll, no queue — one workflow run per trigger.
 
-Dispatch logic on every claim:
+Today's trigger paths:
 
-| Request state | Tasks | Agent dispatched |
-|---|---|---|
-| `pending` | 0 | Planner |
-| `approved` | ≥1 pending | Executor |
-| `approved` | all done | (no agent — mark request `done`) |
-| `approved` | any failed | (no agent — mark request `failed`) |
+| Trigger | Skill |
+|---|---|
+| Gitea PR-merge webhook (`apps/web/src/app/api/webhooks/gitea/route.ts`) | `post-pipeline-pr-merge` |
 
-Webhook-deterministic requests skip the Planner: the recipe simulates what it would have emitted, the request lands at `approved` with tasks pre-fanned out, and the next Executor claim picks one up.
+There is no Planner — every production trigger today decomposes to exactly one skill. If multi-skill orchestration shows up later, reintroduce it as a parent workflow that starts child skill-run workflows.
 
 ---
 
@@ -65,8 +61,8 @@ A function the LLM can call via the AI SDK's tool-calling interface. Tools come 
 2. **Loaded skill** — added when the agent calls `loadSkill`, dropped on `finishSkill`.
 
 A tool's runtime is implicit from where it's registered. Each runtime owns its registry:
-- **Chat:** `apps/web/src/tools/chat/` — registers `renderCanvas`, `handoff`, `handback`, `loadSkill`, `finishSkill`, `getSkill`.
-- **Worker Node:** `apps/agent-worker/src/tools/` — registers `kafka:write`, `s3:write`, `trino:query`, `list_skills`, `emit_task`, `finish_planning`, `loadSkill`, `finishSkill`.
+- **Chat:** chat-side tools live in `apps/agent-service/src/agents/<Specialist>/tools/` and `apps/web/src/extensions/<extension>/tools/`. The harness's `CHAT_TOOLS` set in [`packages/agent-harness/src/tools.ts`](../../packages/agent-harness/src/tools.ts) is the canonical list (`renderCanvas`, `handoff`, `handback`, `loadSkill`, `finishSkill`, `getSkill`).
+- **Skill-run workflow:** `apps/agent-service/src/agents/Executor/tools/` — registers `create_kafka_topic`, `emit_logger_proto`, `register_protobuf_schema`, `create_iceberg_table`, `start_logger_writer`, `loadSkill`, `finishSkill`. Mirrored in the harness's `EXECUTOR_TOOLS` set.
 
 Cross-runtime tools (`loadSkill`, `finishSkill`, `getSkill`) get registered in both. Nothing self-declares a `runtimes:` tag.
 
@@ -74,15 +70,13 @@ If an agent's base tools or a loaded skill's `tools:` list names a tool that isn
 
 ---
 
-## Worker Node
+## Skill-run workflow
 
-The runtime that hosts the Planner and Executor agents. A long-running process — either a kind Deployment in the `workers` namespace or a host-mode `pnpm --filter agent-worker dev` — that polls the request queue, claims one Request at a time, dispatches Planner or Executor based on state, runs it to completion, releases the claim, loops.
+The runtime that hosts the Executor Agent. Each trigger (today: the Gitea PR-merge webhook) starts a Vercel Workflow run via `start(runSkillWorkflow, [{ runId, skillId, args }])` — the workflow loads the skill, runs the agent loop, and returns durably. WDK handles retries, crash recovery, and step persistence.
 
-A Worker Node is identified by `worker.id` (UUID) + a bearer secret. Liveness is heartbeat-based: every claim poll bumps `worker.last_seen_at`; the UI flags ≤30s as online.
+Implementation: [`apps/agent-service/src/workflows/skill-run.ts`](../../apps/agent-service/src/workflows/skill-run.ts) (workflow body) + [`apps/agent-service/src/routes/__wf-skill-run.post.ts`](../../apps/agent-service/src/routes/__wf-skill-run.post.ts) (HTTP trigger).
 
-Worker Nodes have no business logic of their own — they're a runtime. All behavior lives in the two agents and the skills they load.
-
-See: [PLAN-worker-deployment-and-capabilities.md](../archive/PLAN-worker-deployment-and-capabilities.md) for deployment and identity.
+The current implementation wraps the whole agent loop in a single `'use step'` because every post-merge tool is idempotent (kafka topic create-if-not-exists, iceberg `CREATE TABLE IF NOT EXISTS`, `kubectl apply`, etc.) — replay-from-scratch on retry is safe. If non-idempotent tools land later, switch to per-tool steps the way `agent-loop.ts:runToolStep` does for chat.
 
 ---
 
@@ -98,23 +92,20 @@ Chat runtime:
                                        +-- finishSkill({result})
                                              (runtime runs done[] checks if any)
 
-Worker node:
-  Request (queued) --> Worker Node claims it
-                          |
-                          +-- if unplanned --> Planner Agent
-                          |                       |
-                          |                       +-- list_skills (filtered to Executor-owned)
-                          |                       +-- emit_task(s)
-                          |                       +-- finish_planning
-                          |
-                          +-- if planned   --> Executor Agent
-                                                  |
-                                                  | (runtime pre-loads task.skill_id as
-                                                  |  the agent's instructions + tool grants;
-                                                  |  owners must include ExecutorAgent)
-                                                  |
-                                                  +-- finishSkill({result})
-                                                        (runtime runs done[] checks)
+Skill-run workflow:
+  Gitea PR-merge --> webhook handler --> POST /__wf-skill-run
+                                              |
+                                              v
+                                         Vercel Workflow run
+                                              |
+                                              +-- Executor Agent
+                                                    |
+                                                    | (workflow loads task.skill_id as
+                                                    |  the agent's instructions + tool grants;
+                                                    |  owners must include ExecutorAgent)
+                                                    |
+                                                    +-- finishSkill({result})
+                                                          (runtime runs done[] checks)
 ```
 
 One concept (Agent), one resource type (Skill), one capability primitive (Tool). Agents are runtime-bound; skills and tools are runtime-neutral and bind to a runtime by ownership/registration.
