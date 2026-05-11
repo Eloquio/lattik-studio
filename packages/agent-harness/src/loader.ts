@@ -7,8 +7,8 @@
  * tests can reset the cache via `resetSkillCacheForTests`.
  *
  * The default skill directory resolves relative to this file's location, so
- * the same package works whether consumed from the web app, the worker, or
- * a test harness.
+ * the same package works whether consumed from the web app, the agent-service,
+ * or a test harness.
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";

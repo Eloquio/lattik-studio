@@ -33,7 +33,7 @@ describe("listSkills", () => {
     writeSkill(
       "exec-only",
       `name: exec-only
-description: Worker-only skill
+description: Executor-only skill
 version: "0.1"
 owners: [ExecutorAgent]`,
     );
@@ -157,11 +157,11 @@ tools: [create_kafka_topic, create_iceberg_table]`,
   });
 
   it("reports tools that aren't registered in an owner's runtime", () => {
-    // renderCanvas is chat-only; loading it via ExecutorAgent (worker) should warn.
+    // renderCanvas is chat-only; loading it via ExecutorAgent (executor runtime) should warn.
     writeSkill(
       "mismatch",
       `name: mismatch
-description: Tool not in worker registry
+description: Tool not in executor registry
 version: "0.1"
 owners: [ExecutorAgent]
 tools: [renderCanvas]`,
@@ -177,7 +177,7 @@ tools: [renderCanvas]`,
   });
 
   it("reports issues per (skill, owner) pair when a tool is missing in some runtimes", () => {
-    // create_kafka_topic is worker-only. With both owners, the chat
+    // create_kafka_topic is executor-only. With both owners, the chat
     // owner (DataArchitect) gets flagged for missing it.
     writeSkill(
       "cross",

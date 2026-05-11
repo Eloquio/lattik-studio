@@ -1,5 +1,5 @@
 /**
- * Minimal Trino HTTP client for the agent-worker.
+ * Minimal Trino HTTP client used by Executor tools.
  *
  * Trino's REST API: POST /v1/statement returns a {nextUri} we keep polling
  * until the query reaches a terminal state (FINISHED / FAILED / CANCELED).
@@ -8,7 +8,7 @@
  */
 
 const TRINO_URL = process.env.TRINO_URL ?? "http://localhost:8080";
-const TRINO_USER = process.env.TRINO_USER ?? "lattik-agent-worker";
+const TRINO_USER = process.env.TRINO_USER ?? "lattik-executor";
 const TRINO_CATALOG = "iceberg";
 const STATEMENT_TIMEOUT_MS = 30_000;
 

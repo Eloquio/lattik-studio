@@ -55,7 +55,7 @@ function safeName(tableName: string): string {
 
 async function getPartitionCount(topic: string): Promise<number> {
   const kafka = new Kafka({
-    clientId: "lattik-agent-worker",
+    clientId: "lattik-executor",
     brokers: KAFKA_BROKERS,
   });
   const admin = kafka.admin();
