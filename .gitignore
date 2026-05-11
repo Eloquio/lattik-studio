@@ -48,3 +48,6 @@ next-env.d.ts
 
 # turbo
 .turbo
+
+# @workflow/world-local persistence — local-dev queue/run/event store, not state we want in git.
+.workflow-data/
