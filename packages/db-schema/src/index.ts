@@ -97,13 +97,22 @@ export const definitions = pgTable(
     status: text("status").$type<DefinitionStatus>().notNull().default("draft"),
     prUrl: text("prUrl"),
     prMergedAt: timestamp("prMergedAt", { mode: "date" }),
-    createdBy: text("createdBy").references(() => users.id),
+    createdBy: text("createdBy")
+      .notNull()
+      .references(() => users.id),
     createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updatedAt", { mode: "date" }).notNull().defaultNow(),
   },
   (t) => [
     unique("uq_definitions_kind_name").on(t.kind, t.name),
-    index("idx_definitions_kind").on(t.kind),
+    // `listMergedDefinitions(kind)` and the merged-status branch of
+    // `listDefinitions(kind)` both filter on (kind, status). The composite
+    // serves those queries; the standalone (kind) and (status) indexes act
+    // as prefixes/fallbacks for queries that hit only one column.
+    index("idx_definitions_kind_status").on(t.kind, t.status),
+    // `listDefinitions(kind)` for the owner branch and `getDefinitionByName`
+    // both filter on (kind, createdBy).
+    index("idx_definitions_kind_createdBy").on(t.kind, t.createdBy),
     index("idx_definitions_status").on(t.status),
     index("idx_definitions_prUrl").on(t.prUrl),
     index("idx_definitions_createdBy").on(t.createdBy),

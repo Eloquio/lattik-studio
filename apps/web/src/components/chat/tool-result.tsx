@@ -120,7 +120,7 @@ export function ToolResult({ toolName, state, input, output, errorText }: ToolRe
         }`}
       >
         {isLoading ? (
-          <Loader2 className="h-3 w-3 shrink-0 animate-spin text-[#e0a96e]" />
+          <Loader2 className="h-3 w-3 shrink-0 animate-spin text-brand" />
         ) : isFailure ? (
           <AlertCircle className="h-3 w-3 shrink-0 text-red-400" />
         ) : isDone ? (

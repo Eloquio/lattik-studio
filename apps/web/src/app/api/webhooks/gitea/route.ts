@@ -1,7 +1,10 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
+import { z } from "zod";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
+import { log } from "@/lib/log";
+import { rateLimit } from "@/lib/rate-limit";
 
 const WORKFLOW_SKILL_ID = "post-pipeline-pr-merge";
 
@@ -17,6 +20,22 @@ interface MergedDefinition {
 
 /** Max webhook payload: 1MB */
 const MAX_PAYLOAD_SIZE = 1_048_576;
+
+// Validate just the subset of the Gitea pull_request event that this handler
+// reads. We use `.passthrough()` on the inner object so we don't drop fields
+// Gitea sends — we only care about action + pull_request.{merged,html_url}.
+const giteaPrEventSchema = z
+  .object({
+    action: z.string(),
+    pull_request: z
+      .object({
+        merged: z.boolean().optional(),
+        html_url: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
 
 class WebhookSecretMissingError extends Error {
   constructor() {
@@ -49,6 +68,26 @@ function verifySignature(payload: string, signature: string | null): boolean {
 }
 
 export async function POST(req: Request) {
+  // Rate-limit per remote IP. Gitea webhooks come from a small set of source
+  // IPs in practice, so this protects against a misconfigured (or malicious)
+  // Gitea instance flooding us; legitimate deliveries are nowhere near 60/min.
+  const remoteIp =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const { allowed, resetAt } = await rateLimit(`gitea-webhook:${remoteIp}`, {
+    maxRequests: 60,
+    windowMs: 60_000,
+  });
+  if (!allowed) {
+    log.warn("gitea_webhook.rate_limited", { remoteIp, resetAt });
+    return Response.json(
+      { error: "Too many requests" },
+      {
+        status: 429,
+        headers: { "retry-after": String(Math.ceil((resetAt - Date.now()) / 1000)) },
+      },
+    );
+  }
+
   // Check payload size before reading
   const contentLength = req.headers.get("content-length");
   if (contentLength && parseInt(contentLength, 10) > MAX_PAYLOAD_SIZE) {
@@ -68,7 +107,7 @@ export async function POST(req: Request) {
     valid = verifySignature(rawBody, signature);
   } catch (err) {
     if (err instanceof WebhookSecretMissingError) {
-      console.error(err.message);
+      log.error("gitea_webhook.misconfigured", { error: err.message });
       return Response.json(
         { error: "Server misconfigured: webhook secret missing" },
         { status: 500 }
@@ -81,19 +120,34 @@ export async function POST(req: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let payload: Record<string, unknown>;
+  let rawPayload: unknown;
   try {
-    payload = JSON.parse(rawBody);
+    rawPayload = JSON.parse(rawBody);
   } catch {
     return Response.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  const parsed = giteaPrEventSchema.safeParse(rawPayload);
+  if (!parsed.success) {
+    log.warn("gitea_webhook.invalid_payload", {
+      issues: parsed.error.issues.map((i) => ({
+        path: i.path.join("."),
+        message: i.message,
+      })),
+    });
+    return Response.json(
+      { error: "Invalid webhook payload", issues: parsed.error.issues },
+      { status: 400 },
+    );
+  }
+  const payload = parsed.data;
+
   // Gitea sends pull_request events with action "closed" and pull_request.merged = true
-  if (payload.action !== "closed" || !(payload.pull_request as Record<string, unknown>)?.merged) {
+  if (payload.action !== "closed" || !payload.pull_request?.merged) {
     return Response.json({ status: "ignored" }, { status: 202 });
   }
 
-  const prUrl = (payload.pull_request as Record<string, unknown>)?.html_url as string | undefined;
+  const prUrl = payload.pull_request?.html_url;
   if (!prUrl) {
     return Response.json({ status: "no_pr_url" }, { status: 202 });
   }
@@ -213,11 +267,10 @@ export async function POST(req: Request) {
     }).catch((err) => {
       // Non-blocking — log and move on. The webhook's job is to
       // acknowledge Gitea's delivery, not to wait on the workflow.
-      console.error(
-        `[gitea-webhook] failed to dispatch skill run for ${prUrl}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
+      log.error("gitea_webhook.skill_dispatch_failed", {
+        pr_url: prUrl,
+        error: err instanceof Error ? err.message : String(err),
+      });
     });
   }
 

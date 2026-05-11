@@ -89,7 +89,7 @@ export function ChatHistoryPanel({
                 <MessageSquare
                   className={`h-3.5 w-3.5 shrink-0 ${
                     activeChatId === conv.id
-                      ? "text-[#e0a96e]"
+                      ? "text-brand"
                       : "text-white/40"
                   }`}
                 />

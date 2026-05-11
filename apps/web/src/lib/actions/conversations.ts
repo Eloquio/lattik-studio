@@ -28,8 +28,8 @@ export async function saveConversation(data: {
       userId: user.id!,
       title: data.title,
       messages: data.messages,
-      canvasState: data.canvasState ?? undefined,
-      taskStack: data.taskStack ?? undefined,
+      canvasState: data.canvasState ?? null,
+      taskStack: data.taskStack ?? null,
       activeExtensionId: data.activeExtensionId ?? null,
     })
     .onConflictDoUpdate({
@@ -37,8 +37,8 @@ export async function saveConversation(data: {
       set: {
         title: data.title,
         messages: data.messages,
-        canvasState: data.canvasState ?? undefined,
-        taskStack: data.taskStack ?? undefined,
+        canvasState: data.canvasState ?? null,
+        taskStack: data.taskStack ?? null,
         activeExtensionId: data.activeExtensionId ?? null,
         updatedAt: new Date(),
       },

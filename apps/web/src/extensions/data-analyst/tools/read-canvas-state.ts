@@ -1,16 +1,14 @@
-import { zodSchema } from "ai";
-import { z } from "zod";
+import { createReadCanvasStateTool as createBase } from "../../tools/read-canvas-state";
 import { extractAnalystState } from "../spec-builder";
 
 export function createReadCanvasStateTool(getCanvasState: () => unknown) {
-  return {
+  return createBase({
     description:
       "Read the current Data Analyst canvas state. Returns the SQL query, " +
       "query results metadata (column names, row count), and chart configuration if any.",
-    inputSchema: zodSchema(z.object({})),
-    execute: async () => {
-      const state = extractAnalystState(getCanvasState());
-
+    getCanvasState,
+    project: (rawSpec) => {
+      const state = extractAnalystState(rawSpec);
       // Return a summarized view — don't send all rows to the agent
       return {
         sql: state.sql ?? null,
@@ -23,5 +21,5 @@ export function createReadCanvasStateTool(getCanvasState: () => unknown) {
         queryError: state.queryError ?? null,
       };
     },
-  };
+  });
 }
