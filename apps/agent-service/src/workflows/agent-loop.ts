@@ -4,6 +4,7 @@ import {
   gateway,
   convertToModelMessages,
   type ModelMessage,
+  type SystemModelMessage,
   type UIMessage,
 } from "ai";
 import { z } from "zod";
@@ -158,8 +159,19 @@ interface ModelStepResult {
 // reproduce every prompt seam.
 // ---------------------------------------------------------------------------
 
-const AGENT_CONFIGS: Record<AgentId, { system: string; toolNames: string[]; maxLoopSteps: number }> = {
+// Per-agent model and prompt config. `model` mirrors the `model:` frontmatter
+// in each agent's `AGENT.md` — Assistant is intentionally Haiku for fast/cheap
+// concierge routing, the specialists are Sonnet because their flows have richer
+// tool use, validation, and PR-shaped reasoning.
+//
+// The system prompts here include `{{taskStack}}` only for Assistant; the
+// substitution happens per-turn inside `runModelStep`. For Anthropic prompt
+// caching, we split the system text on that seam so the static prefix can be
+// marked `cacheControl: ephemeral` while the per-turn taskStack rides as a
+// separate, uncached message.
+const AGENT_CONFIGS: Record<AgentId, { model: string; system: string; toolNames: string[]; maxLoopSteps: number }> = {
   Assistant: {
+    model: "anthropic/claude-haiku-4.5",
     // The `{{taskStack}}` seam is substituted per-turn inside `runModelStep`
     // because the paused-task block depends on the workflow input, not the
     // static config. The specialists block is hardcoded here — it changes
@@ -189,6 +201,7 @@ Available agents:
     maxLoopSteps: 5,
   },
   PipelineManager: {
+    model: "anthropic/claude-sonnet-4.6",
     system: `You are the Pipeline Manager agent in Lattik Studio. You help users monitor and operate their data pipelines (Airflow DAGs).
 
 ## Canvas Rendering — STRICT
@@ -213,6 +226,7 @@ Use \`getDagDetail\` / \`listDagRuns\` / \`getTaskInstances\` / \`getTaskLogs\` 
     maxLoopSteps: 6,
   },
   DataArchitect: {
+    model: "anthropic/claude-sonnet-4.6",
     system: `You are the Data Architect agent in Lattik Studio. You help users define data pipeline concepts: Entities, Dimensions, Logger Tables, Lattik Tables, and Metrics.
 
 ## Canvas Rendering — STRICT
@@ -286,6 +300,7 @@ After the user is happy with the form, the fixed sequence is:
     maxLoopSteps: 10,
   },
   DataAnalyst: {
+    model: "anthropic/claude-sonnet-4.6",
     system:
       "You are the Data Analyst spike agent. You explore data using SQL. Use listTables to see what's available, describeTable to understand schemas, runQuery to execute SQL, and renderSqlEditor when the user wants to compose a query interactively. Be concise.",
     toolNames: [
@@ -704,15 +719,49 @@ async function runModelStep(input: {
     tools[name] = builder();
   }
 
-  // Substitute the `{{taskStack}}` seam if present (only the Assistant
-  // template has it today). Cheap noop for the other agents.
-  const systemPrompt = config.system.includes("{{taskStack}}")
-    ? config.system.replace("{{taskStack}}", renderTaskStackBlock(input.taskStack))
-    : config.system;
+  // Build the system prompt as one or two SystemModelMessages so the static
+  // prefix can ride a `cacheControl: ephemeral` breakpoint. Anthropic prompt
+  // caching gives ~90% discount on cached input tokens for repeat reads within
+  // the 5-min TTL — the static system text (~3.5 KB for DataArchitect) is
+  // resent verbatim on every loop iteration, so caching it once amortises
+  // across all subsequent turns.
+  //
+  // For Assistant, `{{taskStack}}` is a per-turn dynamic block. We split the
+  // template on the seam so the cached part stays byte-identical across turns
+  // and the (often empty) tail rides as a separate uncached system message.
+  const cacheControl = { type: "ephemeral" as const };
+  let systemMessages: SystemModelMessage[];
+  const seamIndex = config.system.indexOf("{{taskStack}}");
+  if (seamIndex === -1) {
+    systemMessages = [
+      {
+        role: "system",
+        content: config.system,
+        providerOptions: { anthropic: { cacheControl } },
+      },
+    ];
+  } else {
+    const staticPrefix = config.system.slice(0, seamIndex);
+    const staticSuffix = config.system.slice(seamIndex + "{{taskStack}}".length);
+    const dynamicBlock = renderTaskStackBlock(input.taskStack);
+    systemMessages = [
+      {
+        role: "system",
+        content: staticPrefix,
+        providerOptions: { anthropic: { cacheControl } },
+      },
+    ];
+    if (dynamicBlock || staticSuffix) {
+      systemMessages.push({
+        role: "system",
+        content: `${dynamicBlock}${staticSuffix}`,
+      });
+    }
+  }
 
   const result = streamText({
-    model: gateway("anthropic/claude-haiku-4.5"),
-    system: systemPrompt,
+    model: gateway(config.model),
+    system: systemMessages,
     messages: input.messages,
     tools,
   });
@@ -789,17 +838,43 @@ async function runToolStep(input: {
     }
   }
 
+  // Tools that ship a large client payload (e.g. runQuery rendering the full
+  // result set on the canvas) can attach `__modelOutput` to keep the LLM's
+  // tool-result small. The client stream gets the unstripped output (with
+  // `__modelOutput` itself removed so the canvas validator doesn't choke on
+  // it); the caller above receives `modelOutput`, which goes into the next
+  // model turn's messages.
+  const { clientOutput, modelOutput } = splitToolOutput(output);
+
   try {
     await writer.write({
       type: "tool-result",
       iteration: input.iteration,
-      payload: { toolCallId: input.toolCallId, output },
+      payload: { toolCallId: input.toolCallId, output: clientOutput },
     });
   } finally {
     writer.releaseLock();
   }
 
-  return output;
+  return modelOutput;
+}
+
+function splitToolOutput(output: unknown): {
+  clientOutput: unknown;
+  modelOutput: unknown;
+} {
+  if (
+    output !== null &&
+    typeof output === "object" &&
+    "__modelOutput" in output
+  ) {
+    const o = output as Record<string, unknown>;
+    const modelOutput = o.__modelOutput;
+    const clientOutput: Record<string, unknown> = { ...o };
+    delete clientOutput.__modelOutput;
+    return { clientOutput, modelOutput };
+  }
+  return { clientOutput: output, modelOutput: output };
 }
 
 // ---------------------------------------------------------------------------

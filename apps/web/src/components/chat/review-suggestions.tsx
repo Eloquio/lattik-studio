@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Check, X } from "lucide-react";
 import type {
   ReviewSuggestion,
@@ -69,7 +69,7 @@ interface ReviewSuggestionsProps {
   onStatus?: (next: ReviewStatus) => void;
 }
 
-export function ReviewSuggestions({
+function ReviewSuggestionsImpl({
   suggestions,
   onApply,
   onComplete,
@@ -178,3 +178,9 @@ export function ReviewSuggestions({
     </div>
   );
 }
+
+// Memo so messages-list re-renders driven by streaming text tokens elsewhere
+// don't drag every prior review-suggestion card through a re-render.
+// `onApply`/`onComplete`/`onStatus` come from the chat panel as new closures
+// each render; the chat panel separately wraps them stably via refs.
+export const ReviewSuggestions = memo(ReviewSuggestionsImpl);

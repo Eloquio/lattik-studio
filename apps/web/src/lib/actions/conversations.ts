@@ -82,9 +82,24 @@ export async function saveConversation(data: {
     });
 }
 
-export async function listConversations() {
+/**
+ * Cap the history-panel listing so a power user with thousands of saved chats
+ * doesn't pull them all every mount. The default keeps the most recent
+ * conversations and lops off the long tail; callers that want older ones can
+ * paginate by passing a higher `limit`.
+ */
+const DEFAULT_CONVERSATION_LIST_LIMIT = 100;
+const MAX_CONVERSATION_LIST_LIMIT = 500;
+
+export async function listConversations(options: { limit?: number } = {}) {
   const user = await requireUser();
   const db = getDb();
+
+  const requested = options.limit ?? DEFAULT_CONVERSATION_LIST_LIMIT;
+  const limit = Math.min(
+    Math.max(1, Math.floor(requested)),
+    MAX_CONVERSATION_LIST_LIMIT,
+  );
 
   return db
     .select({
@@ -94,7 +109,8 @@ export async function listConversations() {
     })
     .from(schema.conversations)
     .where(eq(schema.conversations.userId, user.id!))
-    .orderBy(desc(schema.conversations.updatedAt));
+    .orderBy(desc(schema.conversations.updatedAt))
+    .limit(limit);
 }
 
 export async function getConversation(id: string) {

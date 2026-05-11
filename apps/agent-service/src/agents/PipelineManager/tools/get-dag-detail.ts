@@ -22,38 +22,22 @@ export const getDagDetailTool = strictTool({
         error: err instanceof Error ? err.message : String(err),
       };
     }
-    // The Airflow fetch is the load-bearing call — if it fails, the
-    // tool fails. The Lattik-Table definition lookup is supplementary
-    // (it enriches the DAG with column families etc.); a DB outage or
-    // missing DATABASE_URL must not turn the whole tool into an error
-    // since the caller can still answer questions about the DAG itself.
-    let dag: Awaited<ReturnType<typeof airflow.getDag>>;
-    try {
-      dag = await airflow.getDag(input.dagId);
-    } catch (err) {
-      return {
-        error: `Failed to get DAG detail: ${err instanceof Error ? err.message : String(err)}`,
-      };
-    }
-
+    // Airflow GET is load-bearing — if it fails the tool fails. The DB
+    // lookup for the linked Lattik-Table definition is supplementary
+    // (it enriches the DAG with column families etc.); a DB outage must
+    // not turn the whole tool into an error. The two calls are independent,
+    // so fire them in parallel and resolve the soft-error case afterwards.
+    //
     // DAG IDs follow the pattern lattik__<table_name> or
     // lattik__backfill__<table_name>. Strip both prefixes to recover
-    // the Lattik Table name and look up the definition row.
+    // the Lattik Table name.
     const tableName = input.dagId
       .replace(/^lattik__backfill__/, "")
       .replace(/^lattik__/, "");
 
-    let linkedDef: {
-      id: string;
-      name: string;
-      kind: string;
-      version: number;
-      status: string;
-      spec: unknown;
-    } | null = null;
-    let linkedDefError: string | null = null;
-    try {
-      linkedDef = await getDb()
+    const [dagResult, linkedDefResult] = await Promise.allSettled([
+      airflow.getDag(input.dagId),
+      getDb()
         .select({
           id: definitions.id,
           name: definitions.name,
@@ -67,12 +51,23 @@ export const getDagDetailTool = strictTool({
           and(eq(definitions.name, tableName), eq(definitions.kind, "lattik_table")),
         )
         .limit(1)
-        .then((rows) => rows[0] ?? null);
-    } catch (err) {
-      // DB unavailable / DATABASE_URL not set / migration drift — surface
-      // a soft warning on the tool output instead of failing the call.
-      linkedDefError = err instanceof Error ? err.message : String(err);
+        .then((rows) => rows[0] ?? null),
+    ]);
+
+    if (dagResult.status === "rejected") {
+      const err = dagResult.reason;
+      return {
+        error: `Failed to get DAG detail: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
+    const dag = dagResult.value;
+    const linkedDef = linkedDefResult.status === "fulfilled" ? linkedDefResult.value : null;
+    const linkedDefError =
+      linkedDefResult.status === "rejected"
+        ? linkedDefResult.reason instanceof Error
+          ? linkedDefResult.reason.message
+          : String(linkedDefResult.reason)
+        : null;
 
     return {
       dagId: dag.dag_id,

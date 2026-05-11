@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Check, AlertCircle, ChevronDown, ChevronUp, Loader2, Wrench } from "lucide-react";
 
 const toolLabels: Record<string, string> = {
@@ -91,7 +91,7 @@ interface ToolResultProps {
   errorText?: string;
 }
 
-export function ToolResult({ toolName, state, input, output, errorText }: ToolResultProps) {
+function ToolResultImpl({ toolName, state, input, output, errorText }: ToolResultProps) {
   const [expanded, setExpanded] = useState(false);
 
   const isLoading = state === "input-streaming" || state === "input-available";
@@ -231,3 +231,8 @@ export function ToolResult({ toolName, state, input, output, errorText }: ToolRe
     </div>
   );
 }
+
+// Memo so an in-flight assistant message's other parts (tokens streaming
+// into the trailing text) don't drag every prior tool-result through a
+// re-render. The chat panel re-renders the whole messages list per token.
+export const ToolResult = memo(ToolResultImpl);

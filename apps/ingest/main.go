@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"fmt"
@@ -44,9 +45,15 @@ func main() {
 	}
 	apiTokenBytes := []byte(apiToken)
 
+	// Hash balancer (CRC32 over key) ensures every message with the same
+	// event_id lands on the same partition. That matters for retries — the
+	// idempotency dedup happens by event_id, so if a retry routes to a
+	// different partition than the original we lose ordering in the consumer
+	// view. LeastBytes (the prior default) optimizes broker-side balance but
+	// breaks the key→partition pin.
 	writer := &kafka.Writer{
 		Addr:         kafka.TCP(kafkaBrokers),
-		Balancer:     &kafka.LeastBytes{},
+		Balancer:     &kafka.Hash{},
 		BatchTimeout: 5 * time.Millisecond, // low latency for local dev
 		Async:        false,
 	}
@@ -114,6 +121,30 @@ func requireBearer(expected []byte, next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// Pool 64 KiB scratch buffers for body reads so the per-request growth
+// allocations inside `io.ReadAll`'s `bytes.Buffer` don't repeat. The final
+// payload is still a fresh, independent slice (so the pooled buffer can be
+// released safely after we hand it off to Kafka).
+var ingestBufPool = sync.Pool{
+	New: func() interface{} {
+		buf := bytes.NewBuffer(make([]byte, 0, 64*1024))
+		return buf
+	},
+}
+
+func readBodyPooled(r io.Reader, max int64) ([]byte, error) {
+	buf := ingestBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer ingestBufPool.Put(buf)
+	if _, err := buf.ReadFrom(io.LimitReader(r, max)); err != nil {
+		return nil, err
+	}
+	// Copy out so the returned slice is independent of the pooled buffer.
+	out := make([]byte, buf.Len())
+	copy(out, buf.Bytes())
+	return out, nil
+}
+
 func ingestHandler(writer *kafka.Writer, dedup *dedupCache) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ct := r.Header.Get("Content-Type")
@@ -122,7 +153,7 @@ func ingestHandler(writer *kafka.Writer, dedup *dedupCache) http.HandlerFunc {
 			return
 		}
 
-		body, err := io.ReadAll(io.LimitReader(r.Body, maxBodySize))
+		body, err := readBodyPooled(r.Body, maxBodySize)
 		if err != nil {
 			http.Error(w, "read error", http.StatusBadRequest)
 			return

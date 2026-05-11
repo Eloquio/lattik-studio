@@ -210,22 +210,36 @@ export function tokenize(input: string): LexResult {
       continue;
     }
 
-    // Numbers
+    // Numbers — scan first, slice once. Per-char `+=` allocates a fresh
+    // String on every digit; lexing runs on every keystroke during
+    // validation, so the per-token allocation cost adds up.
     if (ch >= "0" && ch <= "9") {
-      let num = "";
-      while (pos < input.length && peek() >= "0" && peek() <= "9") {
-        num += advance();
+      const startPos = pos;
+      while (pos < input.length) {
+        const c = input.charCodeAt(pos);
+        if (c < 48 /*0*/ || c > 57 /*9*/) break;
+        advance();
       }
-      if (pos < input.length && peek() === "." && pos + 1 < input.length && input[pos + 1] >= "0" && input[pos + 1] <= "9") {
-        num += advance(); // '.'
-        while (pos < input.length && peek() >= "0" && peek() <= "9") {
-          num += advance();
+      if (
+        pos < input.length &&
+        input[pos] === "." &&
+        pos + 1 < input.length &&
+        input[pos + 1] >= "0" &&
+        input[pos + 1] <= "9"
+      ) {
+        advance(); // '.'
+        while (pos < input.length) {
+          const c = input.charCodeAt(pos);
+          if (c < 48 || c > 57) break;
+          advance();
         }
+        const num = input.slice(startPos, pos);
         if (num.length > MAX_LITERAL_LENGTH) {
           errors.push({ line: startLine, col: startCol, message: `Numeric literal too long (${num.length} chars, max ${MAX_LITERAL_LENGTH})` });
         }
         emit("DECIMAL", num, startLine, startCol);
       } else {
+        const num = input.slice(startPos, pos);
         if (num.length > MAX_LITERAL_LENGTH) {
           errors.push({ line: startLine, col: startCol, message: `Numeric literal too long (${num.length} chars, max ${MAX_LITERAL_LENGTH})` });
         }
@@ -269,18 +283,22 @@ export function tokenize(input: string): LexResult {
       continue;
     }
 
-    // Identifiers and keywords
+    // Identifiers and keywords — scan first, slice once. Same rationale
+    // as the number path; identifier is the most common token type so this
+    // is the largest single allocation win in the lexer.
     if ((ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || ch === "_") {
-      let ident = "";
-      while (
-        pos < input.length &&
-        ((peek() >= "a" && peek() <= "z") ||
-          (peek() >= "A" && peek() <= "Z") ||
-          (peek() >= "0" && peek() <= "9") ||
-          peek() === "_")
-      ) {
-        ident += advance();
+      const startPos = pos;
+      while (pos < input.length) {
+        const c = input.charCodeAt(pos);
+        const isAlpha =
+          (c >= 97 && c <= 122) /*a-z*/ ||
+          (c >= 65 && c <= 90) /*A-Z*/ ||
+          (c >= 48 && c <= 57) /*0-9*/ ||
+          c === 95 /*_*/;
+        if (!isAlpha) break;
+        advance();
       }
+      const ident = input.slice(startPos, pos);
       const upper = ident.toUpperCase();
 
       // After AS keyword, recognize type keywords

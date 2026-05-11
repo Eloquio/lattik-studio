@@ -57,16 +57,52 @@ function warnIfTruncated(rows: unknown[], kind: string) {
   }
 }
 
+// Short-TTL in-process cache. The validation/review flow runs staticCheck →
+// review → staticCheck back-to-back, each independently calling `loadMerged*`
+// — without a cache that's 6+ identical DB hits + Zod parses in a few
+// seconds. A 30s TTL covers the entire flow with one window and is short
+// enough that newly-merged definitions show up promptly in subsequent calls.
+const CACHE_TTL_MS = 30_000;
+type Cached<T> = { value: T; expiresAt: number };
+const cache = new Map<string, Cached<unknown>>();
+
+function memoTtl<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
+  const now = Date.now();
+  const hit = cache.get(key) as Cached<T> | undefined;
+  if (hit && hit.expiresAt > now) return Promise.resolve(hit.value);
+  const promise = fn();
+  void promise.then(
+    (value) => {
+      cache.set(key, { value: value as unknown, expiresAt: Date.now() + ttlMs });
+    },
+    () => {
+      // Don't cache failures — let the next call retry.
+    },
+  );
+  return promise;
+}
+
+/** Clear the referential cache. Call after a merge webhook commits new
+ *  definitions if you need them visible to validators immediately, rather
+ *  than waiting out the 30s TTL. */
+export function invalidateMergedDefinitionsCache() {
+  cache.clear();
+}
+
 export async function loadMergedEntities(): Promise<Entity[]> {
-  const defs = await listMergedDefinitions("entity", REFERENTIAL_LIMIT);
-  warnIfTruncated(defs, "entity");
-  return safeParseAll(entitySchema, defs, "entity");
+  return memoTtl("entities", CACHE_TTL_MS, async () => {
+    const defs = await listMergedDefinitions("entity", REFERENTIAL_LIMIT);
+    warnIfTruncated(defs, "entity");
+    return safeParseAll(entitySchema, defs, "entity");
+  });
 }
 
 export async function loadMergedDimensions(): Promise<Dimension[]> {
-  const defs = await listMergedDefinitions("dimension", REFERENTIAL_LIMIT);
-  warnIfTruncated(defs, "dimension");
-  return safeParseAll(dimensionSchema, defs, "dimension");
+  return memoTtl("dimensions", CACHE_TTL_MS, async () => {
+    const defs = await listMergedDefinitions("dimension", REFERENTIAL_LIMIT);
+    warnIfTruncated(defs, "dimension");
+    return safeParseAll(dimensionSchema, defs, "dimension");
+  });
 }
 
 export function validateDimensionExists(
@@ -81,16 +117,18 @@ export function validateDimensionExists(
 }
 
 export async function loadMergedTables(): Promise<{ loggerTables: LoggerTable[]; lattikTables: LattikTable[] }> {
-  const [logDefs, tableDefs] = await Promise.all([
-    listMergedDefinitions("logger_table", REFERENTIAL_LIMIT),
-    listMergedDefinitions("lattik_table", REFERENTIAL_LIMIT),
-  ]);
-  warnIfTruncated(logDefs, "logger_table");
-  warnIfTruncated(tableDefs, "lattik_table");
-  return {
-    loggerTables: safeParseAll(loggerTableSchema, logDefs, "logger_table"),
-    lattikTables: safeParseAll(lattikTableSchema, tableDefs, "lattik_table"),
-  };
+  return memoTtl("tables", CACHE_TTL_MS, async () => {
+    const [logDefs, tableDefs] = await Promise.all([
+      listMergedDefinitions("logger_table", REFERENTIAL_LIMIT),
+      listMergedDefinitions("lattik_table", REFERENTIAL_LIMIT),
+    ]);
+    warnIfTruncated(logDefs, "logger_table");
+    warnIfTruncated(tableDefs, "lattik_table");
+    return {
+      loggerTables: safeParseAll(loggerTableSchema, logDefs, "logger_table"),
+      lattikTables: safeParseAll(lattikTableSchema, tableDefs, "lattik_table"),
+    };
+  });
 }
 
 export function validateEntityExists(

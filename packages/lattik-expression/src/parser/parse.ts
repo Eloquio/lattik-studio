@@ -41,10 +41,41 @@ export interface ParseResult {
   errors: ParseError[];
 }
 
+// Tiny LRU. `parse()` is called per-keystroke per expression field — wide
+// canvases re-parse every field on every render. The same input string
+// appears many times across renders; caching the immutable result lets the
+// re-parse cost collapse to a Map lookup.
+const PARSE_CACHE_CAPACITY = 256;
+const parseCache = new Map<string, ParseResult>();
+
+function cacheLookup(input: string): ParseResult | undefined {
+  const hit = parseCache.get(input);
+  if (hit === undefined) return undefined;
+  // Bump to the most-recently-used position (Map iteration order is insertion
+  // order, which doubles as LRU when we re-set on every hit).
+  parseCache.delete(input);
+  parseCache.set(input, hit);
+  return hit;
+}
+
+function cacheStore(input: string, result: ParseResult): void {
+  // Don't cache pathologically large inputs.
+  if (input.length > 8192) return;
+  if (parseCache.size >= PARSE_CACHE_CAPACITY) {
+    const oldest = parseCache.keys().next().value;
+    if (oldest !== undefined) parseCache.delete(oldest);
+  }
+  parseCache.set(input, result);
+}
+
 export function parse(input: string): ParseResult {
+  const cached = cacheLookup(input);
+  if (cached !== undefined) return cached;
+
   const { tokens, errors: lexErrors } = tokenize(input);
+  let result: ParseResult;
   if (lexErrors.length > 0) {
-    return {
+    result = {
       expr: null,
       errors: lexErrors.map((e) => ({
         line: e.line,
@@ -52,13 +83,16 @@ export function parse(input: string): ParseResult {
         message: e.message,
       })),
     };
+  } else {
+    const parser = new Parser(tokens);
+    const expr = parser.parseExpr();
+    if (!parser.isAtEnd()) {
+      parser.error(`Unexpected token '${parser.current().text}'`);
+    }
+    result = { expr: parser.errors.length > 0 ? null : expr, errors: parser.errors };
   }
-  const parser = new Parser(tokens);
-  const expr = parser.parseExpr();
-  if (!parser.isAtEnd()) {
-    parser.error(`Unexpected token '${parser.current().text}'`);
-  }
-  return { expr: parser.errors.length > 0 ? null : expr, errors: parser.errors };
+  cacheStore(input, result);
+  return result;
 }
 
 // ---------------------------------------------------------------------------

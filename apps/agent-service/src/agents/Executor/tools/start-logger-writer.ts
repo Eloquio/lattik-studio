@@ -84,6 +84,22 @@ function renderTemplate(
   });
 }
 
+// Read the template once and memoize. The file is immutable in the running
+// container (baked into the image at build time), so a per-invocation
+// `readFile` is wasted syscall + buffer alloc on every webhook fan-out.
+let templatePromise: Promise<string> | null = null;
+function loadTemplate(): Promise<string> {
+  if (!templatePromise) {
+    templatePromise = readFile(TEMPLATE_PATH, "utf8").catch((err) => {
+      // Drop the cached failure so a transient read error can be retried by
+      // the next caller.
+      templatePromise = null;
+      throw err;
+    });
+  }
+  return templatePromise;
+}
+
 export const startLoggerWriterTool = tool({
   description:
     "Apply the per-table Kafka→Iceberg logger-writer Deployment for a Logger Table. Replicas auto-track the Kafka topic's partition count. Idempotent — re-apply triggers a rolling restart with the latest schema/partition count. Returns `{ ok, deployment, namespace, replicas }`.",
@@ -115,7 +131,7 @@ export const startLoggerWriterTool = tool({
 
     let template: string;
     try {
-      template = await readFile(TEMPLATE_PATH, "utf8");
+      template = await loadTemplate();
     } catch (err) {
       return {
         ok: false,

@@ -139,31 +139,39 @@ async function gcOneTable(
     .from(schema.lattikTableCommits)
     .where(eq(schema.lattikTableCommits.tableName, tableName));
 
-  // 2. Fetch each manifest from S3, collect the union of referenced load_ids
+  // 2. Fetch each manifest from S3 in parallel (bounded concurrency so a
+  // table with hundreds of historical commits doesn't fan out to hundreds of
+  // simultaneous S3 GETs). Collect the union of referenced load_ids.
   const referenced = new Set<string>();
-  for (const commit of commits) {
-    const manifestKey = `lattik/${tableName}/manifests/v${String(
-      commit.manifestVersion,
-    ).padStart(4, "0")}_${commit.manifestLoadId}.json`;
-    try {
-      const body = await getObject(S3_BUCKET, manifestKey);
-      const manifest = JSON.parse(body) as LoadManifest;
-      // The manifest itself is a "load_id" via commit.manifestLoadId; include it.
-      referenced.add(commit.manifestLoadId);
-      for (const loadId of Object.values(manifest.columns ?? {})) {
-        referenced.add(loadId);
-      }
-    } catch (err) {
-      // Missing manifest shouldn't block GC — log and continue. A referenced
-      // load_id that we can't read is treated as *still referenced* by not
-      // adding its siblings to the orphan set.
-      log.warn("lattik.gc.manifest_read_failed", {
-        table_name: tableName,
-        manifest_key: manifestKey,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      referenced.add(commit.manifestLoadId);
-    }
+  const MANIFEST_FETCH_CONCURRENCY = 16;
+  for (let i = 0; i < commits.length; i += MANIFEST_FETCH_CONCURRENCY) {
+    const chunk = commits.slice(i, i + MANIFEST_FETCH_CONCURRENCY);
+    await Promise.all(
+      chunk.map(async (commit) => {
+        const manifestKey = `lattik/${tableName}/manifests/v${String(
+          commit.manifestVersion,
+        ).padStart(4, "0")}_${commit.manifestLoadId}.json`;
+        try {
+          const body = await getObject(S3_BUCKET, manifestKey);
+          const manifest = JSON.parse(body) as LoadManifest;
+          // The manifest itself is a "load_id" via commit.manifestLoadId; include it.
+          referenced.add(commit.manifestLoadId);
+          for (const loadId of Object.values(manifest.columns ?? {})) {
+            referenced.add(loadId);
+          }
+        } catch (err) {
+          // Missing manifest shouldn't block GC — log and continue. A
+          // referenced load_id we can't read is conservatively treated as
+          // *still referenced* by not adding its siblings to the orphan set.
+          log.warn("lattik.gc.manifest_read_failed", {
+            table_name: tableName,
+            manifest_key: manifestKey,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          referenced.add(commit.manifestLoadId);
+        }
+      }),
+    );
   }
 
   // 3. List every object under `lattik/<table>/loads/`, group by load_id

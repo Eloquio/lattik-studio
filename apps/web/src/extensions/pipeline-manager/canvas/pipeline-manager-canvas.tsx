@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import type { Spec } from "@json-render/core";
 import { Renderer, JSONUIProvider } from "@json-render/react";
 import { registry } from "./registry";
@@ -22,19 +22,25 @@ export function PipelineManagerCanvas({
   const prevStateRef = useRef(EMPTY_STATE as Record<string, unknown>);
   const prevStateJsonRef = useRef<string | null>(null);
 
-  if (!spec) return null;
+  // Memoize the stringify guard on spec.state so token-by-token parent
+  // re-renders during streaming don't pay the full-state stringify cost.
+  const stableState = useMemo(() => {
+    if (!spec) return null;
+    const stateObj = spec.state ?? EMPTY_STATE;
+    const stateJson = JSON.stringify(stateObj);
+    if (stateJson !== prevStateJsonRef.current) {
+      prevStateJsonRef.current = stateJson;
+      prevStateRef.current = stateObj;
+    }
+    return prevStateRef.current;
+  }, [spec?.state]);
 
-  const stateObj = spec.state ?? EMPTY_STATE;
-  const stateJson = JSON.stringify(stateObj);
-  if (stateJson !== prevStateJsonRef.current) {
-    prevStateJsonRef.current = stateJson;
-    prevStateRef.current = stateObj;
-  }
+  if (!spec || !stableState) return null;
 
   return (
     <JSONUIProvider
       registry={registry}
-      initialState={prevStateRef.current}
+      initialState={stableState}
       onStateChange={onStateChange}
     >
       <div className="relative flex flex-1 flex-col gap-4 p-5">

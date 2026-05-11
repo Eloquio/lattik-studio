@@ -97,13 +97,16 @@ impl Stitcher for IndexedStitcher {
             }
         }
 
-        // Phase 2: Compute union PKs
-        let mut all_pks: Vec<PkValue> = load_matches
+        // Phase 2: Compute union PKs. Dedup via a borrow-only `HashSet<&PkValue>`
+        // before cloning — previously we cloned every PK across every load just
+        // to immediately drop the duplicates. With wide tables and overlapping
+        // load partitions this was the dominant alloc in the indexed path.
+        let unique_pks: std::collections::HashSet<&PkValue> = load_matches
             .values()
-            .flat_map(|matches| matches.iter().map(|(pk, _)| pk.clone()))
+            .flat_map(|matches| matches.iter().map(|(pk, _)| pk))
             .collect();
+        let mut all_pks: Vec<PkValue> = unique_pks.into_iter().cloned().collect();
         all_pks.sort();
-        all_pks.dedup();
 
         if all_pks.is_empty() {
             self.output_schema = Some(output_schema);
@@ -145,11 +148,14 @@ impl Stitcher for IndexedStitcher {
                 continue;
             };
 
-            let matches = load_matches
-                .get(load_id.as_str())
-                .cloned()
-                .unwrap_or_default();
-            let load_pk_to_rid: HashMap<PkValue, u64> = matches.into_iter().collect();
+            // Borrow the matches vec — the consumed-into-HashMap step
+            // previously cloned the whole `Vec<(PkValue, u64)>` (so each
+            // PkValue String/Composite). With wide load match sets this was
+            // a 100k+-row copy per output column. Build the HashMap by ref.
+            let empty: Vec<(PkValue, u64)> = Vec::new();
+            let matches = load_matches.get(load_id.as_str()).unwrap_or(&empty);
+            let load_pk_to_rid: HashMap<&PkValue, u64> =
+                matches.iter().map(|(pk, rid)| (pk, *rid)).collect();
             let reader = readers
                 .get(load_id.as_str())
                 .ok_or_else(|| StitchError::Other(anyhow::anyhow!("Reader not found for load {}", load_id)))?;
@@ -158,7 +164,7 @@ impl Stitcher for IndexedStitcher {
                 // Indexed path: random-access fetch by row_id
                 let row_ids: Vec<u64> = all_pks
                     .iter()
-                    .filter_map(|pk| load_pk_to_rid.get(pk).copied())
+                    .filter_map(|pk| load_pk_to_rid.get(&pk).copied())
                     .collect();
 
                 if row_ids.is_empty() {
@@ -176,7 +182,7 @@ impl Stitcher for IndexedStitcher {
                 let mut fetch_idx = 0usize;
                 let mut indices: Vec<Option<u32>> = Vec::with_capacity(all_pks.len());
                 for pk in &all_pks {
-                    if load_pk_to_rid.contains_key(pk) {
+                    if load_pk_to_rid.contains_key(&pk) {
                         indices.push(Some(fetch_idx as u32));
                         fetch_idx += 1;
                     } else {
@@ -201,7 +207,7 @@ impl Stitcher for IndexedStitcher {
                 // or None if this load doesn't have that PK.
                 let indices: Vec<Option<u32>> = all_pks
                     .iter()
-                    .map(|pk| load_pk_to_rid.get(pk).map(|&rid| rid as u32))
+                    .map(|pk| load_pk_to_rid.get(&pk).map(|&rid| rid as u32))
                     .collect();
 
                 let index_array = UInt32Array::from(indices);
