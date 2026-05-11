@@ -3,8 +3,9 @@ import type { ValidationError } from "./naming";
 import { validateName, validateQualifiedName, validateDescription, validateRetention, validateDedupWindow } from "./naming";
 import { validateExpression } from "./expressions";
 import {
-  loadMergedEntities,
-  loadMergedDimensions,
+  loadMergedEntityNames,
+  loadMergedDimensionNames,
+  loadMergedTableNames,
   loadMergedTables,
   validateEntityExists,
   validateDimensionExists,
@@ -108,10 +109,14 @@ async function validateDimension(spec: Dimension): Promise<ValidationError[]> {
   errors.push(...validateName(spec.name, "name"));
   errors.push(...validateDescription(spec.description, "description"));
 
-  const entities = await loadMergedEntities();
-  errors.push(...validateEntityExists(spec.entity, entities, "entity"));
-
-  const { loggerTables, lattikTables } = await loadMergedTables();
+  // Entity check is existence-only — fetch names without Zod-parsing every
+  // merged entity. Table check uses the full parses because validateColumnExists
+  // walks columns/families.
+  const [entityNames, { loggerTables, lattikTables }] = await Promise.all([
+    loadMergedEntityNames(),
+    loadMergedTables(),
+  ]);
+  errors.push(...validateEntityExists(spec.entity, entityNames, "entity"));
   errors.push(...validateTableExists(spec.source_table, loggerTables, lattikTables, "source_table"));
   errors.push(...validateColumnExists(spec.source_table, spec.source_column, loggerTables, lattikTables, "source_column"));
 
@@ -133,11 +138,12 @@ async function validateLoggerTable(spec: LoggerTable): Promise<ValidationError[]
     }
   }
 
-  // Dimension references must exist
-  const dimensions = await loadMergedDimensions();
+  // Dimension references must exist — names-only path skips the Zod parse
+  // over every merged dimension's spec.
+  const dimensionNames = await loadMergedDimensionNames();
   for (const col of spec.columns) {
     if (col.dimension) {
-      errors.push(...validateDimensionExists(col.dimension, dimensions, `column.${col.name}.dimension`));
+      errors.push(...validateDimensionExists(col.dimension, dimensionNames, `column.${col.name}.dimension`));
     }
   }
 
@@ -162,12 +168,17 @@ async function validateLattikTable(spec: LattikTable): Promise<ValidationError[]
     errors.push({ field: "primary_key", message: "At least one primary key is required" });
   }
 
-  const entities = await loadMergedEntities();
+  // Entity refs are existence-only; tables are needed in full because
+  // validateColumnExists walks columns/families. Fire in parallel.
+  const [entityNames, mergedTables] = await Promise.all([
+    loadMergedEntityNames(),
+    loadMergedTables(),
+  ]);
   for (const pk of spec.primary_key) {
-    errors.push(...validateEntityExists(pk.entity, entities, `primary_key.${pk.column}.entity`));
+    errors.push(...validateEntityExists(pk.entity, entityNames, `primary_key.${pk.column}.entity`));
   }
 
-  const { loggerTables, lattikTables } = await loadMergedTables();
+  const { loggerTables, lattikTables } = mergedTables;
   const allColNames = new Set<string>();
 
   for (const family of spec.column_families) {
@@ -222,11 +233,13 @@ async function validateMetric(spec: Metric): Promise<ValidationError[]> {
     errors.push({ field: "calculations", message: "At least one calculation is required" });
   }
 
-  const { loggerTables, lattikTables } = await loadMergedTables();
+  // Metric check is existence-only on tables (no column-level inspection),
+  // so use the names-only loader to skip the LoggerTable/LattikTable Zod parse.
+  const { loggerTableNames, lattikTableNames } = await loadMergedTableNames();
   for (let i = 0; i < (spec.calculations ?? []).length; i++) {
     const calc = spec.calculations[i];
     errors.push(...validateExpression(calc.expression, `calculations[${i}].expression`));
-    errors.push(...validateTableExists(calc.source_table, loggerTables, lattikTables, `calculations[${i}].source_table`));
+    errors.push(...validateTableExists(calc.source_table, loggerTableNames, lattikTableNames, `calculations[${i}].source_table`));
   }
 
   return errors;

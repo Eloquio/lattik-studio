@@ -133,31 +133,58 @@ impl StitchSession {
             output_schema.fields().iter().map(|f| format!("{}:{}", f.name(), f.data_type())).collect::<Vec<_>>()
         );
 
-        // Open bucket readers for each load
-        let mut readers: HashMap<String, Box<dyn FamilyBucketReader>> = HashMap::new();
-        for spec in &config.load_specs {
-            let format: Box<dyn FamilyFormat> = match spec.format_id.as_str() {
-                "parquet" => Box::new(ParquetFormat),
-                "vortex" => Box::new(VortexFormat),
-                other => {
-                    return Err(StitchError::UnsupportedOperation {
-                        format: other.to_string(),
-                        operation: "open_bucket".to_string(),
+        // Open bucket readers for each load — in parallel. Each open does S3
+        // listing + ObjectStore construction internally (via block_in_place);
+        // with serial opens on N loads we paid N × RTT. std::thread::scope
+        // spawns one OS thread per load. Capture the s3_config and
+        // output_schema by reference once outside the map closure so each
+        // spawned thread inherits the borrow rather than re-capturing
+        // `config` as a whole (which the FnMut map closure can't repeat).
+        let s3_config = &config.s3_config;
+        let output_schema_ref = &output_schema;
+        let readers: HashMap<String, Box<dyn FamilyBucketReader>> =
+            std::thread::scope(|s| -> Result<_> {
+                let handles: Vec<_> = config
+                    .load_specs
+                    .iter()
+                    .map(|spec| {
+                        let load_schema = build_load_schema(spec, output_schema_ref);
+                        let format_id = spec.format_id.as_str();
+                        let format: Box<dyn FamilyFormat> = match format_id {
+                            "parquet" => Box::new(ParquetFormat),
+                            "vortex" => Box::new(VortexFormat),
+                            other => {
+                                return Err(StitchError::UnsupportedOperation {
+                                    format: other.to_string(),
+                                    operation: "open_bucket".to_string(),
+                                });
+                            }
+                        };
+                        Ok(s.spawn(move || -> Result<(String, Box<dyn FamilyBucketReader>)> {
+                            let reader = format.open_bucket(
+                                &spec.path,
+                                &load_schema,
+                                &spec.pk_columns,
+                                s3_config,
+                            )?;
+                            eprintln!(
+                                "[lattik-stitch] Opened reader for load '{}' at path '{}'",
+                                spec.load_id, spec.path
+                            );
+                            Ok((spec.load_id.clone(), reader))
+                        }))
                     })
+                    .collect::<Result<Vec<_>>>()?;
+
+                let mut readers: HashMap<String, Box<dyn FamilyBucketReader>> = HashMap::new();
+                for h in handles {
+                    let (load_id, reader) = h
+                        .join()
+                        .map_err(|_| StitchError::Other(anyhow::anyhow!("open_bucket worker panicked")))??;
+                    readers.insert(load_id, reader);
                 }
-            };
-
-            let load_schema = build_load_schema(spec, &output_schema);
-            let reader = format.open_bucket(
-                &spec.path,
-                &load_schema,
-                &spec.pk_columns,
-                &config.s3_config,
-            )?;
-
-            eprintln!("[lattik-stitch] Opened reader for load '{}' at path '{}'", spec.load_id, spec.path);
-            readers.insert(spec.load_id.clone(), reader);
-        }
+                Ok(readers)
+            })?;
 
         // Parse PK filter if provided
         let pk_filter = config

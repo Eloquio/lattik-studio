@@ -1,5 +1,5 @@
 import type { ValidationError } from "./naming";
-import { listMergedDefinitions } from "../definitions.js";
+import { listMergedDefinitions, listMergedDefinitionNames } from "../definitions.js";
 import {
   entitySchema,
   dimensionSchema,
@@ -105,12 +105,52 @@ export async function loadMergedDimensions(): Promise<Dimension[]> {
   });
 }
 
+/**
+ * Names-only loaders for existence checks. Skip the Zod parse — for an
+ * entity/dimension/table whose only role is "do you exist?", projecting the
+ * spec through its full schema is wasted work. A workspace with hundreds of
+ * definitions saw most of its first-call cost vanish here.
+ */
+export async function loadMergedEntityNames(): Promise<ReadonlySet<string>> {
+  return memoTtl("entity_names", CACHE_TTL_MS, async () => {
+    const rows = await listMergedDefinitionNames("entity", REFERENTIAL_LIMIT);
+    return new Set(rows.map((r) => r.name));
+  });
+}
+
+export async function loadMergedDimensionNames(): Promise<ReadonlySet<string>> {
+  return memoTtl("dimension_names", CACHE_TTL_MS, async () => {
+    const rows = await listMergedDefinitionNames("dimension", REFERENTIAL_LIMIT);
+    return new Set(rows.map((r) => r.name));
+  });
+}
+
+export async function loadMergedTableNames(): Promise<{
+  loggerTableNames: ReadonlySet<string>;
+  lattikTableNames: ReadonlySet<string>;
+}> {
+  return memoTtl("table_names", CACHE_TTL_MS, async () => {
+    const [logger, lattik] = await Promise.all([
+      listMergedDefinitionNames("logger_table", REFERENTIAL_LIMIT),
+      listMergedDefinitionNames("lattik_table", REFERENTIAL_LIMIT),
+    ]);
+    return {
+      loggerTableNames: new Set(logger.map((r) => r.name)),
+      lattikTableNames: new Set(lattik.map((r) => r.name)),
+    };
+  });
+}
+
 export function validateDimensionExists(
   dimensionName: string,
-  mergedDimensions: Dimension[],
+  mergedDimensions: Dimension[] | ReadonlySet<string>,
   field: string
 ): ValidationError[] {
-  if (!mergedDimensions.some((d) => d.name === dimensionName)) {
+  const exists =
+    mergedDimensions instanceof Set
+      ? mergedDimensions.has(dimensionName)
+      : (mergedDimensions as Dimension[]).some((d) => d.name === dimensionName);
+  if (!exists) {
     return [{ field, message: `Dimension '${dimensionName}' does not exist in merged definitions` }];
   }
   return [];
@@ -133,10 +173,14 @@ export async function loadMergedTables(): Promise<{ loggerTables: LoggerTable[];
 
 export function validateEntityExists(
   entityName: string,
-  mergedEntities: Entity[],
+  mergedEntities: Entity[] | ReadonlySet<string>,
   field: string
 ): ValidationError[] {
-  if (!mergedEntities.some((e) => e.name === entityName)) {
+  const exists =
+    mergedEntities instanceof Set
+      ? mergedEntities.has(entityName)
+      : (mergedEntities as Entity[]).some((e) => e.name === entityName);
+  if (!exists) {
     return [{ field, message: `Entity '${entityName}' does not exist in merged definitions` }];
   }
   return [];
@@ -144,14 +188,19 @@ export function validateEntityExists(
 
 export function validateTableExists(
   tableName: string,
-  loggerTables: LoggerTable[],
-  lattikTables: LattikTable[],
+  loggerTables: LoggerTable[] | ReadonlySet<string>,
+  lattikTables: LattikTable[] | ReadonlySet<string>,
   field: string
 ): ValidationError[] {
-  const exists =
-    loggerTables.some((t) => t.name === tableName) ||
-    lattikTables.some((t) => t.name === tableName);
-  if (!exists) {
+  const inLogger =
+    loggerTables instanceof Set
+      ? loggerTables.has(tableName)
+      : (loggerTables as LoggerTable[]).some((t) => t.name === tableName);
+  const inLattik =
+    lattikTables instanceof Set
+      ? lattikTables.has(tableName)
+      : (lattikTables as LattikTable[]).some((t) => t.name === tableName);
+  if (!inLogger && !inLattik) {
     return [{ field, message: `Table '${tableName}' does not exist in merged definitions` }];
   }
   return [];
