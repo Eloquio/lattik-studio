@@ -11,6 +11,29 @@ const AIRFLOW_API_URL =
 
 const BASE = `${AIRFLOW_API_URL}/api/v2`;
 
+/**
+ * Lattik-managed DAG IDs follow the pattern `lattik__<table_name>` or
+ * `lattik__backfill__<table_name>`. Tools that take a `dagId` from an LLM
+ * argument should call this first so the LLM can't probe DAGs the agent
+ * isn't meant to touch (e.g. other workloads colocated in the same
+ * Airflow cluster). Defense-in-depth on top of the tag filter in
+ * `listDags` — the LLM can still pick any string for follow-up calls.
+ */
+const LATTIK_DAG_RE = /^lattik__[A-Za-z0-9_]+$/;
+
+export class InvalidDagIdError extends Error {
+  constructor(dagId: string) {
+    super(
+      `Invalid DAG id: ${JSON.stringify(dagId)}. Only Lattik-managed DAGs (matching ${LATTIK_DAG_RE.source}) can be accessed via these tools.`,
+    );
+    this.name = "InvalidDagIdError";
+  }
+}
+
+export function assertLattikDagId(dagId: string): void {
+  if (!LATTIK_DAG_RE.test(dagId)) throw new InvalidDagIdError(dagId);
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------

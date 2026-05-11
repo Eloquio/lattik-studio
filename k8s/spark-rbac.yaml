@@ -20,22 +20,27 @@ kind: Role
 metadata:
   name: spark-driver
   namespace: workloads
+# Minimum verbs Spark needs in cluster mode: a driver creates executor
+# pods + their headless service, and reads logs. We previously allowed
+# `pods/exec` and `pods/portforward` (useful for `kubectl debug`) and
+# read/write on configmaps/PVCs (Spark doesn't actually need these in our
+# setup — driver scripts ship via the `spark-drivers` ConfigMap which is
+# pre-created by `pnpm spark-drivers:sync` outside the driver SA).
+# Removing them tightens lateral movement if a driver pod is ever
+# compromised.
 rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch", "create", "delete", "deletecollection"]
   - apiGroups: [""]
-    resources: ["pods/log", "pods/exec", "pods/portforward"]
-    verbs: ["get", "list", "watch", "create"]
+    resources: ["pods/log"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["services"]
-    verbs: ["get", "list", "watch", "create", "delete", "deletecollection"]
+    verbs: ["get", "list", "watch", "create", "delete"]
   - apiGroups: [""]
     resources: ["configmaps"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "deletecollection"]
-  - apiGroups: [""]
-    resources: ["persistentvolumeclaims"]
-    verbs: ["get", "list", "watch", "create", "delete", "deletecollection"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

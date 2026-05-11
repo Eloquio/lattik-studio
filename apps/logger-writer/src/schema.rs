@@ -27,13 +27,24 @@ struct SrSchemaResponse {
     version: u32,
 }
 
-/// Fetch the .proto text registered for `subject` (latest version).
+/// Fetch the .proto text registered for `subject`. If `cfg.schema_version`
+/// is set, fetch that exact version — otherwise fall back to `latest`.
+///
+/// Pinning is the safer default for production: it prevents a Schema
+/// Registry rollout (intentional or compromised) from silently re-shaping
+/// what bytes the writer decodes. Local dev leaves SCHEMA_VERSION unset
+/// and uses `latest` for fast iteration.
 pub async fn fetch_proto_text(cfg: &Config) -> Result<String> {
     let subject = format!("logger.{}-value", cfg.logger_table);
+    let version_segment = match cfg.schema_version {
+        Some(v) => v.to_string(),
+        None => "latest".to_string(),
+    };
     let url = format!(
-        "{}/subjects/{}/versions/latest",
+        "{}/subjects/{}/versions/{}",
         cfg.schema_registry_url.trim_end_matches('/'),
         urlencoding::encode(&subject),
+        version_segment,
     );
     let resp = reqwest::get(&url)
         .await
@@ -42,7 +53,7 @@ pub async fn fetch_proto_text(cfg: &Config) -> Result<String> {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
         return Err(anyhow!(
-            "Schema Registry returned {status} for subject {subject}: {body}"
+            "Schema Registry returned {status} for subject {subject} version {version_segment}: {body}"
         ));
     }
     let parsed: SrSchemaResponse = resp.json().await.context("parse SR response")?;

@@ -47,10 +47,27 @@ data:
     s3.endpoint=http://minio.minio:9000
     s3.region=us-east-1
     s3.path-style-access=true
-    s3.aws-access-key=lattik
-    s3.aws-secret-key=lattik-local
+    # Trino expands ${ENV:VAR} from the pod's environment at startup. The
+    # creds come from the `minio-credentials` Secret mounted via envFrom on
+    # the Trino container, so they never appear in the ConfigMap, in
+    # `kubectl describe`, or in pod logs.
+    s3.aws-access-key=${ENV:AWS_ACCESS_KEY_ID}
+    s3.aws-secret-key=${ENV:AWS_SECRET_ACCESS_KEY}
   tpch.properties: |
     connector.name=tpch
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  # Local copy of the MinIO root credentials. Secrets are namespace-scoped
+  # so anything outside the `minio` namespace that needs S3 creds gets its
+  # own copy. Keep values in lockstep with k8s/minio.yaml's minio-secret.
+  name: minio-credentials
+  namespace: trino
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID: lattik
+  AWS_SECRET_ACCESS_KEY: lattik-local
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -73,6 +90,13 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+          envFrom:
+            # Provides AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY which the
+            # iceberg.properties config substitutes into the connector's
+            # s3 creds via ${ENV:...}. Keeping the secret values out of the
+            # ConfigMap means they're not visible in `kubectl describe`.
+            - secretRef:
+                name: minio-credentials
           resources:
             requests:
               memory: "1Gi"

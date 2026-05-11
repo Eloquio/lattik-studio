@@ -48,9 +48,16 @@ const PUBLIC_ROUTES = new Set<string>(["/health"]);
  * env replacements, so a top-level constant captures the BUILD env, not the
  * RUNTIME env. The dedicated env var name avoids accidental NODE_ENV
  * inlining too.
+ *
+ * Belt-and-suspenders: even if the flag is set, we refuse to honor it when
+ * NODE_ENV or VERCEL_ENV reports production. A single misconfigured env var
+ * shouldn't be sufficient to disable the OIDC trust boundary in prod.
  */
 function isDevBypass(): boolean {
-  return process.env.LATTIK_DEV_AUTH_BYPASS === "1";
+  if (process.env.LATTIK_DEV_AUTH_BYPASS !== "1") return false;
+  if (process.env.NODE_ENV === "production") return false;
+  if (process.env.VERCEL_ENV === "production") return false;
+  return true;
 }
 
 /**
@@ -174,9 +181,21 @@ export async function verifyRequest(event: H3Event): Promise<AuthContext> {
  * - `/.well-known/workflow/` — the workflow SDK's internal callbacks
  *   (queue/dispatcher → step/flow/webhook routes). These are hit by the
  *   workflow runtime itself, not by external clients, so the trusted-
- *   client headers don't apply. Production deployments should rely on
- *   network-level isolation here; HMAC-signing the dispatcher→runtime
- *   hop is a separate hardening slice.
+ *   client headers don't apply.
+ *
+ *   **Security model.** On Vercel, the SDK writes `experimentalTriggers`
+ *   into each handler's `.vc-config.json` at build time, which configures
+ *   the route as a Vercel Queues consumer. Vercel enforces that only its
+ *   own queueing infrastructure can invoke consumer routes — public
+ *   internet traffic to `/.well-known/workflow/*` is rejected by the
+ *   platform before it reaches user code. See
+ *   https://vercel.com/docs/queues/concepts#consumer-function-security.
+ *
+ *   **Off-Vercel deployments** (e.g. self-hosted Nitro) do NOT get this
+ *   protection automatically. If you deploy outside Vercel, you must
+ *   either firewall these routes off from the public internet at the
+ *   network layer, or add an HMAC-signing layer to the dispatcher→runtime
+ *   hop. The current code does neither, so off-Vercel use is unsafe.
  */
 const PUBLIC_PREFIXES = ["/.well-known/workflow/"];
 

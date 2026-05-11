@@ -18,6 +18,48 @@ export interface TrinoQueryResult {
 }
 
 /**
+ * Trino identifier regex — letter/underscore prefix, alphanumeric+underscore
+ * tail. Stricter than what Trino accepts inside `"…"` quoting on purpose:
+ * agent-supplied identifiers shouldn't carry punctuation, and a strict regex
+ * is a clean second line of defense behind the quote escaping below.
+ */
+const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]{0,254}$/;
+
+export class TrinoIdentifierError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TrinoIdentifierError";
+  }
+}
+
+/**
+ * Quote a single Trino identifier safely. Validates against IDENT_RE and
+ * doubles any internal `"` (Trino's standard escape) before wrapping. Use
+ * this for any catalog/schema/table name that originated from an LLM or
+ * external input.
+ */
+export function quoteIdent(name: string): string {
+  if (!IDENT_RE.test(name)) {
+    throw new TrinoIdentifierError(`Invalid identifier: ${JSON.stringify(name)}`);
+  }
+  return `"${name.replace(/"/g, '""')}"`;
+}
+
+/**
+ * Quote a dotted table reference like `catalog.schema.table` (1–3 parts).
+ * Each segment is validated and quoted individually.
+ */
+export function quoteTableRef(ref: string): string {
+  const parts = ref.split(".");
+  if (parts.length < 1 || parts.length > 3) {
+    throw new TrinoIdentifierError(
+      `Invalid table reference (expected 1–3 dotted segments): ${JSON.stringify(ref)}`,
+    );
+  }
+  return parts.map(quoteIdent).join(".");
+}
+
+/**
  * Statements we allow the analyst agent to execute. Everything else is
  * rejected before it reaches Trino.
  */

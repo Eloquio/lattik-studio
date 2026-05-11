@@ -2,6 +2,7 @@ import { zodSchema } from "ai";
 import { z } from "zod";
 import type { Spec } from "@json-render/core";
 import * as airflow from "../lib/airflow-client";
+import { assertLattikDagId } from "../lib/airflow-client";
 
 const RENDER_INSTRUCTION =
   "The run detail is now on the canvas showing each task with its status. Do NOT repeat the task list in chat. Summarize the run state briefly (which tasks succeeded/failed, total duration) and offer to show logs for any failed tasks.";
@@ -103,6 +104,7 @@ export const renderDagRunDetailTool = {
   ),
   execute: async (input: { dagId: string; dagRunId: string }) => {
     try {
+      assertLattikDagId(input.dagId);
       const [runsResult, tasksResult] = await Promise.all([
         airflow.listDagRuns(input.dagId, { limit: 1 }),
         airflow.listTaskInstances(input.dagId, input.dagRunId),

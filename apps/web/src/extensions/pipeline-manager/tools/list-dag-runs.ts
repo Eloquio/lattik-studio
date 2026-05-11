@@ -1,6 +1,7 @@
 import { zodSchema } from "ai";
 import { z } from "zod";
 import * as airflow from "../lib/airflow-client";
+import { assertLattikDagId } from "../lib/airflow-client";
 
 export const listDagRunsTool = {
   description:
@@ -16,6 +17,7 @@ export const listDagRunsTool = {
   ),
   execute: async (input: { dagId: string; limit?: number }) => {
     try {
+      assertLattikDagId(input.dagId);
       const result = await airflow.listDagRuns(input.dagId, {
         limit: input.limit ?? 10,
         orderBy: "-start_date",

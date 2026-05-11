@@ -9,6 +9,14 @@ import { getJsonObject, putObject } from "@/lib/s3-client";
 const S3_BUCKET = process.env.S3_DAG_BUCKET ?? "warehouse";
 
 /**
+ * Cap inbound JSON body size. Manifests describe a single Lattik Table
+ * commit (one ds + hour, up to ~hundreds of columns), so 1 MB is plenty.
+ * Capping protects against a compromised token leading to runaway memory
+ * use on `request.json()`.
+ */
+const MAX_COMMIT_BODY_BYTES = 1 * 1024 * 1024;
+
+/**
  * Schema name ( `schema.table` ) and column identifiers. SQL is already
  * parameterized via Drizzle, but these strings end up in S3 keys, manifest
  * JSON, and downstream Spark jobs that interpolate them into DAG YAML, so
@@ -58,6 +66,15 @@ export async function POST(request: Request) {
   if (authError) {
     log.warn("lattik.commit.unauthorized", {});
     return authError;
+  }
+
+  const contentLength = request.headers.get("content-length");
+  if (contentLength) {
+    const len = parseInt(contentLength, 10);
+    if (Number.isFinite(len) && len > MAX_COMMIT_BODY_BYTES) {
+      log.warn("lattik.commit.body_too_large", { contentLength: len });
+      return Response.json({ error: "Payload too large" }, { status: 413 });
+    }
   }
 
   const startedAt = Date.now();

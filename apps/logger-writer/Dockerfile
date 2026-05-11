@@ -45,7 +45,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         libsasl2-2 \
         libssl3 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+ && groupadd -r -g 10001 lattik \
+ && useradd -r -u 10001 -g lattik -s /usr/sbin/nologin lattik
 COPY --from=builder /app/target/release/logger-writer /usr/local/bin/logger-writer
 ENV RUST_LOG=info,logger_writer=debug,rdkafka=info
+USER 10001
 ENTRYPOINT ["/usr/local/bin/logger-writer"]

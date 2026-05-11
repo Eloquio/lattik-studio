@@ -17,7 +17,10 @@ RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -o /lattik-ingest .
 
 # Stage 3: Minimal runtime
 FROM alpine:3.21
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates \
+ && addgroup -S lattik -g 10001 \
+ && adduser -S -u 10001 -G lattik lattik
 COPY --from=build /lattik-ingest /lattik-ingest
 EXPOSE 8090
+USER 10001
 ENTRYPOINT ["/lattik-ingest"]

@@ -25,11 +25,53 @@ import { auth } from "@/auth";
 const AGENT_SERVICE_URL =
   process.env.AGENT_SERVICE_URL ?? "http://localhost:3939";
 
+/**
+ * Allowlist of path prefixes the proxy will forward. Anything else returns
+ * a 404 before the upstream is touched. Keep this narrow: each entry is a
+ * route apps/agent-service intentionally exposes to authenticated browser
+ * users. Internal routes (`/.well-known/workflow/...`, health probes,
+ * future admin endpoints) MUST NOT be reachable through this proxy — the
+ * workflow callbacks specifically are secured by Vercel Queues consumer
+ * function security on the upstream and have no auth of their own.
+ */
+const ALLOWED_PATH_PREFIXES = ["__wf-", "whoami"];
+
+/**
+ * Cap inbound proxied request bodies. The largest legitimate body is a
+ * chat-resume payload (a few hundred KB of message history + canvas
+ * state). Anything substantially larger is either a bug or a DoS vector
+ * against agent-service's memory.
+ */
+const MAX_PROXY_BODY_BYTES = 5 * 1024 * 1024; // 5 MB
+
+function isPathAllowed(path: string[]): boolean {
+  if (path.length === 0) return false;
+  const head = path[0];
+  return ALLOWED_PATH_PREFIXES.some(
+    (p) => head === p || head.startsWith(p),
+  );
+}
+
 async function proxy(req: Request, path: string[]): Promise<Response> {
   const session = await auth();
   const userId = session?.user?.id;
   if (!userId) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (!isPathAllowed(path)) {
+    return Response.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // Reject oversized bodies early so we never start streaming them upstream.
+  // `content-length` may be missing on chunked requests; in that case we
+  // rely on the upstream's own limits, but we still cap the common case.
+  const contentLength = req.headers.get("content-length");
+  if (contentLength) {
+    const parsed = parseInt(contentLength, 10);
+    if (Number.isFinite(parsed) && parsed > MAX_PROXY_BODY_BYTES) {
+      return Response.json({ error: "Payload too large" }, { status: 413 });
+    }
   }
 
   const upstreamUrl = `${AGENT_SERVICE_URL}/${path.join("/")}`;

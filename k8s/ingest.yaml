@@ -3,6 +3,21 @@
 #
 # In-cluster:  ingest.workloads:8090
 # From host:   localhost:8090  (via NodePort 30090)
+#
+# Auth: requires `Authorization: Bearer <INGEST_API_TOKEN>` on POST /v1/events.
+# The token is sourced from the `ingest-api-credentials` Secret below.
+# Dev value is `lattik-local-dev-ingest-token` to match the rest of the
+# local-dev creds posture — rotate via the Secret in any non-dev deploy.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ingest-api-credentials
+  namespace: workloads
+type: Opaque
+stringData:
+  INGEST_API_TOKEN: "lattik-local-dev-ingest-token"
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -20,11 +35,18 @@ spec:
     spec:
       containers:
         - name: ingest
-          image: lattik/ingest:latest
+          # Versioned tag so production deploys don't pick up an
+          # unintentional image swap (drift between local `kind load` and
+          # what's actually running). Bump in lockstep with
+          # `ingest:image-build` in package.json when shipping changes.
+          image: lattik/ingest:0.1.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8090
+          envFrom:
+            - secretRef:
+                name: ingest-api-credentials
           env:
             - name: KAFKA_BROKERS
               value: "kafka.kafka:9092"

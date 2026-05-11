@@ -86,7 +86,11 @@ spec:
     spark.sql.catalog.iceberg.io-impl: "org.apache.iceberg.aws.s3.S3FileIO"
     spark.sql.catalog.iceberg.s3.endpoint: "http://minio.minio.svc.cluster.local:9000"
     spark.sql.catalog.iceberg.s3.path-style-access: "true"
-    spark.sql.catalog.iceberg.s3.access-key-id: "lattik"
-    spark.sql.catalog.iceberg.s3.secret-access-key: "lattik-local"
-    spark.sql.catalog.iceberg.s3.region: "us-east-1"
+    # NB: S3 credentials are NOT set in sparkConf — they'd be visible in
+    # `kubectl describe sparkapplication` and in scheduler logs. Instead,
+    # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY come from the
+    # `minio-credentials` Secret via `envFrom` on driver/executor above,
+    # and the AWS SDK v2 default credential chain picks them up. AWS_REGION
+    # is set as an env var (also above) because the parquet writer code
+    # path uses the SDK default chain, not sparkConf.
     spark.sql.defaultCatalog: "iceberg"
