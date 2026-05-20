@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  web:
+    name: apps/web · typecheck + test + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Workspace packages (@eloquio/db-schema, @eloquio/render-intents,
+      # @eloquio/lattik-expression, @eloquio/lattik-logger,
+      # @eloquio/json-render-adapter, @eloquio/agent-harness) compile to
+      # `dist/` and the apps import them from there per their package.json
+      # `main`/`types`. Build them once up-front so `tsc --noEmit` in the
+      # app jobs can resolve the workspace imports.
+      - name: Build workspace packages
+        run: pnpm --filter './packages/*' run build
+
+      # `pnpm lint` is intentionally not run here yet — `main` currently
+      # has 27 existing lint errors (react-hooks/refs,
+      # react-hooks/set-state-in-effect, unused vars) that pre-date this
+      # workflow. Re-enable in a follow-up PR once those are cleared so
+      # the gate goes green on day one instead of forcing every PR to
+      # carry an unrelated lint cleanup.
+
+      - name: Typecheck
+        working-directory: apps/web
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        run: pnpm --filter web test
+
+      - name: Build
+        working-directory: apps/web
+        env:
+          # Dummy values so `next build` can evaluate env.* references at build
+          # time. These never hit a real service — CI only verifies the build
+          # succeeds, not that runtime wiring is correct.
+          AI_GATEWAY_API_KEY: ci-dummy
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+          AUTH_URL: https://ci.example.com
+          AUTH_SECRET: ci-dummy-secret-ci-dummy-secret-ci
+          AUTH_GOOGLE_ID: ci-dummy
+          AUTH_GOOGLE_SECRET: ci-dummy
+          GITEA_URL: http://localhost:3300
+          GITEA_TOKEN: ci-dummy
+          GITEA_WEBHOOK_SECRET: ci-dummy-webhook-secret
+          LATTIK_API_TOKEN: ci-dummy-lattik-token
+          S3_ENDPOINT: http://localhost:9000
+          S3_ACCESS_KEY_ID: ci
+          S3_SECRET_ACCESS_KEY: ci-dummy
+        run: pnpm build
+
+  agent-service:
+    name: apps/agent-service · typecheck + test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build workspace packages
+        run: pnpm --filter './packages/*' run build
+
+      - name: Typecheck
+        run: pnpm --filter agent-service typecheck
+
+      - name: Unit tests
+        run: pnpm --filter agent-service test
+
+  ingest:
+    name: apps/ingest · go build + vet + test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          cache-dependency-path: apps/ingest/go.sum
+
+      - name: Go vet
+        working-directory: apps/ingest
+        run: go vet ./...
+
+      - name: Go build
+        working-directory: apps/ingest
+        run: go build ./...
+
+      - name: Go test
+        working-directory: apps/ingest
+        run: go test ./...

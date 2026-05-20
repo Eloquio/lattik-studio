@@ -42,6 +42,10 @@ export const test = base.extend<{
     await page.goto("/");
     await page.waitForURL("/", { timeout: 10_000 });
 
+    // `use` is Playwright's fixture-handoff callback, not React's `use` hook —
+    // the react-hooks lint rule fires a false positive because the function
+    // name matches the `use*` pattern.
+    // eslint-disable-next-line react-hooks/rules-of-hooks
     await use(page);
   },
 });
