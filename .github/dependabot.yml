@@ -1,0 +1,61 @@
+# Dependabot keeps npm + Go + GitHub Actions dependencies fresh.
+# Without this, transitive CVEs accumulate silently — the manual
+# `pnpm audit` sweep that drove PR #2 had to find them by hand.
+#
+# Grouping rules: minor + patch land as one PR per ecosystem so the
+# review queue stays manageable. Major bumps come through as
+# individual PRs because they tend to be breaking and warrant
+# separate evaluation.
+version: 2
+updates:
+  # pnpm/npm — single update root because pnpm workspaces are
+  # managed from the root package.json / pnpm-lock.yaml. Dependabot
+  # discovers nested apps/ and packages/ through the lockfile.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "npm"
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Go modules for the ingest service.
+  - package-ecosystem: "gomod"
+    directory: "/apps/ingest"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "go"
+    groups:
+      gomod-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions versions in .github/workflows/*.yml. Lower
+  # cadence — actions break less often.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "ci"
