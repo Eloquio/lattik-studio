@@ -90,8 +90,11 @@ export async function POST(req: Request) {
 
   // Check payload size before reading
   const contentLength = req.headers.get("content-length");
-  if (contentLength && parseInt(contentLength, 10) > MAX_PAYLOAD_SIZE) {
-    return Response.json({ error: "Payload too large" }, { status: 413 });
+  if (contentLength) {
+    const len = parseInt(contentLength, 10);
+    if (Number.isFinite(len) && len > MAX_PAYLOAD_SIZE) {
+      return Response.json({ error: "Payload too large" }, { status: 413 });
+    }
   }
 
   const rawBody = await req.text();
