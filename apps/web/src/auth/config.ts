@@ -38,6 +38,30 @@ export const authConfig = {
     authorized({ auth }) {
       return !!auth?.user;
     },
+    // OAuth allowlist. `AUTH_ALLOWED_EMAILS` accepts a comma-separated list of
+    // entries in two shapes: a literal email (`alice@example.com`) matches that
+    // exact address; an entry starting with `@` (`@example.com`) matches any
+    // email at that domain. If the env var is unset or empty we allow all —
+    // setting it is the opt-in to enforcement.
+    signIn({ user, account }) {
+      if (account?.provider === "credentials") return true;
+
+      const raw = process.env.AUTH_ALLOWED_EMAILS;
+      if (!raw) return true;
+
+      const allowlist = raw
+        .split(",")
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
+      if (allowlist.length === 0) return true;
+
+      const email = user.email?.toLowerCase();
+      if (!email) return false;
+
+      return allowlist.some((entry) =>
+        entry.startsWith("@") ? email.endsWith(entry) : email === entry,
+      );
+    },
     jwt({ token, user }) {
       if (user) token.id = user.id;
       return token;

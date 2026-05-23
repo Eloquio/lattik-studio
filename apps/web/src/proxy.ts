@@ -73,7 +73,22 @@ function generateNonce(): string {
 // a default function" even though the build-time scan accepts it. Wrapping the
 // auth handler in a default-exported `function proxy` declaration is the
 // defensive form that satisfies both checks. See vercel/next.js#85648.
+//
+// Auth gate: when wrapping middleware with `auth((req) => …)` (callback form),
+// Auth.js v5 does NOT consult the `authorized` callback from authConfig — the
+// inner callback owns the redirect decision. Without this explicit check,
+// every request would fall through to NextResponse.next() unauthenticated.
+// See nextauthjs/next-auth#12976.
 const handler = auth((req) => {
+  const { pathname } = req.nextUrl;
+  const isSignInPath = pathname === "/sign-in";
+
+  if (!req.auth && !isSignInPath) {
+    const signInUrl = req.nextUrl.clone();
+    signInUrl.pathname = "/sign-in";
+    return NextResponse.redirect(signInUrl);
+  }
+
   const nonce = generateNonce();
   const csp = buildCsp(nonce);
 
