@@ -19,6 +19,60 @@ const QUERY_TIMEOUT_MS = 30_000;
 const DUCKDB_EXTENSION_PATH = process.env.DUCKDB_EXTENSION_PATH;
 
 // ---------------------------------------------------------------------------
+// SQL injection prevention
+// ---------------------------------------------------------------------------
+
+/**
+ * Validates that an environment variable value is safe for use in SQL statements.
+ * Rejects values containing characters that could enable SQL injection.
+ *
+ * @param key - The environment variable name (for error messages)
+ * @param value - The value to validate
+ * @returns The validated value
+ * @throws Error if the value contains potentially dangerous characters
+ */
+function validateEnvForSQL(key: string, value: string): string {
+  // Reject values containing single quotes, double quotes, semicolons, or backslashes
+  // These are common SQL injection vectors
+  if (/['";\\]/.test(value)) {
+    throw new Error(
+      `Security: Invalid characters in environment variable ${key}. ` +
+        `Values used in SQL statements cannot contain: ' " ; \\`
+    );
+  }
+  return value;
+}
+
+/**
+ * Validates that a DuckDB extension path is safe to load.
+ * This is especially critical since LOAD can execute arbitrary code.
+ *
+ * @param path - The extension path to validate
+ * @returns The validated path
+ * @throws Error if the path is potentially unsafe
+ */
+function validateExtensionPath(path: string): string {
+  // First apply general SQL validation
+  validateEnvForSQL("DUCKDB_EXTENSION_PATH", path);
+
+  // Extension path should end with .duckdb_extension
+  if (!path.endsWith(".duckdb_extension")) {
+    throw new Error(
+      `Security: DUCKDB_EXTENSION_PATH must end with .duckdb_extension, got: ${path}`
+    );
+  }
+
+  // Reject paths with suspicious patterns (path traversal attempts, etc.)
+  if (/\.\./.test(path) || /[<>|*?]/.test(path)) {
+    throw new Error(
+      `Security: DUCKDB_EXTENSION_PATH contains potentially unsafe characters: ${path}`
+    );
+  }
+
+  return path;
+}
+
+// ---------------------------------------------------------------------------
 // Singleton DuckDB instance (one per Next.js server process)
 // ---------------------------------------------------------------------------
 
@@ -39,16 +93,25 @@ function initDuckDb(): Promise<void> {
     const db = getDb();
     const conn = db.connect();
 
+    // Validate and escape all environment variables before using them in SQL
+    const validatedEndpoint = validateEnvForSQL(
+      "S3_ENDPOINT",
+      S3_ENDPOINT.replace(/^https?:\/\//, "")
+    );
+    const validatedAccessKey = validateEnvForSQL("S3_ACCESS_KEY_ID", S3_ACCESS_KEY);
+    const validatedSecretKey = validateEnvForSQL("S3_SECRET_ACCESS_KEY", S3_SECRET_KEY);
+
     const statements = [
-      `SET s3_endpoint='${S3_ENDPOINT.replace(/^https?:\/\//, "")}'`,
-      `SET s3_access_key_id='${S3_ACCESS_KEY}'`,
-      `SET s3_secret_access_key='${S3_SECRET_KEY}'`,
+      `SET s3_endpoint='${validatedEndpoint}'`,
+      `SET s3_access_key_id='${validatedAccessKey}'`,
+      `SET s3_secret_access_key='${validatedSecretKey}'`,
       `SET s3_use_ssl=false`,
       `SET s3_url_style='path'`,
     ];
 
     if (DUCKDB_EXTENSION_PATH) {
-      statements.push(`LOAD '${DUCKDB_EXTENSION_PATH}'`);
+      const validatedPath = validateExtensionPath(DUCKDB_EXTENSION_PATH);
+      statements.push(`LOAD '${validatedPath}'`);
     }
 
     let idx = 0;
