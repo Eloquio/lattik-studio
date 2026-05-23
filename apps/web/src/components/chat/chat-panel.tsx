@@ -116,7 +116,7 @@ export function ChatPanel({
         // a body shape that targets the now-deleted route — the request
         // will 404 from agent-service, which is the desired
         // fail-loudly behavior until the new trigger is wired.
-        api: "/api/agent-proxy/chat",
+        api: "/api/chat",
         prepareSendMessagesRequest({
           id,
           messages,
@@ -136,7 +136,7 @@ export function ChatPanel({
               (messageId && messages.find((m) => m.id === messageId)) ||
               [...messages].reverse().find((m) => m.role === "user");
             return {
-              api: "/api/agent-proxy/__wf-chat",
+              api: "/api/chat",
               headers,
               credentials,
               body: {
@@ -156,7 +156,7 @@ export function ChatPanel({
             // turn that drives regeneration is already in the
             // (truncated) DB history.
             return {
-              api: "/api/agent-proxy/__wf-chat",
+              api: "/api/chat",
               headers,
               credentials,
               body: {
