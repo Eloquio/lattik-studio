@@ -1,28 +1,19 @@
+import { getInstallationToken } from "./github-app-auth";
+
 const GITHUB_API = "https://api.github.com";
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN ?? "";
 const GITHUB_OWNER = process.env.GITHUB_OWNER ?? "";
 const GITHUB_REPO = process.env.GITHUB_REPO ?? "";
 
 function ensureConfig() {
-  if (!GITHUB_TOKEN) {
-    throw new Error(
-      "GITHUB_TOKEN environment variable is not set. Create a fine-grained PAT with Contents (RW) and Pull requests (RW) on the pipelines repo.",
-    );
-  }
   if (!GITHUB_OWNER || !GITHUB_REPO) {
     throw new Error(
       "GITHUB_OWNER and GITHUB_REPO environment variables must be set.",
     );
   }
-}
-
-function headers(): Record<string, string> {
-  return {
-    "Content-Type": "application/json",
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-    Authorization: `Bearer ${GITHUB_TOKEN}`,
-  };
+  // Token-side env (GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY,
+  // GITHUB_APP_INSTALLATION_ID) is validated lazily inside
+  // getInstallationToken so a misconfigured installation surfaces a
+  // specific, actionable error message on the first API call.
 }
 
 function repoUrl(suffix: string): string {
@@ -30,8 +21,17 @@ function repoUrl(suffix: string): string {
 }
 
 async function ghFetch(url: string, init?: RequestInit): Promise<Response> {
-  const res = await fetch(url, { ...init, headers: { ...headers(), ...(init?.headers ?? {}) } });
-  return res;
+  const token = await getInstallationToken();
+  return fetch(url, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      Authorization: `Bearer ${token}`,
+      ...(init?.headers ?? {}),
+    },
+  });
 }
 
 export async function createBranch(branchName: string, fromRef = "main") {
