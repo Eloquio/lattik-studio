@@ -60,7 +60,7 @@ function generateNonce(): string {
   return btoa(bin);
 }
 
-export default auth((req) => {
+export const proxy = auth((req) => {
   const nonce = generateNonce();
   const csp = buildCsp(nonce);
 
