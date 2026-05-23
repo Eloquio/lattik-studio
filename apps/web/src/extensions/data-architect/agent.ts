@@ -13,8 +13,6 @@ import {
   createStaticCheckTool,
   createUpdateDefinitionTool,
   createGenerateYamlTool,
-  createSubmitPRTool,
-  deleteDefinitionTool,
   listDefinitionsTool,
   getDefinitionTool,
 } from "./tools";
@@ -111,8 +109,6 @@ export function dataArchitectAgent(options?: AgentOptions): ExtensionAgent {
       staticCheck: createStaticCheckTool(getCanvasState),
       updateDefinition: createUpdateDefinitionTool(getCanvasState),
       generateYaml: createGenerateYamlTool(getCanvasState),
-      submitPR: createSubmitPRTool(getCanvasState),
-      deleteDefinition: deleteDefinitionTool,
       listDefinitions: listDefinitionsTool,
       getDefinition: getDefinitionTool,
       handback: {
