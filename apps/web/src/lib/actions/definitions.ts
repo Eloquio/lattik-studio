@@ -58,7 +58,7 @@ export async function updateDefinition(
 /**
  * Mark a definition row as awaiting a deletion PR merge. Any authenticated
  * user may flip a merged (shared) definition into `pending_deletion` — the
- * Gitea PR itself is what gates the actual data change, and the webhook is
+ * GitHub PR itself is what gates the actual data change, and the webhook is
  * the only thing that consummates the DB cleanup on merge. The ownership
  * check that `updateDefinition` enforces is therefore deliberately skipped
  * here; without that, a user could never propose deletion of a definition

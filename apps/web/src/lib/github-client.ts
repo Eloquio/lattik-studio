@@ -68,9 +68,9 @@ export async function createBranch(branchName: string, fromRef = "main") {
 /**
  * Atomic multi-file commit via the Git Data API. We create blobs for each
  * file, assemble them into a new tree on top of the branch's current tree,
- * and create one commit pointing at that tree. This matches Gitea's batch
- * commit semantics — N files become 1 commit, not N — and avoids the
- * ugly per-file commit history you'd get from the Contents API.
+ * and create one commit pointing at that tree. N files become 1 commit, not
+ * N — avoids the ugly per-file commit history you'd get from the Contents
+ * API for a multi-file submit.
  */
 export async function commitFiles(
   branchName: string,

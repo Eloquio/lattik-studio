@@ -47,10 +47,9 @@ class WebhookSecretMissingError extends Error {
  * `sha256=<hex>`; we strip the prefix and constant-time compare against an
  * HMAC of the raw body using our shared secret.
  *
- * Mirrors the gitea variant in spirit but with two protocol-level diffs:
- * (1) the prefix, (2) the header name. Throws on missing secret so a
- * misconfigured server returns 500 — silent acceptance of unsigned
- * deliveries would be the worst possible failure mode here.
+ * Throws on missing secret so a misconfigured server returns 500 —
+ * silent acceptance of unsigned deliveries would be the worst possible
+ * failure mode here.
  */
 function verifySignature(payload: string, signature: string | null): boolean {
   const secret = process.env.GITHUB_WEBHOOK_SECRET;

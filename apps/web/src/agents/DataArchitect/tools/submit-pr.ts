@@ -19,7 +19,7 @@ interface YamlFile {
 }
 
 /**
- * Names that flow into Gitea branch names, commit messages, and PR titles
+ * Names that flow into GitHub branch names, commit messages, and PR titles
  * must be tightly constrained — the value originates from canvas form state
  * which is editable by the user *and* shaped by the LLM. A prompt-injected
  * name like `../../evil` or one with embedded newlines would otherwise
@@ -81,7 +81,7 @@ export interface CreateSubmitPRToolOptions {
 export function createSubmitPRTool(opts: CreateSubmitPRToolOptions) {
   return tool({
     description:
-      "Submit the YAML files currently displayed in the canvas YAML editor as a PR to Gitea for review. Requires that generateYaml has been called first — reads the (possibly user-edited) YAML files directly from canvas state. The returned `prUrl` is a clickable URL that MUST be shared with the user verbatim.",
+      "Submit the YAML files currently displayed in the canvas YAML editor as a PR to GitHub for review. Requires that generateYaml has been called first — reads the (possibly user-edited) YAML files directly from canvas state. The returned `prUrl` is a clickable URL that MUST be shared with the user verbatim.",
     inputSchema: zodSchema(
       z.object({
         kind: definitionKindEnum.describe(

@@ -2358,7 +2358,7 @@ export const { registry, handlers } = defineRegistry(catalog, {
             rel="noopener noreferrer"
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-stone-800 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-700"
           >
-            View PR in Gitea
+            View PR on GitHub
             <ExternalLink className="h-3.5 w-3.5" />
           </a>
         </div>

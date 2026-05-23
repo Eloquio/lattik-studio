@@ -5,7 +5,7 @@ The Data Architect is a specialist agent in Lattik Studio that helps users defin
 ## Architecture
 
 ```
-User ←→ Chat ←→ Agent (Claude Sonnet 4.6) ←→ Tools ←→ Canvas / DB / Gitea
+User ←→ Chat ←→ Agent (Claude Sonnet 4.6) ←→ Tools ←→ Canvas / DB / GitHub
 ```
 
 The agent is a `ToolLoopAgent` (Vercel AI SDK v6) with a max of 10 tool steps per turn. It receives system instructions listing the available skills, and is told to always load the skill document first before starting any workflow.
@@ -33,7 +33,7 @@ All five definition types follow the same workflow:
 2. **AI Review** — Agent calls `reviewDefinition`, which runs a separate reviewer LLM (Claude Sonnet) guided by the [`reviewing-definitions`](skills/reviewing-definitions.md) skill (review-only audience — not in the agent's skill menu). The tool returns actionable one-click fixes that render as `ReviewCard` components on the canvas.
 3. **Accept/Deny Suggestions** — User accepts or denies each suggestion via canvas buttons. Agent reads decisions with `readCanvasState` and applies accepted changes.
 4. **Static Checks** — Agent calls `staticCheck` which runs validation functions (naming, referential integrity, expression syntax). Failures return to canvas for fixes.
-5. **Generate and Submit** — Agent calls `updateDefinition` to save the draft to the database, then `submitPR` to generate YAML and create a PR in Gitea/GitHub.
+5. **Generate and Submit** — Agent calls `updateDefinition` to save the draft to the database, then `submitPR` to generate YAML and create a PR on GitHub.
 
 ## Tools
 

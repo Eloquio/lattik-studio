@@ -14,6 +14,12 @@ interface NavPanelProps {
   onChatClick?: () => void;
 }
 
+// Set in Vercel env (and .env.local for dev) to point at the GitHub
+// pipelines repo. NEXT_PUBLIC_ prefix is required so this is readable
+// from the client component. If unset, we hide the shortcut entirely
+// rather than dropping the user on a 404.
+const PIPELINES_REPO_URL = process.env.NEXT_PUBLIC_PIPELINES_REPO_URL;
+
 export function NavPanel({ historyOpen = false, onChatClick }: NavPanelProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -40,25 +46,30 @@ export function NavPanel({ historyOpen = false, onChatClick }: NavPanelProps) {
         <TooltipContent side="right">Chat History</TooltipContent>
       </Tooltip>
 
-      <Tooltip>
-        <TooltipTrigger
-          className="mt-auto flex h-10 w-10 items-center justify-center rounded-md text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-          onClick={() =>
-            window.open(
-              "http://localhost:3300/lattik/pipelines",
-              "_blank",
-              "noopener,noreferrer",
-            )
-          }
-        >
-          <GitBranch className="h-5 w-5" />
-        </TooltipTrigger>
-        <TooltipContent side="right">Gitea</TooltipContent>
-      </Tooltip>
+      {/* `mt-auto` lives on the first bottom-anchored item so the
+          nav stays bottom-aligned whether or not the pipelines repo
+          shortcut is rendered. */}
+      {PIPELINES_REPO_URL && (
+        <Tooltip>
+          <TooltipTrigger
+            className="mt-auto flex h-10 w-10 items-center justify-center rounded-md text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+            onClick={() =>
+              window.open(
+                PIPELINES_REPO_URL,
+                "_blank",
+                "noopener,noreferrer",
+              )
+            }
+          >
+            <GitBranch className="h-5 w-5" />
+          </TooltipTrigger>
+          <TooltipContent side="right">Pipelines repo</TooltipContent>
+        </Tooltip>
+      )}
 
       <Tooltip>
         <TooltipTrigger
-          className="flex h-10 w-10 items-center justify-center rounded-md text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+          className={`${PIPELINES_REPO_URL ? "" : "mt-auto "}flex h-10 w-10 items-center justify-center rounded-md text-white/70 transition-colors hover:bg-white/10 hover:text-white`}
           onClick={() => signOut({ redirectTo: "/sign-in" })}
         >
           <LogOut className="h-5 w-5" />

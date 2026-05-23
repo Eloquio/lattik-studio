@@ -467,7 +467,7 @@ const TOOL_DEFINITIONS: Record<string, () => any> = {
   submitPR: () =>
     strictTool({
       description:
-        "Open a Gitea PR for the YAML currently shown on the canvas. Returns `{ status: 'submitted', prUrl }` on success — share the prUrl as a clickable markdown link in your reply.",
+        "Open a GitHub PR for the YAML currently shown on the canvas. Returns `{ status: 'submitted', prUrl }` on success — share the prUrl as a clickable markdown link in your reply.",
       inputSchema: z.object({
         kind: definitionKindEnum,
         name: z.string(),
@@ -507,7 +507,7 @@ const TOOL_DEFINITIONS: Record<string, () => any> = {
   deleteDefinition: () =>
     strictTool({
       description:
-        "Open a Gitea PR that deletes a definition's YAML file. NOTE: this only stops the pipeline going forward; it does not drop the warehouse table. Tell the user that part is manual.",
+        "Open a GitHub PR that deletes a definition's YAML file. NOTE: this only stops the pipeline going forward; it does not drop the warehouse table. Tell the user that part is manual.",
       inputSchema: z.object({
         name: z.string(),
         kind: definitionKindEnum.optional(),
