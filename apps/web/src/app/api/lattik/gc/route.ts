@@ -73,10 +73,8 @@ export async function POST(request: Request) {
   const url = new URL(request.url);
   const tableName = url.searchParams.get("table");
   const dryRun = url.searchParams.get("dry_run") !== "false"; // default true
-  const minAgeSeconds = parseInt(
-    url.searchParams.get("min_age_seconds") ?? String(DEFAULT_MIN_AGE_SECONDS),
-    10,
-  );
+  const minAgeSecondsRaw = url.searchParams.get("min_age_seconds") ?? String(DEFAULT_MIN_AGE_SECONDS);
+  const minAgeSeconds = parseInt(minAgeSecondsRaw, 10);
 
   if (!tableName) {
     log.warn("lattik.gc.invalid_request", { reason: "missing_table" });
@@ -97,6 +95,17 @@ export async function POST(request: Request) {
           "table must be in 'schema.table' format (lowercase letters, digits, underscore)",
       },
       { status: 400 },
+    );
+  }
+
+  if (!Number.isFinite(minAgeSeconds) || minAgeSeconds < 0) {
+    log.warn("lattik.gc.invalid_request", {
+      reason: "invalid_min_age_seconds",
+      value: minAgeSecondsRaw,
+    });
+    return Response.json(
+      { error: "min_age_seconds must be a non-negative integer" },
+      { status: 400 }
     );
   }
 
