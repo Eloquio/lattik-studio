@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, Geist_Mono, Homemade_Apple } from "next/font/google";
+import { headers } from "next/headers";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
@@ -24,11 +25,17 @@ export const metadata: Metadata = {
   description: "Lattik Studio — AI chat with glassmorphic UI",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Reading headers() opts the layout (and every page below it) into dynamic
+  // rendering. CSP nonces are incompatible with prerendering — a cached HTML
+  // body has no nonces baked in, and `strict-dynamic` in the CSP causes the
+  // browser to block every <script> that lacks one.
+  await headers();
+
   return (
     <html
       lang="en"

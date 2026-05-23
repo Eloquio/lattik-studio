@@ -92,10 +92,14 @@ const handler = auth((req) => {
   const nonce = generateNonce();
   const csp = buildCsp(nonce);
 
-  // Propagate the nonce to downstream RSC/route handlers so they can attach
-  // it to any inline <script> they need to render.
+  // Propagate the nonce to downstream RSC/route handlers and ALSO set the CSP
+  // on the request. Next.js's renderer scans the request's Content-Security-
+  // Policy header for the nonce token and stamps it onto its own bootstrap
+  // <script> tags. Without the CSP on the request, Next.js renders unsigned
+  // scripts that the browser then refuses to execute under `strict-dynamic`.
   const requestHeaders = new Headers(req.headers);
   requestHeaders.set("x-nonce", nonce);
+  requestHeaders.set("Content-Security-Policy", csp);
 
   const res = NextResponse.next({
     request: { headers: requestHeaders },
