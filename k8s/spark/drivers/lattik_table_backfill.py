@@ -25,8 +25,10 @@ from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
 from lattik_driver_utils import (
+    S3_BUCKET,
     commit_via_api,
     get_latest_version,
+    get_loads_for_ds,
     merge_cumulative,
     set_api_url,
     write_load,
@@ -99,6 +101,87 @@ def compute_delta(
         return spark.createDataFrame([], source_df.schema)
 
     return source_df.groupBy(*pk_columns).agg(*agg_exprs)
+
+
+def read_delta_from_load(
+    spark: SparkSession,
+    table_name: str,
+    table_path: str,
+    family: dict,
+    pk_columns: list[str],
+    ds: str,
+    hour: int | None,
+) -> DataFrame | None:
+    """Read stored delta columns for a committed ds/hour load, if available.
+
+    Loads written by `write_load` contain both cumulative columns and
+    `<column>__delta` columns. During the cascade phase we only need the delta
+    columns; cumulative values are recomputed from the updated baseline.
+    """
+    column_names = [col["name"] for col in family["columns"]]
+    load_ids_by_column = get_loads_for_ds(table_name, column_names, ds, hour)
+
+    missing_columns = [
+        column_name
+        for column_name in column_names
+        if column_name not in load_ids_by_column
+    ]
+    if missing_columns:
+        print(
+            f"[backfill] No committed delta load for ds={ds}, hour={hour}, "
+            f"columns={missing_columns}"
+        )
+        return None
+
+    delta_dfs: list[DataFrame] = []
+    load_ids = sorted(set(load_ids_by_column.values()))
+
+    for load_id in load_ids:
+        columns_for_load = [
+            column_name
+            for column_name in column_names
+            if load_ids_by_column[column_name] == load_id
+        ]
+        load_path = f"s3a://{S3_BUCKET}/{table_path}/loads/{load_id}/data"
+
+        try:
+            load_df = spark.read.parquet(load_path)
+        except Exception as e:
+            print(
+                f"[backfill] Warning: could not read committed load {load_id} "
+                f"for ds={ds}, hour={hour} at {load_path}: {e}"
+            )
+            return None
+
+        required_columns = pk_columns + [
+            f"{column_name}__delta" for column_name in columns_for_load
+        ]
+        missing_load_columns = [
+            column_name
+            for column_name in required_columns
+            if column_name not in load_df.columns
+        ]
+        if missing_load_columns:
+            print(
+                f"[backfill] Warning: committed load {load_id} for ds={ds}, "
+                f"hour={hour} is missing columns {missing_load_columns}"
+            )
+            return None
+
+        delta_dfs.append(load_df.select(*required_columns))
+
+    if not delta_dfs:
+        return None
+
+    delta_df = delta_dfs[0]
+    for next_df in delta_dfs[1:]:
+        delta_df = delta_df.join(next_df, on=pk_columns, how="full_outer")
+
+    print(
+        f"[backfill] Read committed delta for ds={ds}, hour={hour} "
+        f"from {len(load_ids)} load(s)"
+    )
+    return delta_df
 
 
 # ---------------------------------------------------------------------------
@@ -191,10 +274,34 @@ def backfill_family(
             )
 
             for ds in cascade_dates:
-                # TODO: Read existing delta from the load's Parquet file
-                delta_df = compute_delta(spark, family, ds, hour)
+                delta_df = read_delta_from_load(
+                    spark,
+                    table_name,
+                    table_path,
+                    family,
+                    pk_columns,
+                    ds,
+                    hour,
+                )
 
-                if delta_df.isEmpty():
+                if delta_df is None:
+                    print(
+                        f"[backfill] Falling back to source delta computation "
+                        f"for cascade ds={ds}"
+                    )
+                    delta_df = compute_delta(spark, family, ds, hour)
+                    delta_is_empty = delta_df.isEmpty()
+                else:
+                    delta_is_empty = delta_df.isEmpty()
+                    if delta_is_empty:
+                        print(
+                            f"[backfill] Committed delta for cascade ds={ds} "
+                            f"is empty; falling back to source"
+                        )
+                        delta_df = compute_delta(spark, family, ds, hour)
+                        delta_is_empty = delta_df.isEmpty()
+
+                if delta_is_empty:
                     print(f"[backfill] No data for cascade ds={ds}, skipping")
                     continue
 

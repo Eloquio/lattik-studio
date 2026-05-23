@@ -374,21 +374,44 @@ def get_latest_version(table_name: str) -> int:
     return resp.json().get("manifest_version", 0)
 
 
-def get_load_for_ds(
-    table_name: str, column_name: str, ds: str
-) -> Optional[str]:
-    """Return the load_id that produced `column_name` at `ds`, if any."""
+def get_loads_for_ds(
+    table_name: str,
+    column_names: list[str],
+    ds: str,
+    hour: Optional[int] = None,
+) -> dict[str, str]:
+    """Return column -> load_id mappings for a committed ds/hour, if any."""
+    params: dict[str, str | int] = {
+        "table": table_name,
+        "mode": "ds",
+        "ds": ds,
+        "columns": ",".join(column_names),
+    }
+    if hour is not None:
+        params["hour"] = hour
+
     resp = requests.get(
         f"{LATTIK_API}/commit",
         headers=auth_headers(),
-        params={
-            "table": table_name,
-            "mode": "ds",
-            "ds": ds,
-            "columns": column_name,
-        },
+        params=params,
         timeout=30,
     )
     if resp.status_code != 200:
-        return None
-    return resp.json().get("columns", {}).get(column_name)
+        return {}
+
+    columns = resp.json().get("columns", {})
+    return {
+        column_name: load_id
+        for column_name, load_id in columns.items()
+        if column_name in column_names
+    }
+
+
+def get_load_for_ds(
+    table_name: str,
+    column_name: str,
+    ds: str,
+    hour: Optional[int] = None,
+) -> Optional[str]:
+    """Return the load_id that produced `column_name` at `ds`, if any."""
+    return get_loads_for_ds(table_name, [column_name], ds, hour).get(column_name)
