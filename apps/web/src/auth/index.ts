@@ -3,6 +3,7 @@ import Google from "next-auth/providers/google";
 import Credentials from "next-auth/providers/credentials";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
 
+import { authConfig } from "./config";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
 import { upsertDevAdmin } from "@/db/dev-user";
@@ -29,6 +30,7 @@ function devProvider() {
 export const { handlers, auth, signIn, signOut } = NextAuth(() => {
   const db = getDb();
   return {
+    ...authConfig,
     adapter: DrizzleAdapter(db, {
       usersTable: schema.users,
       accountsTable: schema.accounts,
@@ -36,22 +38,5 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => {
       verificationTokensTable: schema.verificationTokens,
     }),
     providers: isDev ? [devProvider()] : [Google],
-    session: { strategy: "jwt" },
-    pages: {
-      signIn: "/sign-in",
-    },
-    callbacks: {
-      authorized({ auth }) {
-        return !!auth?.user;
-      },
-      jwt({ token, user }) {
-        if (user) token.id = user.id;
-        return token;
-      },
-      session({ session, token }) {
-        if (token.id) session.user.id = token.id as string;
-        return session;
-      },
-    },
   };
 });

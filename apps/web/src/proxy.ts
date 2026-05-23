@@ -1,5 +1,12 @@
+import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { authConfig } from "@/auth/config";
+
+// IMPORTANT: import the edge-safe `authConfig`, not `@/auth`. The full auth
+// module pulls in DrizzleAdapter + postgres-js, which fail at runtime inside
+// the Next.js 16 proxy runtime ("TypeError: pb is not a function"). The proxy
+// only needs to decode the JWT cookie, which doesn't require an adapter.
+const { auth } = NextAuth(authConfig);
 
 /**
  * Wraps NextAuth's `auth` middleware with a per-request Content-Security-Policy
@@ -60,7 +67,13 @@ function generateNonce(): string {
   return btoa(bin);
 }
 
-export const proxy = auth((req) => {
+// Next.js 16's proxy.ts runtime check requires a default-exported function
+// declaration (or a named `proxy` const). The `export const proxy = auth(...)`
+// form silently fails at runtime with "must export a function named `proxy` or
+// a default function" even though the build-time scan accepts it. Wrapping the
+// auth handler in a default-exported `function proxy` declaration is the
+// defensive form that satisfies both checks. See vercel/next.js#85648.
+const handler = auth((req) => {
   const nonce = generateNonce();
   const csp = buildCsp(nonce);
 
@@ -75,6 +88,10 @@ export const proxy = auth((req) => {
   res.headers.set("Content-Security-Policy", csp);
   return res;
 });
+
+export default function proxy(...args: Parameters<typeof handler>) {
+  return handler(...args);
+}
 
 export const config = {
   // We KEEP /sign-in inside the matcher (vs. excluding it like the other
