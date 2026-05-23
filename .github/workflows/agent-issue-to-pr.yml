@@ -1,0 +1,80 @@
+name: Agent · issue to PR
+
+# Every newly-opened issue spawns an autonomous Claude Code run that attempts a
+# PR. Re-kick a run on an existing issue by adding the `agent-retry` label
+# (remove and re-add it to fire again).
+#
+# Auth: routed through Vercel AI Gateway so usage shows up alongside the rest
+# of the project's spend. Requires the `AI_GATEWAY_API_KEY` repo secret and the
+# `claude-code` GitHub App installed on the repo.
+
+on:
+  issues:
+    types: [opened, labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  implement:
+    # The `labeled` trigger fires for every label change. Only act when the
+    # issue was just opened, or when the specific label that was added is
+    # `agent-retry` / `complex` (the two we care about).
+    if: >-
+      github.event.action == 'opened' ||
+      github.event.label.name == 'agent-retry' ||
+      github.event.label.name == 'complex'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Pick model based on `complex` label
+        id: model
+        run: |
+          if [[ "${{ contains(github.event.issue.labels.*.name, 'complex') }}" == "true" ]]; then
+            echo "model=anthropic/claude-opus-4.7" >> "$GITHUB_OUTPUT"
+          else
+            echo "model=anthropic/claude-sonnet-4.6" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: anthropics/claude-code-action@v1
+        env:
+          # Route through Vercel AI Gateway. ANTHROPIC_API_KEY must be empty
+          # so the SDK falls through to ANTHROPIC_AUTH_TOKEN.
+          ANTHROPIC_BASE_URL: https://ai-gateway.vercel.sh
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.AI_GATEWAY_API_KEY }}
+          ANTHROPIC_API_KEY: ""
+        with:
+          prompt: |
+            You are working on issue #${{ github.event.issue.number }}:
+            "${{ github.event.issue.title }}"
+
+            ${{ github.event.issue.body }}
+
+            Workflow:
+            1. Read CLAUDE.md and the code areas relevant to this issue.
+            2. Create a branch named `agent/issue-${{ github.event.issue.number }}-<short-slug>`.
+            3. Implement the change end-to-end. Keep the diff focused on the issue.
+            4. Run the same checks CI runs, locally, before pushing:
+                 pnpm install --frozen-lockfile
+                 pnpm --filter './packages/*' run build
+                 pnpm --filter web exec tsc --noEmit
+                 pnpm --filter web test
+                 pnpm --filter agent-service typecheck
+                 pnpm --filter agent-service test
+               And for any apps/ingest changes:
+                 cd apps/ingest && go vet ./... && go build ./... && go test ./...
+            5. Open a PR targeting `main`. Include `Closes #${{ github.event.issue.number }}`
+               in the PR body so the issue auto-closes on merge.
+            6. Post one summary comment on the issue linking to the PR.
+
+            If the issue is ambiguous, under-specified, or requires destructive
+            actions you cannot justify, do not guess. Comment on the issue
+            explaining what's blocking you and stop.
+          claude_args: |
+            --model ${{ steps.model.outputs.model }}
+            --max-turns 60
