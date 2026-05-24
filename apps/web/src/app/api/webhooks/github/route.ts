@@ -169,10 +169,6 @@ export async function POST(req: Request) {
     .from(schema.definitions)
     .where(eq(schema.definitions.prUrl, prUrl));
 
-  if (definitions.length === 0) {
-    return Response.json({ status: "ok", mergedCount: 0, deletedCount: 0 });
-  }
-
   const toDelete = definitions.filter((d) => d.status === "pending_deletion");
   const toMerge = definitions.filter((d) => d.status !== "pending_deletion");
 
@@ -192,7 +188,6 @@ export async function POST(req: Request) {
       .where(inArray(schema.definitions.id, toDelete.map((d) => d.id)));
   }
 
-  let requestId: string | undefined;
   if (toMerge.length > 0) {
     await Promise.all([
       db
@@ -214,80 +209,78 @@ export async function POST(req: Request) {
         })),
       ),
     ]);
+  }
 
-    const mergedDefs: MergedDefinitionRef[] = toMerge.map((d) => ({
-      id: d.id,
-      kind: d.kind,
-      name: d.name,
-      spec: d.spec,
-    }));
+  // Always record + start a workflow for any merged PR, even ones with
+  // no matching `definitions` row (e.g. hand-edited YAML or test PRs).
+  // The walking-skeleton workflow just logs and acks; per-kind branches
+  // inside it will no-op on an empty definitions array.
+  const mergedDefs: MergedDefinitionRef[] = toMerge.map((d) => ({
+    id: d.id,
+    kind: d.kind,
+    name: d.name,
+    spec: d.spec,
+  }));
 
-    // Start the post-merge workflow in-process via WDK. We generate
-    // `pipelineRunId` ourselves and pass it into the workflow so its
-    // terminal step can update the row by a known key — WDK 4.x doesn't
-    // surface its own runId from inside a workflow body. The row is
-    // inserted *before* start() so a fast workflow can't outrun the
-    // insert.
-    //
-    // GitHub may redeliver the same x-github-delivery on transient
-    // failure. The ack-only workflow is safe to replay, but once real
-    // side effects land here we'll need an app-level dedup keyed on
-    // x-github-delivery.
-    const ghDeliveryId = req.headers.get("x-github-delivery") ?? randomUUID();
-    const pipelineRunId = randomUUID();
+  // GitHub may redeliver the same x-github-delivery on transient
+  // failure. The ack-only workflow is safe to replay, but once real
+  // side effects land here we'll need an app-level dedup keyed on
+  // x-github-delivery.
+  const ghDeliveryId = req.headers.get("x-github-delivery") ?? randomUUID();
+  const pipelineRunId = randomUUID();
 
-    try {
-      await db.insert(schema.pipelineWorkflowRuns).values({
-        id: pipelineRunId,
-        workflowName: "post-pipeline-pr-merge",
-        status: "running",
-        prUrl,
-        input: {
-          ghDeliveryId,
-          definitionIds: mergedDefs.map((d) => d.id),
-          definitionKinds: mergedDefs.map((d) => d.kind),
-        },
-      });
-    } catch (err) {
-      log.error("github_webhook.workflow_run_insert_failed", {
-        pipeline_run_id: pipelineRunId,
-        pr_url: prUrl,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return Response.json(
-        { error: "Failed to record workflow run" },
-        { status: 500 },
-      );
-    }
+  // Insert the row *before* start() so a fast workflow can't outrun
+  // the insert — its terminal step updates this row by id.
+  try {
+    await db.insert(schema.pipelineWorkflowRuns).values({
+      id: pipelineRunId,
+      workflowName: "post-pipeline-pr-merge",
+      status: "running",
+      prUrl,
+      input: {
+        ghDeliveryId,
+        definitionIds: mergedDefs.map((d) => d.id),
+        definitionKinds: mergedDefs.map((d) => d.kind),
+      },
+    });
+  } catch (err) {
+    log.error("github_webhook.workflow_run_insert_failed", {
+      pipeline_run_id: pipelineRunId,
+      pr_url: prUrl,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return Response.json(
+      { error: "Failed to record workflow run" },
+      { status: 500 },
+    );
+  }
 
-    try {
-      const run = await start(postPipelineMergeWorkflow, [
-        { pipelineRunId, prUrl, ghDeliveryId, definitions: mergedDefs },
-      ]);
-      requestId = run.runId;
-    } catch (err) {
-      log.error("github_webhook.workflow_start_failed", {
-        pipeline_run_id: pipelineRunId,
-        pr_url: prUrl,
-        gh_delivery_id: ghDeliveryId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      // Mark the row failed so the listing reflects the truth — the run
-      // never actually started.
-      await db
-        .update(schema.pipelineWorkflowRuns)
-        .set({
-          status: "failed",
-          finishedAt: new Date(),
-          errorMessage:
-            err instanceof Error ? err.message : String(err),
-        })
-        .where(eq(schema.pipelineWorkflowRuns.id, pipelineRunId));
-      return Response.json(
-        { error: "Failed to start post-merge workflow" },
-        { status: 500 },
-      );
-    }
+  let requestId: string | undefined;
+  try {
+    const run = await start(postPipelineMergeWorkflow, [
+      { pipelineRunId, prUrl, ghDeliveryId, definitions: mergedDefs },
+    ]);
+    requestId = run.runId;
+  } catch (err) {
+    log.error("github_webhook.workflow_start_failed", {
+      pipeline_run_id: pipelineRunId,
+      pr_url: prUrl,
+      gh_delivery_id: ghDeliveryId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    await db
+      .update(schema.pipelineWorkflowRuns)
+      .set({
+        status: "failed",
+        finishedAt: new Date(),
+        errorMessage:
+          err instanceof Error ? err.message : String(err),
+      })
+      .where(eq(schema.pipelineWorkflowRuns.id, pipelineRunId));
+    return Response.json(
+      { error: "Failed to start post-merge workflow" },
+      { status: 500 },
+    );
   }
 
   return Response.json({
