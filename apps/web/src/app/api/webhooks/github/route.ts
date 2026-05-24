@@ -1,22 +1,15 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
+import { start } from "workflow/api";
 import { z } from "zod";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
 import { log } from "@/lib/log";
 import { rateLimit } from "@/lib/rate-limit";
-
-const WORKFLOW_SKILL_ID = "post-pipeline-pr-merge";
-
-const AGENT_SERVICE_URL =
-  process.env.AGENT_SERVICE_URL ?? "http://localhost:3939";
-
-interface MergedDefinition {
-  id: string;
-  kind: string;
-  name: string;
-  spec: unknown;
-}
+import {
+  postPipelineMergeWorkflow,
+  type MergedDefinitionRef,
+} from "@/workflows/post-pipeline-pr-merge";
 
 const MAX_PAYLOAD_SIZE = 1_048_576;
 
@@ -222,39 +215,79 @@ export async function POST(req: Request) {
       ),
     ]);
 
-    const mergedDefs: MergedDefinition[] = toMerge.map((d) => ({
+    const mergedDefs: MergedDefinitionRef[] = toMerge.map((d) => ({
       id: d.id,
       kind: d.kind,
       name: d.name,
       spec: d.spec,
     }));
 
-    // Dispatch the post-merge skill via agent-service. NOTE: agent-service
-    // isn't yet redeployed after the Phase 1 collapse, so this fetch will
-    // fail in prod — the .catch below downgrades that to a log line. The
-    // PR-state DB updates above still commit, which is the load-bearing
-    // half of this handler. Phase 2 of the agent-service collapse will
-    // turn this into a direct in-process workflow.start().
-    requestId = `wh_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-    const skillRunBody = {
-      runId: requestId,
-      skillId: WORKFLOW_SKILL_ID,
-      args: { pr_url: prUrl, definitions: mergedDefs },
-    };
-    fetch(`${AGENT_SERVICE_URL}/__wf-skill-run`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Client-Id": "web",
-        "X-User-Id": "system:webhook",
-      },
-      body: JSON.stringify(skillRunBody),
-    }).catch((err) => {
-      log.error("github_webhook.skill_dispatch_failed", {
+    // Start the post-merge workflow in-process via WDK. We generate
+    // `pipelineRunId` ourselves and pass it into the workflow so its
+    // terminal step can update the row by a known key — WDK 4.x doesn't
+    // surface its own runId from inside a workflow body. The row is
+    // inserted *before* start() so a fast workflow can't outrun the
+    // insert.
+    //
+    // GitHub may redeliver the same x-github-delivery on transient
+    // failure. The ack-only workflow is safe to replay, but once real
+    // side effects land here we'll need an app-level dedup keyed on
+    // x-github-delivery.
+    const ghDeliveryId = req.headers.get("x-github-delivery") ?? randomUUID();
+    const pipelineRunId = randomUUID();
+
+    try {
+      await db.insert(schema.pipelineWorkflowRuns).values({
+        id: pipelineRunId,
+        workflowName: "post-pipeline-pr-merge",
+        status: "running",
+        prUrl,
+        input: {
+          ghDeliveryId,
+          definitionIds: mergedDefs.map((d) => d.id),
+          definitionKinds: mergedDefs.map((d) => d.kind),
+        },
+      });
+    } catch (err) {
+      log.error("github_webhook.workflow_run_insert_failed", {
+        pipeline_run_id: pipelineRunId,
         pr_url: prUrl,
         error: err instanceof Error ? err.message : String(err),
       });
-    });
+      return Response.json(
+        { error: "Failed to record workflow run" },
+        { status: 500 },
+      );
+    }
+
+    try {
+      const run = await start(postPipelineMergeWorkflow, [
+        { pipelineRunId, prUrl, ghDeliveryId, definitions: mergedDefs },
+      ]);
+      requestId = run.runId;
+    } catch (err) {
+      log.error("github_webhook.workflow_start_failed", {
+        pipeline_run_id: pipelineRunId,
+        pr_url: prUrl,
+        gh_delivery_id: ghDeliveryId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      // Mark the row failed so the listing reflects the truth — the run
+      // never actually started.
+      await db
+        .update(schema.pipelineWorkflowRuns)
+        .set({
+          status: "failed",
+          finishedAt: new Date(),
+          errorMessage:
+            err instanceof Error ? err.message : String(err),
+        })
+        .where(eq(schema.pipelineWorkflowRuns.id, pipelineRunId));
+      return Response.json(
+        { error: "Failed to start post-merge workflow" },
+        { status: 500 },
+      );
+    }
   }
 
   return Response.json({
