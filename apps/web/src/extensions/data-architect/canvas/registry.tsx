@@ -911,6 +911,341 @@ const statusStyles: Record<string, { bg: string; text: string; dot: string }> = 
 };
 
 // ============================================================
+// PRSubmitted variants
+// ============================================================
+
+interface PRSubmittedVariantProps {
+  kind: string;
+  name: string;
+  prNumber: number;
+  prUrl: string;
+  branch: string;
+  files: string[];
+  kindLabel: string;
+}
+
+// A — Marginalia: borderless, typography-driven. Brown ink labels, dashed
+// dividers that echo the paper grid, no nested card boxes.
+function PRSubmittedMarginalia({ name, prNumber, prUrl, branch, files, kindLabel }: PRSubmittedVariantProps) {
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-1">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-700">
+          ✓ Submitted
+        </span>
+        <h2
+          className="text-2xl leading-tight text-[#6b3410]"
+          style={{ fontFamily: "var(--font-display), cursive" }}
+        >
+          Your {kindLabel} is ready for review
+        </h2>
+        <p className="text-xs text-stone-600">
+          <span className="font-mono text-stone-800">{name}</span> — committed and pushed.
+        </p>
+      </div>
+
+      <div className="border-t border-dashed border-stone-400/40" />
+
+      <a
+        href={prUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="group flex items-baseline gap-2"
+      >
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">
+          PR
+        </span>
+        <span className="font-mono text-sm text-[#6b3410] underline decoration-stone-400/60 underline-offset-4 group-hover:decoration-[#6b3410]">
+          #{prNumber} — Define {kindLabel}: {name}
+        </span>
+        <ExternalLink className="h-3 w-3 text-stone-400 group-hover:text-[#6b3410]" />
+      </a>
+
+      <div className="flex items-baseline gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">
+          Branch
+        </span>
+        <span className="font-mono text-xs text-stone-700">{branch}</span>
+      </div>
+
+      {files.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">
+            Files ({files.length})
+          </span>
+          <ul className="flex flex-col gap-0.5 pl-3">
+            {files.map((path: string) => (
+              <li key={path} className="flex items-baseline gap-2 text-xs text-stone-700">
+                <span className="text-stone-400">·</span>
+                <span className="font-mono">{path}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="border-t border-dashed border-stone-400/40" />
+
+      <a
+        href={prUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex w-fit items-center gap-1.5 text-sm font-medium text-[#6b3410] underline decoration-2 decoration-[#e0a96e] underline-offset-4 hover:decoration-[#6b3410]"
+      >
+        View PR on GitHub
+        <ExternalLink className="h-3.5 w-3.5" />
+      </a>
+    </div>
+  );
+}
+
+// B — Paper slip: a single off-white slip pinned over the paper with subtle
+// rotation + offset shadow, one brown wax-seal accent, no nested borders.
+function PRSubmittedSlip({ name, prNumber, prUrl, branch, files, kindLabel }: PRSubmittedVariantProps) {
+  return (
+    <div
+      className="relative -rotate-[0.4deg] rounded-md bg-[#faf3e3] p-5 shadow-[2px_4px_0_rgba(107,52,16,0.08),0_8px_24px_-12px_rgba(107,52,16,0.25)] ring-1 ring-stone-300/40"
+    >
+      <div className="flex flex-col gap-5">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 -rotate-6 items-center justify-center rounded-full bg-[#6b3410] text-amber-50 ring-4 ring-[#6b3410]/10">
+            <PartyPopper className="h-4 w-4" />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#6b3410]">
+              Submitted
+            </span>
+            <h2
+              className="text-xl leading-tight text-stone-800"
+              style={{ fontFamily: "var(--font-display), cursive" }}
+            >
+              {kindLabel} ready for review
+            </h2>
+            <p className="text-xs text-stone-600">
+              <span className="font-mono text-stone-800">{name}</span>
+            </p>
+          </div>
+        </div>
+
+        <div className="h-px bg-[repeating-linear-gradient(to_right,rgba(107,52,16,0.25)_0_4px,transparent_4px_8px)]" />
+
+        <div className="flex flex-col gap-2.5">
+          <a
+            href={prUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group flex items-center justify-between gap-2"
+          >
+            <div className="flex items-baseline gap-2 min-w-0">
+              <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-stone-500">
+                PR
+              </span>
+              <span className="truncate text-sm font-semibold text-stone-800 group-hover:text-[#6b3410]">
+                #{prNumber} — Define {kindLabel}: {name}
+              </span>
+            </div>
+            <ExternalLink className="h-3.5 w-3.5 shrink-0 text-stone-400 group-hover:text-[#6b3410]" />
+          </a>
+
+          <div className="flex items-baseline gap-2">
+            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-stone-500">
+              Branch
+            </span>
+            <span className="truncate font-mono text-xs text-stone-700">{branch}</span>
+          </div>
+        </div>
+
+        {files.length > 0 && (
+          <>
+            <div className="h-px bg-[repeating-linear-gradient(to_right,rgba(107,52,16,0.25)_0_4px,transparent_4px_8px)]" />
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">
+                Files ({files.length})
+              </span>
+              <ul className="flex flex-col gap-1">
+                {files.map((path: string) => (
+                  <li key={path} className="flex items-center gap-2 text-xs text-stone-700">
+                    <FileCode className="h-3 w-3 shrink-0 text-[#c89766]" />
+                    <span className="truncate font-mono">{path}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </>
+        )}
+
+        <a
+          href={prUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex w-full items-center justify-center gap-1.5 rounded-md bg-[#6b3410] px-4 py-2 text-sm font-medium text-amber-50 transition-colors hover:bg-[#4a2208]"
+        >
+          View PR on GitHub
+          <ExternalLink className="h-3.5 w-3.5" />
+        </a>
+      </div>
+    </div>
+  );
+}
+
+// C — Receipt: dashed perforation outline, monospaced receipt typography,
+// rubber-stamp success header in brown ink.
+function PRSubmittedReceipt({ name, prNumber, prUrl, branch, files, kindLabel }: PRSubmittedVariantProps) {
+  return (
+    <div className="rounded-sm border-2 border-dashed border-stone-400/60 bg-[#fbf5e6] p-5">
+      <div className="flex flex-col gap-4">
+        <div className="flex items-start justify-between gap-3">
+          <div
+            className="rotate-[-3deg] border-[2.5px] border-double border-[#6b3410] px-3 py-1 font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-[#6b3410]"
+            style={{ boxShadow: "1px 1px 0 rgba(107,52,16,0.15)" }}
+          >
+            ✓ Submitted
+          </div>
+          <span className="font-mono text-[10px] uppercase tracking-wider text-stone-500">
+            No. {String(prNumber).padStart(4, "0")}
+          </span>
+        </div>
+
+        <div className="font-mono text-xs leading-relaxed text-stone-700">
+          <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5">
+            <span className="text-stone-500">KIND</span>
+            <span className="uppercase">{kindLabel}</span>
+
+            <span className="text-stone-500">NAME</span>
+            <span className="text-[#6b3410]">{name}</span>
+
+            <span className="text-stone-500">BRANCH</span>
+            <span className="truncate">{branch}</span>
+
+            <span className="text-stone-500">PR</span>
+            <a
+              href={prUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 truncate text-[#6b3410] underline decoration-stone-400/60 underline-offset-2 hover:decoration-[#6b3410]"
+            >
+              #{prNumber}
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          </div>
+        </div>
+
+        {files.length > 0 && (
+          <>
+            <div className="border-t border-dashed border-stone-400/60" />
+            <div className="font-mono text-xs text-stone-700">
+              <div className="mb-1.5 flex items-baseline justify-between">
+                <span className="text-stone-500">FILES</span>
+                <span className="text-stone-400">x{files.length}</span>
+              </div>
+              <ul className="flex flex-col gap-0.5">
+                {files.map((path: string, i: number) => (
+                  <li key={path} className="flex items-baseline gap-2">
+                    <span className="text-stone-400">{String(i + 1).padStart(2, "0")}.</span>
+                    <span className="truncate">{path}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </>
+        )}
+
+        <div className="border-t border-dashed border-stone-400/60" />
+
+        <a
+          href={prUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex w-full items-center justify-center gap-1.5 border-2 border-[#6b3410] bg-transparent px-4 py-2 font-mono text-xs font-bold uppercase tracking-wider text-[#6b3410] transition-colors hover:bg-[#6b3410] hover:text-amber-50"
+        >
+          View PR on GitHub
+          <ExternalLink className="h-3.5 w-3.5" />
+        </a>
+      </div>
+    </div>
+  );
+}
+
+// Original — kept for side-by-side comparison while picking a design.
+function PRSubmittedOriginal({ name, prNumber, prUrl, branch, files, kindLabel }: PRSubmittedVariantProps) {
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="relative overflow-hidden rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-amber-50 p-6">
+        <div className="flex items-start gap-4">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-100 ring-4 ring-emerald-50">
+            <PartyPopper className="h-6 w-6 text-emerald-600" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <h2 className="text-base font-semibold text-stone-800">PR submitted successfully</h2>
+            <p className="text-xs text-stone-500">
+              Your {kindLabel}{" "}
+              <span className="font-mono text-stone-700">{name}</span> is ready for review.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <a
+        href={prUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="group flex items-center justify-between gap-3 rounded-lg border border-stone-200 bg-white p-4 transition-colors hover:border-amber-300 hover:bg-amber-50/30"
+      >
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-md bg-purple-100 text-purple-600">
+            <GitPullRequest className="h-4 w-4" />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-xs font-medium text-stone-500">Pull Request</span>
+            <span className="text-sm font-semibold text-stone-800 group-hover:text-amber-700">
+              #{prNumber} — Define {kindLabel}: {name}
+            </span>
+          </div>
+        </div>
+        <ExternalLink className="h-4 w-4 text-stone-400 group-hover:text-amber-600" />
+      </a>
+
+      <div className="flex items-center gap-2 rounded-lg border border-stone-200 bg-stone-50/50 px-3 py-2">
+        <GitBranch className="h-3.5 w-3.5 text-stone-400" />
+        <span className="text-[11px] font-medium uppercase tracking-wider text-stone-400">
+          Branch
+        </span>
+        <span className="ml-1 truncate font-mono text-xs text-stone-700">{branch}</span>
+      </div>
+
+      {files.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[11px] font-medium uppercase tracking-wider text-stone-400">
+            Files committed ({files.length})
+          </span>
+          <ul className="flex flex-col gap-1 rounded-lg border border-stone-200 bg-white p-2">
+            {files.map((path: string) => (
+              <li
+                key={path}
+                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-stone-700 hover:bg-stone-50"
+              >
+                <FileCode className="h-3.5 w-3.5 shrink-0 text-stone-400" />
+                <span className="truncate font-mono">{path}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <a
+        href={prUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex w-full items-center justify-center gap-2 rounded-lg bg-stone-800 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-700"
+      >
+        View PR on GitHub
+        <ExternalLink className="h-3.5 w-3.5" />
+      </a>
+    </div>
+  );
+}
+
+// ============================================================
 // Registry
 // ============================================================
 
@@ -2282,85 +2617,49 @@ export const { registry, handlers } = defineRegistry(catalog, {
 
     PRSubmittedCard: ({ props }) => {
       const kindLabel = props.kind ? props.kind.replace(/_/g, " ") : "definition";
+      const [variant, setVariant] = useState<"marginalia" | "slip" | "receipt" | "original">("marginalia");
+
+      const variants: { id: typeof variant; label: string; hint: string }[] = [
+        { id: "marginalia", label: "A · Marginalia", hint: "borderless, typographic" },
+        { id: "slip", label: "B · Paper slip", hint: "single tilted card" },
+        { id: "receipt", label: "C · Receipt", hint: "dashed perforation" },
+        { id: "original", label: "Original", hint: "current design" },
+      ];
+
       return (
         <div className="flex flex-col gap-5">
-          {/* Hero */}
-          <div className="relative overflow-hidden rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-amber-50 p-6">
-            <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-100 ring-4 ring-emerald-50">
-                <PartyPopper className="h-6 w-6 text-emerald-600" />
-              </div>
-              <div className="flex flex-col gap-1">
-                <h2 className="text-base font-semibold text-stone-800">PR submitted successfully</h2>
-                <p className="text-xs text-stone-500">
-                  Your {kindLabel}{" "}
-                  <span className="font-mono text-stone-700">{props.name}</span> is ready for
-                  review.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* PR card */}
-          <a
-            href={props.prUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="group flex items-center justify-between gap-3 rounded-lg border border-stone-200 bg-white p-4 transition-colors hover:border-amber-300 hover:bg-amber-50/30"
-          >
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-md bg-purple-100 text-purple-600">
-                <GitPullRequest className="h-4 w-4" />
-              </div>
-              <div className="flex flex-col">
-                <span className="text-xs font-medium text-stone-500">Pull Request</span>
-                <span className="text-sm font-semibold text-stone-800 group-hover:text-amber-700">
-                  #{props.prNumber} — Define {kindLabel}: {props.name}
-                </span>
-              </div>
-            </div>
-            <ExternalLink className="h-4 w-4 text-stone-400 group-hover:text-amber-600" />
-          </a>
-
-          {/* Branch */}
-          <div className="flex items-center gap-2 rounded-lg border border-stone-200 bg-stone-50/50 px-3 py-2">
-            <GitBranch className="h-3.5 w-3.5 text-stone-400" />
-            <span className="text-[11px] font-medium uppercase tracking-wider text-stone-400">
-              Branch
+          {/* Variant picker — temporary scaffolding for design selection. */}
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[10px] font-medium uppercase tracking-wider text-stone-500">
+              Pick a design
             </span>
-            <span className="ml-1 truncate font-mono text-xs text-stone-700">{props.branch}</span>
+            <div className="flex flex-wrap gap-1.5">
+              {variants.map((v) => {
+                const active = v.id === variant;
+                return (
+                  <button
+                    key={v.id}
+                    onClick={() => setVariant(v.id)}
+                    className={`flex flex-col items-start rounded-md px-2.5 py-1.5 text-left transition-colors ${
+                      active
+                        ? "bg-[#6b3410] text-amber-50"
+                        : "bg-white/40 text-stone-600 ring-1 ring-stone-300/60 hover:bg-white/70"
+                    }`}
+                  >
+                    <span className="text-[11px] font-semibold">{v.label}</span>
+                    <span className={`text-[9px] ${active ? "text-amber-200/80" : "text-stone-400"}`}>
+                      {v.hint}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {/* Files */}
-          {props.files.length > 0 && (
-            <div className="flex flex-col gap-1.5">
-              <span className="text-[11px] font-medium uppercase tracking-wider text-stone-400">
-                Files committed ({props.files.length})
-              </span>
-              <ul className="flex flex-col gap-1 rounded-lg border border-stone-200 bg-white p-2">
-                {props.files.map((path: string) => (
-                  <li
-                    key={path}
-                    className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-stone-700 hover:bg-stone-50"
-                  >
-                    <FileCode className="h-3.5 w-3.5 shrink-0 text-stone-400" />
-                    <span className="truncate font-mono">{path}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* CTA */}
-          <a
-            href={props.prUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-stone-800 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-700"
-          >
-            View PR on GitHub
-            <ExternalLink className="h-3.5 w-3.5" />
-          </a>
+          {variant === "marginalia" && <PRSubmittedMarginalia {...props} kindLabel={kindLabel} />}
+          {variant === "slip" && <PRSubmittedSlip {...props} kindLabel={kindLabel} />}
+          {variant === "receipt" && <PRSubmittedReceipt {...props} kindLabel={kindLabel} />}
+          {variant === "original" && <PRSubmittedOriginal {...props} kindLabel={kindLabel} />}
         </div>
       );
     },
