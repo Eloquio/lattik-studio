@@ -97,8 +97,13 @@ export function CanvasPanel({
         <div className="h-8 w-0.5 rounded-full bg-white/20" />
       </div>
 
-      {/* Canvas content */}
-      <div className="flex flex-1 flex-col overflow-hidden rounded-l-xl bg-stone-50 shadow-lg">
+      {/* Canvas content. `canvas-paper` (defined in globals.css) paints
+          the cream + grid notebook background AND restyles any headings
+          inside it with the all-caps notebook treatment. Content cards
+          render on top of the grid; the grid shows in gutters between
+          them. The chrome bar below keeps its own `bg-white` so the
+          header sits flush over the paper. */}
+      <div className="canvas-paper flex flex-1 flex-col overflow-hidden rounded-l-xl shadow-lg">
         <div className="flex items-center justify-between border-b border-stone-200 bg-white px-4 py-2 rounded-tl-xl">
           <span className="text-sm font-medium text-stone-700">Canvas</span>
           <Button variant="ghost" size="icon" className="h-8 w-8 text-stone-500 hover:bg-stone-100 hover:text-stone-700" onClick={onClose}>

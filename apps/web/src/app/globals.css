@@ -158,4 +158,24 @@
     background-color: rgb(255 255 255 / 0.3);
     background-clip: content-box;
   }
+
+  /* Notebook-paper canvas surface. Cream background + faint 16px grid
+     drawn with two 1px linear-gradients; content cards/forms keep their
+     own white backgrounds and sit on top of the grid so it shows in
+     gutters between them — the paper texture, not a foreground line.
+     Headings inside the canvas inherit the all-caps notebook treatment
+     to match the SUBJECT TOPIC / DATE / INSERT STICKERS HERE
+     typography of a physical grid notebook. */
+  .canvas-paper {
+    background-color: #f3eada;
+    background-image:
+      linear-gradient(to right, rgba(120, 80, 40, 0.10) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(120, 80, 40, 0.10) 1px, transparent 1px);
+    background-size: 16px 16px;
+  }
+  .canvas-paper :where(h1, h2, h3, h4, h5, h6) {
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #6b3410;
+  }
 }
