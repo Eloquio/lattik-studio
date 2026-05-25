@@ -86,9 +86,17 @@ export default async function WorkflowsPage() {
   const failedCount = rows.filter((r) => r.status === "failed").length;
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="relative flex h-screen w-screen overflow-hidden">
+      {/* Background image + blur — matches the chat page so the NavPanel
+          renders against the same glassmorphic backdrop. */}
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: "url('/bg.avif')" }}
+      />
+      <div className="absolute inset-0 backdrop-blur-xl bg-black/60" />
+
       <NavPanel />
-      <main className="canvas-paper flex-1 overflow-auto">
+      <main className="canvas-paper relative z-10 flex-1 overflow-auto">
         <div className="mx-auto flex max-w-5xl flex-col gap-4 p-8">
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2">
