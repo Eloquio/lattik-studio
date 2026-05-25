@@ -1,4 +1,4 @@
-import { desc, inArray } from "drizzle-orm";
+import { asc, desc, inArray } from "drizzle-orm";
 import { Activity } from "lucide-react";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
@@ -39,9 +39,51 @@ export default async function WorkflowsPage() {
     .orderBy(desc(schema.pipelineWorkflowRuns.startedAt))
     .limit(100);
 
+  const runIds = rows.map((r) => r.id);
   const prUrls = rows
     .map((r) => r.prUrl)
     .filter((u): u is string => Boolean(u));
+
+  // Per-definition step checklists (currently only logger_table). Order by
+  // runId then stepOrder so we can group in JS without another sort.
+  const stepRows =
+    runIds.length > 0
+      ? await db
+          .select()
+          .from(schema.pipelineWorkflowSteps)
+          .where(inArray(schema.pipelineWorkflowSteps.runId, runIds))
+          .orderBy(
+            asc(schema.pipelineWorkflowSteps.runId),
+            asc(schema.pipelineWorkflowSteps.definitionName),
+            asc(schema.pipelineWorkflowSteps.stepOrder),
+          )
+      : [];
+
+  type StepChain = {
+    definitionId: string | null;
+    definitionKind: string;
+    definitionName: string;
+    steps: { name: string; status: string }[];
+  };
+  const stepsByRun = new Map<string, StepChain[]>();
+  for (const s of stepRows) {
+    const chains = stepsByRun.get(s.runId) ?? [];
+    let chain = chains.find(
+      (c) =>
+        c.definitionId === s.definitionId && c.definitionName === s.definitionName,
+    );
+    if (!chain) {
+      chain = {
+        definitionId: s.definitionId,
+        definitionKind: s.definitionKind,
+        definitionName: s.definitionName,
+        steps: [],
+      };
+      chains.push(chain);
+    }
+    chain.steps.push({ name: s.stepName, status: s.status });
+    stepsByRun.set(s.runId, chains);
+  }
 
   const auditRows =
     prUrls.length > 0
@@ -165,6 +207,7 @@ export default async function WorkflowsPage() {
                     modified={audit.modified}
                     deleted={audit.deleted}
                     invalid={audit.invalid}
+                    stepChains={stepsByRun.get(row.id) ?? []}
                   />
                 );
               })}

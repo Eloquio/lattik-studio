@@ -275,6 +275,13 @@ export const workflowRuns = pgTable(
 
 export type PipelineWorkflowStatus = "running" | "succeeded" | "failed";
 
+export type PipelineWorkflowStepStatus =
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "skipped";
+
 /**
  * Append-only run log for system-triggered (non-chat) workflows like the
  * post-merge pipeline. Distinct from `workflow_run` above, which is the
@@ -308,5 +315,50 @@ export const pipelineWorkflowRuns = pgTable(
   (t) => [
     index("idx_pipeline_workflow_runs_startedAt").on(t.startedAt),
     index("idx_pipeline_workflow_runs_status").on(t.status),
+  ]
+);
+
+/**
+ * Sub-steps of a `pipelineWorkflowRuns` row. Each new/modified
+ * logger_table (and, later, other kinds) gets its own per-definition
+ * provisioning chain — e.g. for a logger_table:
+ *   1. Generate Protobuf descriptor
+ *   2. Register schema with Schema Registry
+ *   3. Create Kafka topic
+ *   4. Create Iceberg sink table
+ *
+ * Steps are seeded up front (status="pending") when the workflow starts
+ * so the /workflows card can render the full checklist before any step
+ * has run, then each step transitions through "running" → "succeeded"
+ * (or "failed"). One run can carry many step chains — group by
+ * `definitionId` in the UI.
+ */
+export const pipelineWorkflowSteps = pgTable(
+  "pipeline_workflow_step",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    runId: text("runId")
+      .notNull()
+      .references(() => pipelineWorkflowRuns.id, { onDelete: "cascade" }),
+    /** The definition this step chain belongs to (e.g. a logger_table). */
+    definitionId: text("definitionId"),
+    /** Kind of the definition, e.g. "logger_table". */
+    definitionKind: text("definitionKind").notNull(),
+    /** Display name of the definition, e.g. "events.evt_conversation". */
+    definitionName: text("definitionName").notNull(),
+    /** Short label shown in the checklist row, e.g. "Create Kafka topic". */
+    stepName: text("stepName").notNull(),
+    /** Display order within this (run, definition) chain, 0-based. */
+    stepOrder: integer("stepOrder").notNull(),
+    status: text("status").$type<PipelineWorkflowStepStatus>().notNull(),
+    startedAt: timestamp("startedAt", { mode: "date" }),
+    finishedAt: timestamp("finishedAt", { mode: "date" }),
+    errorMessage: text("errorMessage"),
+  },
+  (t) => [
+    index("idx_pipeline_workflow_steps_runId").on(t.runId),
+    index("idx_pipeline_workflow_steps_definitionId").on(t.definitionId),
   ]
 );
