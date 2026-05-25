@@ -120,9 +120,19 @@ export function WorkflowsView({
 
   return (
     <main className="canvas-paper relative z-10 flex flex-1 overflow-hidden">
-      {/* Left half — workflow runs list. */}
+      {/* Left half — workflow runs list. When the panel is open we
+          drop the max-width constraint and tighten the inside edge
+          so the cards hug the splitter instead of leaving a wide
+          empty gutter; when the panel is closed, fall back to the
+          centered max-w-5xl layout. */}
       <div className="flex-1 overflow-auto">
-        <div className="mx-auto flex max-w-5xl flex-col gap-4 p-8">
+        <div
+          className={
+            selectedStep
+              ? "flex flex-col gap-4 py-8 pl-8 pr-4"
+              : "mx-auto flex max-w-5xl flex-col gap-4 p-8"
+          }
+        >
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2">
               <Activity className="h-4 w-4 text-amber-600" />

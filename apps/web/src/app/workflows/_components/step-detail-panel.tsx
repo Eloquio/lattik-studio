@@ -56,7 +56,7 @@ export function StepDetailPanel({ step, onClose }: StepDetailPanelProps) {
       : null;
 
   return (
-    <div className="flex flex-col gap-4 p-8">
+    <div className="flex flex-col gap-4 py-8 pl-4 pr-8">
       <div className="flex items-start gap-2">
         <ListChecks className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
