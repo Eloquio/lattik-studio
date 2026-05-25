@@ -1,9 +1,13 @@
 import { asc, desc, inArray } from "drizzle-orm";
-import { Activity } from "lucide-react";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
 import { NavPanel } from "@/components/layout/nav-panel";
-import { WorkflowRunCard } from "./_components/workflow-run-card";
+import type { StepDetail } from "./_components/step-detail-panel";
+import type { StepChain } from "./_components/workflow-run-card";
+import {
+  WorkflowsView,
+  type RunCardData,
+} from "./_components/workflows-view";
 
 export const dynamic = "force-dynamic";
 
@@ -59,18 +63,16 @@ export default async function WorkflowsPage() {
           )
       : [];
 
-  type StepChain = {
-    definitionId: string | null;
-    definitionKind: string;
-    definitionName: string;
-    steps: { id: string; name: string; status: string }[];
-  };
+  const runById = new Map(rows.map((r) => [r.id, r]));
 
   // Webhook redelivery can produce duplicate step rows within the same
   // (runId, definitionId) — `seedLoggerTableStepsStep` runs again and
   // re-inserts. Dedupe by `stepOrder` per chain, keeping the most
   // advanced status (succeeded > failed > running > pending/skipped).
-  // Without this the card renders the same checklist twice.
+  // Without this the card renders the same checklist twice. We also pick
+  // the row whose status wins as the canonical row whose `id` carries
+  // into the side panel — so the panel always reads from the latest
+  // attempt's metadata, not a stale earlier duplicate.
   const statusPriority: Record<string, number> = {
     succeeded: 4,
     failed: 3,
@@ -78,15 +80,19 @@ export default async function WorkflowsPage() {
     pending: 1,
     skipped: 0,
   };
-  const chainsByRunKey = new Map<
-    string,
-    Map<
-      string,
-      StepChain & {
-        stepsByOrder: Map<number, { id: string; name: string; status: string }>;
-      }
-    >
-  >();
+  type DedupedStep = {
+    id: string;
+    name: string;
+    status: string;
+    startedAt: Date | null;
+    finishedAt: Date | null;
+    errorMessage: string | null;
+    stepOrder: number;
+  };
+  type ChainAccumulator = StepChain & {
+    stepsByOrder: Map<number, DedupedStep>;
+  };
+  const chainsByRunKey = new Map<string, Map<string, ChainAccumulator>>();
   for (const s of stepRows) {
     const chainKey = `${s.definitionId ?? ""}::${s.definitionName}`;
     let chainsForRun = chainsByRunKey.get(s.runId);
@@ -114,22 +120,50 @@ export default async function WorkflowsPage() {
         id: s.id,
         name: s.stepName,
         status: s.status,
+        startedAt: s.startedAt,
+        finishedAt: s.finishedAt,
+        errorMessage: s.errorMessage,
+        stepOrder: s.stepOrder,
       });
     }
   }
+
   const stepsByRun = new Map<string, StepChain[]>();
+  const stepDetails: Record<string, StepDetail> = {};
   for (const [runId, chainsForRun] of chainsByRunKey) {
-    stepsByRun.set(
-      runId,
-      Array.from(chainsForRun.values()).map((c) => ({
+    const run = runById.get(runId);
+    const chains: StepChain[] = [];
+    for (const c of chainsForRun.values()) {
+      const ordered = Array.from(c.stepsByOrder.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([, step]) => step);
+      chains.push({
         definitionId: c.definitionId,
         definitionKind: c.definitionKind,
         definitionName: c.definitionName,
-        steps: Array.from(c.stepsByOrder.entries())
-          .sort(([a], [b]) => a - b)
-          .map(([, step]) => step),
-      })),
-    );
+        steps: ordered.map((o) => ({
+          id: o.id,
+          name: o.name,
+          status: o.status,
+        })),
+      });
+      for (const step of ordered) {
+        stepDetails[step.id] = {
+          id: step.id,
+          runId,
+          workflowName: run?.workflowName ?? "unknown",
+          stepName: step.name,
+          stepOrder: step.stepOrder,
+          status: step.status,
+          definitionKind: c.definitionKind,
+          definitionName: c.definitionName,
+          startedAt: step.startedAt,
+          finishedAt: step.finishedAt,
+          errorMessage: step.errorMessage,
+        };
+      }
+    }
+    stepsByRun.set(runId, chains);
   }
 
   const auditRows =
@@ -182,6 +216,24 @@ export default async function WorkflowsPage() {
   const succeededCount = rows.filter((r) => r.status === "succeeded").length;
   const failedCount = rows.filter((r) => r.status === "failed").length;
 
+  const cards: RunCardData[] = rows.map((row) => {
+    const audit = row.prUrl ? auditByUrl.get(row.prUrl) : undefined;
+    return {
+      id: row.id,
+      workflowName: row.workflowName,
+      status: row.status,
+      startedAt: TIME_FORMAT.format(row.startedAt),
+      finishedAt: row.finishedAt ? TIME_FORMAT.format(row.finishedAt) : null,
+      errorMessage: row.errorMessage,
+      prUrl: row.prUrl,
+      added: audit ? Array.from(audit.added) : [],
+      modified: audit ? Array.from(audit.modified) : [],
+      deleted: audit ? Array.from(audit.deleted) : [],
+      invalid: audit ? Array.from(audit.invalid) : [],
+      stepChains: stepsByRun.get(row.id) ?? [],
+    };
+  });
+
   return (
     <div className="relative flex h-screen w-screen overflow-hidden">
       {/* Background image + blur — matches the chat page so the NavPanel
@@ -193,77 +245,13 @@ export default async function WorkflowsPage() {
       <div className="absolute inset-0 backdrop-blur-xl bg-black/60" />
 
       <NavPanel />
-      <main className="canvas-paper relative z-10 flex-1 overflow-auto">
-        <div className="mx-auto flex max-w-5xl flex-col gap-4 p-8">
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-2">
-              <Activity className="h-4 w-4 text-amber-600" />
-              <h2 className="text-sm font-semibold text-stone-800">Workflows</h2>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <div className="flex items-center gap-1.5 rounded-full bg-stone-100 px-2.5 py-1">
-                <span className="text-[11px] font-medium text-stone-500">
-                  {rows.length} recent
-                </span>
-              </div>
-              {activeCount > 0 && (
-                <div className="flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
-                  <span className="text-[11px] font-medium text-blue-700">
-                    {activeCount} running
-                  </span>
-                </div>
-              )}
-              <div className="flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                <span className="text-[11px] font-medium text-emerald-700">
-                  {succeededCount} succeeded
-                </span>
-              </div>
-              {failedCount > 0 && (
-                <div className="flex items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-                  <span className="text-[11px] font-medium text-red-700">
-                    {failedCount} failed
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {rows.length === 0 ? (
-            <div className="rounded-lg border border-stone-400 bg-[#f3eada] p-12 text-center">
-              <p className="text-xs text-stone-500">
-                No workflow runs yet. Merge a pipeline PR to trigger one.
-              </p>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {rows.map((row) => {
-                const audit = row.prUrl ? auditByUrl.get(row.prUrl) : undefined;
-                return (
-                  <WorkflowRunCard
-                    key={row.id}
-                    workflowName={row.workflowName}
-                    status={row.status}
-                    startedAt={TIME_FORMAT.format(row.startedAt)}
-                    finishedAt={
-                      row.finishedAt ? TIME_FORMAT.format(row.finishedAt) : null
-                    }
-                    errorMessage={row.errorMessage}
-                    prUrl={row.prUrl}
-                    added={audit ? Array.from(audit.added) : []}
-                    modified={audit ? Array.from(audit.modified) : []}
-                    deleted={audit ? Array.from(audit.deleted) : []}
-                    invalid={audit ? Array.from(audit.invalid) : []}
-                    stepChains={stepsByRun.get(row.id) ?? []}
-                  />
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </main>
+      <WorkflowsView
+        cards={cards}
+        stepDetails={stepDetails}
+        activeCount={activeCount}
+        succeededCount={succeededCount}
+        failedCount={failedCount}
+      />
     </div>
   );
 }
