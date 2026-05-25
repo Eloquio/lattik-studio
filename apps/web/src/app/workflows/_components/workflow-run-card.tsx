@@ -53,16 +53,32 @@ interface WorkflowRunCardProps {
 
 function StepIcon({ status }: { status: string }) {
   if (status === "succeeded") {
-    return <Check className="h-3 w-3 text-emerald-600" />;
+    return (
+      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 text-white shadow-sm ring-1 ring-emerald-600/30">
+        <Check className="h-3 w-3" strokeWidth={3} />
+      </span>
+    );
   }
   if (status === "failed") {
-    return <X className="h-3 w-3 text-red-600" />;
+    return (
+      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white shadow-sm ring-1 ring-red-600/30">
+        <X className="h-3 w-3" strokeWidth={3} />
+      </span>
+    );
   }
   if (status === "running") {
-    return <Loader2 className="h-3 w-3 animate-spin text-blue-600" />;
+    return (
+      <span className="inline-flex h-4 w-4 items-center justify-center">
+        <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+      </span>
+    );
   }
   // pending / skipped
-  return <Circle className="h-3 w-3 text-stone-400" />;
+  return (
+    <span className="inline-flex h-4 w-4 items-center justify-center">
+      <Circle className="h-3 w-3 text-stone-400" />
+    </span>
+  );
 }
 
 function StepChecklist({ chain }: { chain: StepChain }) {
