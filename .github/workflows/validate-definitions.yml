@@ -1,0 +1,52 @@
+name: Validate definitions
+
+# Reusable workflow that posts a PR's definition YAMLs to lattik.studio for
+# canonical Zod + referential validation. Callers (e.g. lattik-pipelines)
+# trigger this from their own `pull_request` workflow so the validation logic
+# stays in lockstep with the validator implementation that ships with the
+# Next.js app — no per-repo drift.
+on:
+  workflow_call:
+    inputs:
+      prNumber:
+        description: PR number to validate
+        required: true
+        type: number
+      sha:
+        description: Head SHA of the PR
+        required: true
+        type: string
+    secrets:
+      LATTIK_VALIDATE_PR_SECRET:
+        description: Bearer token shared with the /api/validate-pr endpoint
+        required: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call lattik.studio validator
+        env:
+          TOKEN: ${{ secrets.LATTIK_VALIDATE_PR_SECRET }}
+          PR_NUMBER: ${{ inputs.prNumber }}
+          SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          response=$(curl -sS -w "\n%{http_code}" \
+            -X POST https://lattik.studio/api/validate-pr \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"prNumber\":$PR_NUMBER,\"sha\":\"$SHA\"}")
+          body=$(echo "$response" | sed '$d')
+          status=$(echo "$response" | tail -n 1)
+          echo "HTTP $status"
+          echo "$body" | jq .
+          if [ "$status" != "200" ]; then
+            echo "::error::Validator returned HTTP $status"
+            exit 1
+          fi
+          ok=$(echo "$body" | jq -r '.ok')
+          if [ "$ok" != "true" ]; then
+            echo "$body" | jq -r '.errors[] | "::error file=\(.path)::\(.message)"'
+            exit 1
+          fi
