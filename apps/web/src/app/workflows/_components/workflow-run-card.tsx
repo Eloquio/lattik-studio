@@ -28,8 +28,10 @@ interface WorkflowRunCardProps {
   finishedAt: string | null;
   errorMessage: string | null;
   prUrl: string | null;
+  added: string[];
   modified: string[];
   deleted: string[];
+  invalid: string[];
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -51,12 +53,18 @@ export function WorkflowRunCard({
   finishedAt,
   errorMessage,
   prUrl,
+  added,
   modified,
   deleted,
+  invalid,
 }: WorkflowRunCardProps) {
   const [open, setOpen] = useState(false);
   const hasDetails =
-    modified.length > 0 || deleted.length > 0 || Boolean(errorMessage);
+    added.length > 0 ||
+    modified.length > 0 ||
+    deleted.length > 0 ||
+    invalid.length > 0 ||
+    Boolean(errorMessage);
 
   return (
     <div className="group rounded-lg border border-stone-400 bg-[#f3eada] transition-shadow hover:shadow-sm">
@@ -79,6 +87,11 @@ export function WorkflowRunCard({
               {workflowName}
             </span>
             <StatusBadge status={status} />
+            {added.length > 0 && (
+              <span className="text-[10px] text-stone-500">
+                {added.length} added
+              </span>
+            )}
             {modified.length > 0 && (
               <span className="text-[10px] text-stone-500">
                 {modified.length} modified
@@ -87,6 +100,11 @@ export function WorkflowRunCard({
             {deleted.length > 0 && (
               <span className="text-[10px] text-stone-500">
                 {deleted.length} deleted
+              </span>
+            )}
+            {invalid.length > 0 && (
+              <span className="text-[10px] text-red-600">
+                {invalid.length} invalid
               </span>
             )}
           </div>
@@ -128,6 +146,18 @@ export function WorkflowRunCard({
         <div className="border-t border-stone-300 px-3 pb-3 pt-2 text-[11px] text-stone-700">
           {hasDetails ? (
             <div className="flex flex-col gap-3">
+              {added.length > 0 && (
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-stone-500">
+                    Added ({added.length})
+                  </div>
+                  <ul className="mt-1 ml-4 list-disc space-y-0.5 font-mono">
+                    {added.map((d, i) => (
+                      <li key={i}>{d}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {modified.length > 0 && (
                 <div>
                   <div className="text-[10px] font-semibold uppercase tracking-wide text-stone-500">
@@ -147,6 +177,18 @@ export function WorkflowRunCard({
                   </div>
                   <ul className="mt-1 ml-4 list-disc space-y-0.5 font-mono">
                     {deleted.map((d, i) => (
+                      <li key={i}>{d}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {invalid.length > 0 && (
+                <div className="rounded-md bg-red-50 p-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-red-700">
+                    Invalid ({invalid.length})
+                  </div>
+                  <ul className="mt-1 ml-4 list-disc space-y-0.5 font-mono text-red-800">
+                    {invalid.map((d, i) => (
                       <li key={i}>{d}</li>
                     ))}
                   </ul>

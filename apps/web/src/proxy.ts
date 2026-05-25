@@ -119,5 +119,5 @@ export const config = {
   // there's no risk of a /sign-in → /sign-in redirect loop for
   // unauthenticated users. API routes return JSON, not HTML, so CSP is
   // not useful for them; static assets bypass middleware entirely.
-  matcher: ["/((?!api/auth|api/webhooks|api/runs|api/cron|api/lattik|\\.well-known/workflow|_next/static|_next/image|favicon.ico|bg.avif).*)"],
+  matcher: ["/((?!api/auth|api/webhooks|api/validate-pr|api/runs|api/cron|api/lattik|\\.well-known/workflow|_next/static|_next/image|favicon.ico|bg.avif).*)"],
 };

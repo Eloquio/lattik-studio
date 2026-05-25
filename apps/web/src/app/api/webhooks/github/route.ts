@@ -1,11 +1,12 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { start } from "workflow/api";
 import { z } from "zod";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
 import { log } from "@/lib/log";
 import { rateLimit } from "@/lib/rate-limit";
+import { reconcileDefinitionsFromPR } from "@/lib/reconcile-definitions";
 import {
   postPipelineMergeWorkflow,
   type MergedDefinitionRef,
@@ -23,6 +24,12 @@ const githubPrEventSchema = z
       .object({
         merged: z.boolean().optional(),
         html_url: z.string().optional(),
+        // PR number — needed to fetch the file diff via the GitHub API.
+        number: z.number().optional(),
+        // SHA of the squash/merge commit that landed on `main`. We pull
+        // file content at this ref so the reconciler sees the post-merge
+        // state, not the PR's head branch.
+        merge_commit_sha: z.string().nullable().optional(),
       })
       .passthrough()
       .optional(),
@@ -154,72 +161,110 @@ export async function POST(req: Request) {
   if (!prUrl) {
     return Response.json({ status: "no_pr_url" }, { status: 202 });
   }
+  const prNumber = payload.pull_request?.number;
+  const mergeCommitSha = payload.pull_request?.merge_commit_sha;
+  if (typeof prNumber !== "number" || !mergeCommitSha) {
+    // Without these we can't read the post-merge file content; nothing to
+    // reconcile. Ack so GitHub doesn't retry.
+    log.warn("github_webhook.missing_pr_metadata", {
+      prUrl,
+      hasNumber: typeof prNumber === "number",
+      hasMergeSha: Boolean(mergeCommitSha),
+    });
+    return Response.json({ status: "missing_pr_metadata" }, { status: 202 });
+  }
 
   const db = getDb();
   const receivedAt = new Date();
 
-  const definitions = await db
-    .select({
-      id: schema.definitions.id,
-      kind: schema.definitions.kind,
-      name: schema.definitions.name,
-      spec: schema.definitions.spec,
-      status: schema.definitions.status,
-    })
-    .from(schema.definitions)
-    .where(eq(schema.definitions.prUrl, prUrl));
-
-  const toDelete = definitions.filter((d) => d.status === "pending_deletion");
-  const toMerge = definitions.filter((d) => d.status !== "pending_deletion");
-
-  if (toDelete.length > 0) {
-    await db.insert(schema.webhookAuditLog).values(
-      toDelete.map((d) => ({
-        prUrl,
-        definitionId: d.id,
-        action: "definition_deleted" as const,
-        status: "success" as const,
-        detail: `${d.kind} "${d.name}" deleted after deletion PR merged`,
-        receivedAt,
-      })),
+  // Reconcile DB against the YAML files actually changed in the PR. Git is
+  // the source of truth — Lattik-authored PRs and hand-edited ones go
+  // through the same code path here.
+  let reconcileResult: Awaited<ReturnType<typeof reconcileDefinitionsFromPR>>;
+  try {
+    reconcileResult = await reconcileDefinitionsFromPR({
+      prUrl,
+      prNumber,
+      mergeCommitSha,
+    });
+  } catch (err) {
+    log.error("github_webhook.reconcile_failed", {
+      pr_url: prUrl,
+      pr_number: prNumber,
+      merge_sha: mergeCommitSha,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    // Still surface a workflow row so /workflows shows the failure, then
+    // bail with 500 so GitHub retries.
+    const pipelineRunId = randomUUID();
+    await db.insert(schema.pipelineWorkflowRuns).values({
+      id: pipelineRunId,
+      workflowName: "post-pipeline-pr-merge",
+      status: "failed",
+      prUrl,
+      input: { prNumber, mergeCommitSha },
+      finishedAt: new Date(),
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+    return Response.json(
+      { error: "Failed to reconcile definitions from PR" },
+      { status: 500 },
     );
-    await db
-      .delete(schema.definitions)
-      .where(inArray(schema.definitions.id, toDelete.map((d) => d.id)));
   }
 
-  if (toMerge.length > 0) {
-    await Promise.all([
-      db
-        .update(schema.definitions)
-        .set({
-          status: "merged",
-          prMergedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(inArray(schema.definitions.id, toMerge.map((d) => d.id))),
-      db.insert(schema.webhookAuditLog).values(
-        toMerge.map((d) => ({
-          prUrl,
-          definitionId: d.id,
-          action: "definition_merged" as const,
-          status: "success" as const,
-          detail: `${d.kind} "${d.name}" marked as merged`,
-          receivedAt,
-        })),
-      ),
-    ]);
+  // Fan out the reconciliation outcome into the audit log so /workflows can
+  // show "Added: …", "Modified: …", "Deleted: …", "Invalid: …".
+  const auditRows = [
+    ...reconcileResult.added.map((d) => ({
+      prUrl,
+      definitionId: d.definitionId,
+      action: "definition_added" as const,
+      status: "success" as const,
+      detail: `${d.kind} "${d.name}" added`,
+      receivedAt,
+    })),
+    ...reconcileResult.modified.map((d) => ({
+      prUrl,
+      definitionId: d.definitionId,
+      action: "definition_modified" as const,
+      status: "success" as const,
+      detail: `${d.kind} "${d.name}" modified`,
+      receivedAt,
+    })),
+    ...reconcileResult.deleted.map((d) => ({
+      prUrl,
+      definitionId: d.definitionId,
+      action: "definition_deleted" as const,
+      status: "success" as const,
+      detail: `${d.kind} "${d.name}" deleted`,
+      receivedAt,
+    })),
+    ...reconcileResult.invalid.map((d) => ({
+      prUrl,
+      definitionId: d.definitionId,
+      action: "validation_failed" as const,
+      status: "failure" as const,
+      detail: `${d.kind} "${d.name}": ${d.error}`,
+      receivedAt,
+    })),
+  ];
+  if (auditRows.length > 0) {
+    await db.insert(schema.webhookAuditLog).values(auditRows);
   }
 
-  // Always record + start a workflow for any merged PR, even ones with
-  // no matching `definitions` row (e.g. hand-edited YAML or test PRs).
-  // The walking-skeleton workflow just logs and acks; per-kind branches
-  // inside it will no-op on an empty definitions array.
-  const mergedDefs: MergedDefinitionRef[] = toMerge.map((d) => ({
-    id: d.id,
+  // The downstream workflow only cares about defs that ended up valid —
+  // invalid rows are intentionally excluded so DAG / Kafka / Schema Registry
+  // steps don't operate on broken specs.
+  const validRefs = [...reconcileResult.added, ...reconcileResult.modified];
+  const mergedDefs: MergedDefinitionRef[] = validRefs.map((d) => ({
+    id: d.definitionId,
     kind: d.kind,
     name: d.name,
-    spec: d.spec,
+    // The reconciler already wrote the validated spec into the DB; the
+    // workflow can re-read by id when it needs it. Carry an empty spec
+    // through the workflow input so we don't bloat it with full JSON
+    // payloads for large lattik tables.
+    spec: {},
   }));
 
   // GitHub may redeliver the same x-github-delivery on transient
@@ -285,8 +330,10 @@ export async function POST(req: Request) {
 
   return Response.json({
     status: "ok",
-    mergedCount: toMerge.length,
-    deletedCount: toDelete.length,
+    addedCount: reconcileResult.added.length,
+    modifiedCount: reconcileResult.modified.length,
+    deletedCount: reconcileResult.deleted.length,
+    invalidCount: reconcileResult.invalid.length,
     requestId,
   });
 }

@@ -16,13 +16,17 @@ const TIME_FORMAT = new Intl.DateTimeFormat(undefined, {
   second: "2-digit",
 });
 
-// The audit log `detail` string is human-readable but ends with a phrase
-// describing the action ("marked as merged", "deleted after deletion PR
-// merged"). The expanded section already groups by action, so we trim
-// those trailing phrases for a tighter line.
+// The audit log `detail` string ends with a phrase describing the action
+// ("added", "modified", "deleted"). The expanded section already groups by
+// action, so we trim the trailing verb for a tighter line. Validation
+// failures keep the colon-and-message suffix so the reason is visible.
 function detailToLabel(detail: string | null): string {
   if (!detail) return "(no detail)";
   return detail
+    .replace(/ added$/, "")
+    .replace(/ modified$/, "")
+    .replace(/ deleted$/, "")
+    // Legacy entries from before the reconcile rewrite — keep readable.
     .replace(/ marked as merged$/, "")
     .replace(/ deleted after deletion PR merged$/, "");
 }
@@ -53,15 +57,26 @@ export default async function WorkflowsPage() {
 
   const auditByUrl = new Map<
     string,
-    { modified: string[]; deleted: string[] }
+    {
+      added: string[];
+      modified: string[];
+      deleted: string[];
+      invalid: string[];
+    }
   >();
   for (const a of auditRows) {
     const entry =
-      auditByUrl.get(a.prUrl) ?? { modified: [], deleted: [] };
-    if (a.action === "definition_merged") {
+      auditByUrl.get(a.prUrl) ??
+      { added: [], modified: [], deleted: [], invalid: [] };
+    if (a.action === "definition_added") {
+      entry.added.push(detailToLabel(a.detail));
+    } else if (a.action === "definition_modified") {
       entry.modified.push(detailToLabel(a.detail));
     } else if (a.action === "definition_deleted") {
       entry.deleted.push(detailToLabel(a.detail));
+    } else if (a.action === "validation_failed") {
+      // Keep the full ":reason" suffix — that's the point of this bucket.
+      entry.invalid.push(a.detail ?? "(no detail)");
     }
     auditByUrl.set(a.prUrl, entry);
   }
@@ -122,8 +137,10 @@ export default async function WorkflowsPage() {
               {rows.map((row) => {
                 const audit =
                   (row.prUrl && auditByUrl.get(row.prUrl)) || {
+                    added: [],
                     modified: [],
                     deleted: [],
+                    invalid: [],
                   };
                 return (
                   <WorkflowRunCard
@@ -136,8 +153,10 @@ export default async function WorkflowsPage() {
                     }
                     errorMessage={row.errorMessage}
                     prUrl={row.prUrl}
+                    added={audit.added}
                     modified={audit.modified}
                     deleted={audit.deleted}
+                    invalid={audit.invalid}
                   />
                 );
               })}

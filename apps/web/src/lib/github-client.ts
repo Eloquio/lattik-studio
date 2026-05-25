@@ -261,3 +261,97 @@ export async function mergePullRequest(prNumber: number) {
 export function getGitHubPRUrl(prNumber: number): string {
   return `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/pull/${prNumber}`;
 }
+
+export type PullRequestFileStatus =
+  | "added"
+  | "modified"
+  | "removed"
+  | "renamed"
+  | "copied"
+  | "changed"
+  | "unchanged";
+
+export interface PullRequestFile {
+  path: string;
+  status: PullRequestFileStatus;
+  previousFilename?: string;
+}
+
+/**
+ * GET /repos/{owner}/{repo}/pulls/{n}/files — the list of files changed by a
+ * PR. Paginates if the PR touches >100 files (rare for definition PRs but
+ * cheap to handle correctly). Returns the slim shape the reconciler needs.
+ */
+export async function listPullRequestFiles(
+  prNumber: number,
+): Promise<PullRequestFile[]> {
+  ensureConfig();
+  const all: PullRequestFile[] = [];
+  let page = 1;
+  // GitHub caps `per_page` at 100 for this endpoint; pagination is via Link
+  // header but page-number is just as reliable for an upper-bounded loop.
+  while (true) {
+    const res = await ghFetch(
+      repoUrl(`/pulls/${prNumber}/files?per_page=100&page=${page}`),
+    );
+    if (!res.ok) {
+      throw new Error(
+        `Failed to list files for PR #${prNumber}: ${res.status} ${await res.text()}`,
+      );
+    }
+    const batch = (await res.json()) as Array<{
+      filename: string;
+      status: PullRequestFileStatus;
+      previous_filename?: string;
+    }>;
+    for (const f of batch) {
+      all.push({
+        path: f.filename,
+        status: f.status,
+        previousFilename: f.previous_filename,
+      });
+    }
+    if (batch.length < 100) break;
+    page += 1;
+    if (page > 30) {
+      // 3000 files is far beyond anything a definition PR would touch; refuse
+      // to loop forever if GitHub returns truncated-but-full pages somehow.
+      throw new Error(
+        `PR #${prNumber} has > 3000 changed files — refusing to paginate further`,
+      );
+    }
+  }
+  return all;
+}
+
+/**
+ * GET /repos/{owner}/{repo}/contents/{path}?ref={sha} — fetches a single
+ * file's content at a specific git ref. Used to read the post-merge content
+ * of YAMLs touched by a PR. Returns "" if the file isn't present at that ref
+ * (404) — callers checking deletions don't need content anyway, but symmetric
+ * handling keeps the call site simple.
+ */
+export async function getFileAtRef(
+  path: string,
+  ref: string,
+): Promise<string> {
+  ensureConfig();
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  const res = await ghFetch(
+    repoUrl(`/contents/${encodedPath}?ref=${encodeURIComponent(ref)}`),
+  );
+  if (res.status === 404) return "";
+  if (!res.ok) {
+    throw new Error(
+      `Failed to fetch '${path}' at ref '${ref}': ${res.status} ${await res.text()}`,
+    );
+  }
+  const json = (await res.json()) as { content?: string; encoding?: string };
+  if (!json.content) return "";
+  if (json.encoding && json.encoding !== "base64") {
+    throw new Error(
+      `Unexpected encoding for '${path}' at '${ref}': ${json.encoding}`,
+    );
+  }
+  return Buffer.from(json.content, "base64").toString("utf8");
+}

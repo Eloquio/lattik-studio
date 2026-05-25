@@ -82,7 +82,8 @@ export type DefinitionStatus =
   | "draft"
   | "pending_review"
   | "merged"
-  | "pending_deletion";
+  | "pending_deletion"
+  | "invalid";
 
 export const definitions = pgTable(
   "definition",
@@ -135,8 +136,10 @@ export const rateLimits = pgTable(
 );
 
 export type WebhookActionType =
-  | "definition_merged"
+  | "definition_added"
+  | "definition_modified"
   | "definition_deleted"
+  | "validation_failed"
   | "kafka_topic_created"
   | "schema_registered"
   | "dag_generated";
