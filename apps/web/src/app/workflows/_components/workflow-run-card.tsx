@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
 import {
   Check,
@@ -50,6 +49,8 @@ interface WorkflowRunCardProps {
   deleted: string[];
   invalid: string[];
   stepChains: StepChain[];
+  onStepClick: (stepId: string) => void;
+  selectedStepId: string | null;
 }
 
 function StepIcon({ status }: { status: string }) {
@@ -82,28 +83,42 @@ function StepIcon({ status }: { status: string }) {
   );
 }
 
-function StepChecklist({ chain }: { chain: StepChain }) {
+function StepChecklist({
+  chain,
+  onStepClick,
+  selectedStepId,
+}: {
+  chain: StepChain;
+  onStepClick: (stepId: string) => void;
+  selectedStepId: string | null;
+}) {
   return (
     <ul className="mt-1 ml-4 space-y-0.5">
-      {chain.steps.map((s) => (
-        <li key={s.id} className="flex items-center gap-1.5">
-          <StepIcon status={s.status} />
-          <Link
-            href={`/workflows/steps/${s.id}`}
-            className={`underline-offset-2 hover:underline ${
-              s.status === "succeeded"
-                ? "text-stone-600 hover:text-stone-900"
-                : s.status === "failed"
-                  ? "text-red-700 hover:text-red-900"
-                  : s.status === "running"
-                    ? "text-stone-700 hover:text-stone-900"
-                    : "text-stone-500 hover:text-stone-700"
-            }`}
-          >
-            {s.name}
-          </Link>
-        </li>
-      ))}
+      {chain.steps.map((s) => {
+        const isSelected = s.id === selectedStepId;
+        return (
+          <li key={s.id} className="flex items-center gap-1.5">
+            <StepIcon status={s.status} />
+            <button
+              type="button"
+              onClick={() => onStepClick(s.id)}
+              className={`text-left underline-offset-2 hover:underline ${
+                isSelected ? "font-semibold underline" : ""
+              } ${
+                s.status === "succeeded"
+                  ? "text-stone-600 hover:text-stone-900"
+                  : s.status === "failed"
+                    ? "text-red-700 hover:text-red-900"
+                    : s.status === "running"
+                      ? "text-stone-700 hover:text-stone-900"
+                      : "text-stone-500 hover:text-stone-700"
+              }`}
+            >
+              {s.name}
+            </button>
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -132,6 +147,8 @@ export function WorkflowRunCard({
   deleted,
   invalid,
   stepChains,
+  onStepClick,
+  selectedStepId,
 }: WorkflowRunCardProps) {
   const [open, setOpen] = useState(false);
   const hasDetails =
@@ -243,7 +260,13 @@ export function WorkflowRunCard({
                       return (
                         <li key={i}>
                           {d}
-                          {chain && <StepChecklist chain={chain} />}
+                          {chain && (
+                            <StepChecklist
+                              chain={chain}
+                              onStepClick={onStepClick}
+                              selectedStepId={selectedStepId}
+                            />
+                          )}
                         </li>
                       );
                     })}
@@ -261,7 +284,13 @@ export function WorkflowRunCard({
                       return (
                         <li key={i}>
                           {d}
-                          {chain && <StepChecklist chain={chain} />}
+                          {chain && (
+                            <StepChecklist
+                              chain={chain}
+                              onStepClick={onStepClick}
+                              selectedStepId={selectedStepId}
+                            />
+                          )}
                         </li>
                       );
                     })}
