@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { Activity, GitBranch, LogOut, MessageSquare } from "lucide-react";
+import { Activity, GitBranch, LogOut, MessageSquare, Terminal } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -25,6 +25,7 @@ export function NavPanel({ historyOpen = false, onChatClick }: NavPanelProps) {
   const pathname = usePathname();
   const onHome = pathname === "/";
   const onWorkflows = pathname === "/workflows" || pathname.startsWith("/workflows/");
+  const onSqlPlayground = pathname === "/sql-playground" || pathname.startsWith("/sql-playground/");
 
   const handleChatClick = () => {
     if (onChatClick) onChatClick();
@@ -59,6 +60,20 @@ export function NavPanel({ historyOpen = false, onChatClick }: NavPanelProps) {
           <Activity className="h-5 w-5" />
         </TooltipTrigger>
         <TooltipContent side="right">Workflows</TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger
+          className={`flex h-10 w-10 items-center justify-center rounded-md transition-colors ${
+            onSqlPlayground
+              ? "bg-white/15 text-brand"
+              : "text-white/70 hover:bg-white/10 hover:text-white"
+          }`}
+          onClick={() => router.push("/sql-playground")}
+        >
+          <Terminal className="h-5 w-5" />
+        </TooltipTrigger>
+        <TooltipContent side="right">SQL Playground</TooltipContent>
       </Tooltip>
 
       {/* `mt-auto` lives on the first bottom-anchored item so the
