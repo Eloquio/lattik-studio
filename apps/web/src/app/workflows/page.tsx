@@ -65,24 +65,62 @@ export default async function WorkflowsPage() {
     definitionName: string;
     steps: { name: string; status: string }[];
   };
-  const stepsByRun = new Map<string, StepChain[]>();
+
+  // Webhook redelivery can produce duplicate step rows within the same
+  // (runId, definitionId) — `seedLoggerTableStepsStep` runs again and
+  // re-inserts. Dedupe by `stepOrder` per chain, keeping the most
+  // advanced status (succeeded > failed > running > pending/skipped).
+  // Without this the card renders the same checklist twice.
+  const statusPriority: Record<string, number> = {
+    succeeded: 4,
+    failed: 3,
+    running: 2,
+    pending: 1,
+    skipped: 0,
+  };
+  const chainsByRunKey = new Map<
+    string,
+    Map<string, StepChain & { stepsByOrder: Map<number, { name: string; status: string }> }>
+  >();
   for (const s of stepRows) {
-    const chains = stepsByRun.get(s.runId) ?? [];
-    let chain = chains.find(
-      (c) =>
-        c.definitionId === s.definitionId && c.definitionName === s.definitionName,
-    );
+    const chainKey = `${s.definitionId ?? ""}::${s.definitionName}`;
+    let chainsForRun = chainsByRunKey.get(s.runId);
+    if (!chainsForRun) {
+      chainsForRun = new Map();
+      chainsByRunKey.set(s.runId, chainsForRun);
+    }
+    let chain = chainsForRun.get(chainKey);
     if (!chain) {
       chain = {
         definitionId: s.definitionId,
         definitionKind: s.definitionKind,
         definitionName: s.definitionName,
         steps: [],
+        stepsByOrder: new Map(),
       };
-      chains.push(chain);
+      chainsForRun.set(chainKey, chain);
     }
-    chain.steps.push({ name: s.stepName, status: s.status });
-    stepsByRun.set(s.runId, chains);
+    const prev = chain.stepsByOrder.get(s.stepOrder);
+    if (
+      !prev ||
+      (statusPriority[s.status] ?? -1) > (statusPriority[prev.status] ?? -1)
+    ) {
+      chain.stepsByOrder.set(s.stepOrder, { name: s.stepName, status: s.status });
+    }
+  }
+  const stepsByRun = new Map<string, StepChain[]>();
+  for (const [runId, chainsForRun] of chainsByRunKey) {
+    stepsByRun.set(
+      runId,
+      Array.from(chainsForRun.values()).map((c) => ({
+        definitionId: c.definitionId,
+        definitionKind: c.definitionKind,
+        definitionName: c.definitionName,
+        steps: Array.from(c.stepsByOrder.entries())
+          .sort(([a], [b]) => a - b)
+          .map(([, step]) => step),
+      })),
+    );
   }
 
   const auditRows =
@@ -97,28 +135,36 @@ export default async function WorkflowsPage() {
           .where(inArray(schema.webhookAuditLog.prUrl, prUrls))
       : [];
 
+  // Webhook redelivery can produce multiple audit rows per definition per
+  // PR. We dedupe by formatted label so each definition shows up once per
+  // bucket, regardless of how many times the webhook fired.
   const auditByUrl = new Map<
     string,
     {
-      added: string[];
-      modified: string[];
-      deleted: string[];
-      invalid: string[];
+      added: Set<string>;
+      modified: Set<string>;
+      deleted: Set<string>;
+      invalid: Set<string>;
     }
   >();
   for (const a of auditRows) {
     const entry =
       auditByUrl.get(a.prUrl) ??
-      { added: [], modified: [], deleted: [], invalid: [] };
+      {
+        added: new Set<string>(),
+        modified: new Set<string>(),
+        deleted: new Set<string>(),
+        invalid: new Set<string>(),
+      };
     if (a.action === "definition_added") {
-      entry.added.push(detailToLabel(a.detail));
+      entry.added.add(detailToLabel(a.detail));
     } else if (a.action === "definition_modified") {
-      entry.modified.push(detailToLabel(a.detail));
+      entry.modified.add(detailToLabel(a.detail));
     } else if (a.action === "definition_deleted") {
-      entry.deleted.push(detailToLabel(a.detail));
+      entry.deleted.add(detailToLabel(a.detail));
     } else if (a.action === "validation_failed") {
       // Keep the full ":reason" suffix — that's the point of this bucket.
-      entry.invalid.push(a.detail ?? "(no detail)");
+      entry.invalid.add(a.detail ?? "(no detail)");
     }
     auditByUrl.set(a.prUrl, entry);
   }
@@ -185,13 +231,7 @@ export default async function WorkflowsPage() {
           ) : (
             <div className="flex flex-col gap-2">
               {rows.map((row) => {
-                const audit =
-                  (row.prUrl && auditByUrl.get(row.prUrl)) || {
-                    added: [],
-                    modified: [],
-                    deleted: [],
-                    invalid: [],
-                  };
+                const audit = row.prUrl ? auditByUrl.get(row.prUrl) : undefined;
                 return (
                   <WorkflowRunCard
                     key={row.id}
@@ -203,10 +243,10 @@ export default async function WorkflowsPage() {
                     }
                     errorMessage={row.errorMessage}
                     prUrl={row.prUrl}
-                    added={audit.added}
-                    modified={audit.modified}
-                    deleted={audit.deleted}
-                    invalid={audit.invalid}
+                    added={audit ? Array.from(audit.added) : []}
+                    modified={audit ? Array.from(audit.modified) : []}
+                    deleted={audit ? Array.from(audit.deleted) : []}
+                    invalid={audit ? Array.from(audit.invalid) : []}
                     stepChains={stepsByRun.get(row.id) ?? []}
                   />
                 );
