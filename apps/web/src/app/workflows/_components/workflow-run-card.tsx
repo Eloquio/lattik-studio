@@ -2,11 +2,15 @@
 
 import { useState } from "react";
 import {
+  Check,
   ChevronDown,
   ChevronRight,
+  Circle,
   Clock,
   GitPullRequest,
+  Loader2,
   Timer,
+  X,
 } from "lucide-react";
 
 const STATUS_STYLES: Record<string, { bg: string; text: string; dot: string }> = {
@@ -21,6 +25,18 @@ const FALLBACK_STYLE = {
   dot: "bg-stone-400",
 };
 
+function extractPrNumber(url: string): string | null {
+  const match = url.match(/\/pulls?\/(\d+)(?:[/?#]|$)/);
+  return match ? match[1] : null;
+}
+
+export interface StepChain {
+  definitionId: string | null;
+  definitionKind: string;
+  definitionName: string;
+  steps: { name: string; status: string }[];
+}
+
 interface WorkflowRunCardProps {
   workflowName: string;
   status: string;
@@ -32,6 +48,46 @@ interface WorkflowRunCardProps {
   modified: string[];
   deleted: string[];
   invalid: string[];
+  stepChains: StepChain[];
+}
+
+function StepIcon({ status }: { status: string }) {
+  if (status === "succeeded") {
+    return <Check className="h-3 w-3 text-emerald-600" />;
+  }
+  if (status === "failed") {
+    return <X className="h-3 w-3 text-red-600" />;
+  }
+  if (status === "running") {
+    return <Loader2 className="h-3 w-3 animate-spin text-blue-600" />;
+  }
+  // pending / skipped
+  return <Circle className="h-3 w-3 text-stone-400" />;
+}
+
+function StepChecklist({ chain }: { chain: StepChain }) {
+  return (
+    <ul className="mt-1 ml-4 space-y-0.5">
+      {chain.steps.map((s, i) => (
+        <li key={i} className="flex items-center gap-1.5">
+          <StepIcon status={s.status} />
+          <span
+            className={
+              s.status === "succeeded"
+                ? "text-stone-600"
+                : s.status === "failed"
+                  ? "text-red-700"
+                  : s.status === "running"
+                    ? "text-stone-700"
+                    : "text-stone-500"
+            }
+          >
+            {s.name}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -57,6 +113,7 @@ export function WorkflowRunCard({
   modified,
   deleted,
   invalid,
+  stepChains,
 }: WorkflowRunCardProps) {
   const [open, setOpen] = useState(false);
   const hasDetails =
@@ -65,6 +122,14 @@ export function WorkflowRunCard({
     deleted.length > 0 ||
     invalid.length > 0 ||
     Boolean(errorMessage);
+
+  // Audit-log entries are formatted as `${kind} "${name}"` by the
+  // workflows page; the chain carries kind+name directly, so build the
+  // same string and look up by it.
+  const chainByLabel = new Map<string, StepChain>();
+  for (const c of stepChains) {
+    chainByLabel.set(`${c.definitionKind} "${c.definitionName}"`, c);
+  }
 
   return (
     <div className="group rounded-lg border border-stone-400 bg-[#f3eada] transition-shadow hover:shadow-sm">
@@ -137,7 +202,10 @@ export function WorkflowRunCard({
             className="inline-flex shrink-0 items-center gap-1 rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-medium text-stone-600 transition-colors hover:bg-stone-200 hover:text-stone-800"
           >
             <GitPullRequest className="h-2.5 w-2.5" />
-            PR
+            {(() => {
+              const num = extractPrNumber(prUrl);
+              return num ? `PR ${num}` : "PR";
+            })()}
           </a>
         )}
       </button>
@@ -151,10 +219,16 @@ export function WorkflowRunCard({
                   <div className="text-[10px] font-semibold uppercase tracking-wide text-stone-500">
                     Added ({added.length})
                   </div>
-                  <ul className="mt-1 ml-4 list-disc space-y-0.5 font-mono">
-                    {added.map((d, i) => (
-                      <li key={i}>{d}</li>
-                    ))}
+                  <ul className="mt-1 ml-4 list-disc space-y-1.5 font-mono">
+                    {added.map((d, i) => {
+                      const chain = chainByLabel.get(d);
+                      return (
+                        <li key={i}>
+                          {d}
+                          {chain && <StepChecklist chain={chain} />}
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               )}
@@ -163,10 +237,16 @@ export function WorkflowRunCard({
                   <div className="text-[10px] font-semibold uppercase tracking-wide text-stone-500">
                     Modified ({modified.length})
                   </div>
-                  <ul className="mt-1 ml-4 list-disc space-y-0.5 font-mono">
-                    {modified.map((d, i) => (
-                      <li key={i}>{d}</li>
-                    ))}
+                  <ul className="mt-1 ml-4 list-disc space-y-1.5 font-mono">
+                    {modified.map((d, i) => {
+                      const chain = chainByLabel.get(d);
+                      return (
+                        <li key={i}>
+                          {d}
+                          {chain && <StepChecklist chain={chain} />}
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               )}
