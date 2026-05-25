@@ -1,7 +1,7 @@
 "use client";
 
 import { Activity } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { WorkflowRunCard, type StepChain } from "./workflow-run-card";
 import { StepDetailPanel, type StepDetail } from "./step-detail-panel";
 
@@ -29,7 +29,13 @@ interface WorkflowsViewProps {
   failedCount: number;
 }
 
-const DEFAULT_PANEL_WIDTH = 40;
+/**
+ * Splitter sits 50/50 by default; the user can drag it 25–75. The
+ * panel side reads the percentage out of the total available width,
+ * matching how the chat canvas computes its split.
+ */
+const DEFAULT_PANEL_WIDTH = 50;
+const NAV_WIDTH = 56;
 
 export function WorkflowsView({
   cards,
@@ -54,9 +60,68 @@ export function WorkflowsView({
     setSelectedStepId(null);
   }, []);
 
+  useEffect(() => {
+    if (!selectedStep) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") handleClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [selectedStep, handleClose]);
+
+  const isDragging = useRef(false);
+  const handlersRef = useRef<{
+    move: ((e: MouseEvent) => void) | null;
+    up: (() => void) | null;
+  }>({ move: null, up: null });
+
+  useEffect(() => {
+    return () => {
+      if (handlersRef.current.move) {
+        document.removeEventListener("mousemove", handlersRef.current.move);
+      }
+      if (handlersRef.current.up) {
+        document.removeEventListener("mouseup", handlersRef.current.up);
+      }
+    };
+  }, []);
+
+  const handleSplitterMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDragging.current = true;
+
+    const handleMouseMove = (ev: MouseEvent) => {
+      if (!isDragging.current) return;
+      const windowWidth = window.innerWidth;
+      const availableWidth = windowWidth - NAV_WIDTH;
+      const newWidth =
+        ((windowWidth - ev.clientX) / availableWidth) * 100;
+      setPanelWidth(Math.min(Math.max(newWidth, 25), 75));
+    };
+
+    const handleMouseUp = () => {
+      isDragging.current = false;
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+      handlersRef.current = { move: null, up: null };
+    };
+
+    if (handlersRef.current.move) {
+      document.removeEventListener("mousemove", handlersRef.current.move);
+    }
+    if (handlersRef.current.up) {
+      document.removeEventListener("mouseup", handlersRef.current.up);
+    }
+
+    handlersRef.current = { move: handleMouseMove, up: handleMouseUp };
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+  }, []);
+
   return (
-    <>
-      <main className="canvas-paper relative z-10 flex-1 overflow-auto">
+    <main className="canvas-paper relative z-10 flex flex-1 overflow-hidden">
+      {/* Left half — workflow runs list. */}
+      <div className="flex-1 overflow-auto">
         <div className="mx-auto flex max-w-5xl flex-col gap-4 p-8">
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2">
@@ -123,14 +188,32 @@ export function WorkflowsView({
             </div>
           )}
         </div>
-      </main>
+      </div>
 
-      <StepDetailPanel
-        step={selectedStep}
-        width={panelWidth}
-        onWidthChange={setPanelWidth}
-        onClose={handleClose}
-      />
-    </>
+      {selectedStep && (
+        <>
+          {/* Splitter sits at the seam on the same canvas-paper surface.
+              Grab zone is wider than the visible divider for easier
+              dragging. */}
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            onMouseDown={handleSplitterMouseDown}
+            className="group relative flex h-full w-1.5 shrink-0 cursor-col-resize items-center justify-center"
+          >
+            <div className="h-full w-px bg-stone-400/60 transition-colors group-hover:bg-stone-500/80 group-active:bg-stone-600" />
+          </div>
+
+          {/* Right half — step detail. No own background so it reads as
+              the same notebook page. */}
+          <div
+            className="shrink-0 overflow-auto"
+            style={{ width: `${panelWidth}%` }}
+          >
+            <StepDetailPanel step={selectedStep} onClose={handleClose} />
+          </div>
+        </>
+      )}
+    </main>
   );
 }
