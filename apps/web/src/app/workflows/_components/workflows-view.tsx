@@ -192,16 +192,16 @@ export function WorkflowsView({
 
       {selectedStep && (
         <>
-          {/* Splitter sits at the seam on the same canvas-paper surface.
-              Grab zone is wider than the visible divider for easier
-              dragging. */}
+          {/* Splitter — invisible by default so the notebook surface
+              reads as one continuous page. Hover/drag reveals a thin
+              line so the resize affordance stays discoverable. */}
           <div
             role="separator"
             aria-orientation="vertical"
             onMouseDown={handleSplitterMouseDown}
             className="group relative flex h-full w-1.5 shrink-0 cursor-col-resize items-center justify-center"
           >
-            <div className="h-full w-px bg-stone-400/60 transition-colors group-hover:bg-stone-500/80 group-active:bg-stone-600" />
+            <div className="h-full w-px bg-transparent transition-colors group-hover:bg-stone-400/60 group-active:bg-stone-500/80" />
           </div>
 
           {/* Right half — step detail. No own background so it reads as
