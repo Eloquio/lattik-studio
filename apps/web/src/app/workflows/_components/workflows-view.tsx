@@ -1,6 +1,7 @@
 "use client";
 
 import { Activity } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { WorkflowRunCard, type StepChain } from "./workflow-run-card";
 import { StepDetailPanel, type StepDetail } from "./step-detail-panel";
@@ -44,7 +45,15 @@ export function WorkflowsView({
   succeededCount,
   failedCount,
 }: WorkflowsViewProps) {
-  const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
+  // Persist the open step in `?step=<id>` so refresh / share-by-URL
+  // restores the panel. The initial value is read once from the URL
+  // on mount; subsequent transitions update the URL via
+  // history.replaceState so we don't trigger a Next server re-fetch
+  // every time the user clicks a step.
+  const searchParams = useSearchParams();
+  const [selectedStepId, setSelectedStepId] = useState<string | null>(
+    () => searchParams.get("step"),
+  );
   const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
 
   const selectedStep = useMemo(
@@ -52,13 +61,32 @@ export function WorkflowsView({
     [selectedStepId, stepDetails],
   );
 
-  const handleStepClick = useCallback((stepId: string) => {
-    setSelectedStepId((prev) => (prev === stepId ? null : stepId));
+  const syncUrl = useCallback((stepId: string | null) => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (stepId) {
+      url.searchParams.set("step", stepId);
+    } else {
+      url.searchParams.delete("step");
+    }
+    window.history.replaceState(null, "", url.toString());
   }, []);
+
+  const handleStepClick = useCallback(
+    (stepId: string) => {
+      setSelectedStepId((prev) => {
+        const next = prev === stepId ? null : stepId;
+        syncUrl(next);
+        return next;
+      });
+    },
+    [syncUrl],
+  );
 
   const handleClose = useCallback(() => {
     setSelectedStepId(null);
-  }, []);
+    syncUrl(null);
+  }, [syncUrl]);
 
   useEffect(() => {
     if (!selectedStep) return;
@@ -68,6 +96,16 @@ export function WorkflowsView({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [selectedStep, handleClose]);
+
+  // If we hydrated with a `?step=<id>` that no longer exists (stale
+  // share link, deleted step), drop the param so the URL doesn't
+  // carry a phantom selection.
+  useEffect(() => {
+    if (selectedStepId && !stepDetails[selectedStepId]) {
+      setSelectedStepId(null);
+      syncUrl(null);
+    }
+  }, [selectedStepId, stepDetails, syncUrl]);
 
   const isDragging = useRef(false);
   const handlersRef = useRef<{
