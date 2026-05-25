@@ -63,7 +63,7 @@ export default async function WorkflowsPage() {
     definitionId: string | null;
     definitionKind: string;
     definitionName: string;
-    steps: { name: string; status: string }[];
+    steps: { id: string; name: string; status: string }[];
   };
 
   // Webhook redelivery can produce duplicate step rows within the same
@@ -80,7 +80,12 @@ export default async function WorkflowsPage() {
   };
   const chainsByRunKey = new Map<
     string,
-    Map<string, StepChain & { stepsByOrder: Map<number, { name: string; status: string }> }>
+    Map<
+      string,
+      StepChain & {
+        stepsByOrder: Map<number, { id: string; name: string; status: string }>;
+      }
+    >
   >();
   for (const s of stepRows) {
     const chainKey = `${s.definitionId ?? ""}::${s.definitionName}`;
@@ -105,7 +110,11 @@ export default async function WorkflowsPage() {
       !prev ||
       (statusPriority[s.status] ?? -1) > (statusPriority[prev.status] ?? -1)
     ) {
-      chain.stepsByOrder.set(s.stepOrder, { name: s.stepName, status: s.status });
+      chain.stepsByOrder.set(s.stepOrder, {
+        id: s.id,
+        name: s.stepName,
+        status: s.status,
+      });
     }
   }
   const stepsByRun = new Map<string, StepChain[]>();

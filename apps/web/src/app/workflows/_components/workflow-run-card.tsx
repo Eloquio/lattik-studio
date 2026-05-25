@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import {
   Check,
@@ -34,7 +35,7 @@ export interface StepChain {
   definitionId: string | null;
   definitionKind: string;
   definitionName: string;
-  steps: { name: string; status: string }[];
+  steps: { id: string; name: string; status: string }[];
 }
 
 interface WorkflowRunCardProps {
@@ -84,22 +85,23 @@ function StepIcon({ status }: { status: string }) {
 function StepChecklist({ chain }: { chain: StepChain }) {
   return (
     <ul className="mt-1 ml-4 space-y-0.5">
-      {chain.steps.map((s, i) => (
-        <li key={i} className="flex items-center gap-1.5">
+      {chain.steps.map((s) => (
+        <li key={s.id} className="flex items-center gap-1.5">
           <StepIcon status={s.status} />
-          <span
-            className={
+          <Link
+            href={`/workflows/steps/${s.id}`}
+            className={`underline-offset-2 hover:underline ${
               s.status === "succeeded"
-                ? "text-stone-600"
+                ? "text-stone-600 hover:text-stone-900"
                 : s.status === "failed"
-                  ? "text-red-700"
+                  ? "text-red-700 hover:text-red-900"
                   : s.status === "running"
-                    ? "text-stone-700"
-                    : "text-stone-500"
-            }
+                    ? "text-stone-700 hover:text-stone-900"
+                    : "text-stone-500 hover:text-stone-700"
+            }`}
           >
             {s.name}
-          </span>
+          </Link>
         </li>
       ))}
     </ul>
