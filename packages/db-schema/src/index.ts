@@ -1,4 +1,6 @@
+import { sql } from "drizzle-orm";
 import {
+  boolean,
   date,
   index,
   integer,
@@ -8,6 +10,8 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
+  uuid,
 } from "drizzle-orm/pg-core";
 import type { AdapterAccountType } from "next-auth/adapters";
 
@@ -362,3 +366,140 @@ export const pipelineWorkflowSteps = pgTable(
     index("idx_pipeline_workflow_steps_definitionId").on(t.definitionId),
   ]
 );
+
+// ---------------------------------------------------------------------------
+// Batch scheduler — DAGs synced from the lattik-pipelines sibling repo,
+// queued/dispatched by /api/scheduler/tick, executed in Vercel Sandboxes
+// from a bundle produced by lattik-pipelines' GitHub Actions.
+// ---------------------------------------------------------------------------
+
+/**
+ * One row per (DAG id, branch). "Branch" is "prod" for main, "pr-<n>" for an
+ * open PR. The PR variants get their dag id suffixed with `_pr_<n>` so they
+ * coexist in the same table. Reconciler upserts on the `(id, branch)` unique
+ * constraint and soft-archives by setting `archivedAt`.
+ */
+export const dags = pgTable(
+  "dag",
+  {
+    id: text("id").notNull(),
+    branch: text("branch").notNull(),
+    /** YAML path inside the bundle (e.g. `dags/daily_metrics.yaml`). */
+    sourcePath: text("source_path").notNull(),
+    yamlRaw: text("yaml_raw").notNull(),
+    /** sha256(yamlRaw) — manifest cache key, also pinned onto dag_runs. */
+    yamlHash: text("yaml_hash").notNull(),
+    /** Zod-validated `DagDef`. */
+    parsed: jsonb("parsed").notNull(),
+    schedule: text("schedule").notNull(),
+    timezone: text("timezone").notNull().default("UTC"),
+    startDate: date("start_date").notNull(),
+    catchup: boolean("catchup").notNull().default(true),
+    maxActiveRuns: integer("max_active_runs").notNull().default(3),
+    /** Human-toggled. Reconciler never sets this. */
+    enabled: boolean("enabled").notNull().default(false),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    /** Bookmark used by catchup — most recent enqueued logical datetime. */
+    lastEnqueuedLogicalDatetime: timestamp(
+      "last_enqueued_logical_datetime",
+      { withTimezone: true }
+    ),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (t) => [uniqueIndex("dags_id_branch_unique").on(t.id, t.branch)]
+);
+
+/**
+ * One row per scheduled run. `id` is the deterministic
+ * `${dagId}__${compactIso}` (e.g. `daily_metrics__20260510T000000000Z`) —
+ * used both as the workflow runId argument and the URL path segment.
+ *
+ * `manifestSha` pins the run to the YAML version it was enqueued against.
+ * The task launch step recomputes sha256(dags.yamlRaw) and refuses to launch
+ * on mismatch so a YAML PR merging mid-run can't surprise the topology.
+ */
+export const dagRuns = pgTable(
+  "dag_run",
+  {
+    id: text("id").primaryKey(),
+    dagId: text("dag_id").notNull(),
+    branch: text("branch").notNull(),
+    logicalDatetime: timestamp("logical_datetime", {
+      withTimezone: true,
+    }).notNull(),
+    /** queued | running | succeeded | failed | cancelled */
+    status: text("status").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    bundleSha: text("bundle_sha"),
+    manifestSha: text("manifest_sha"),
+    workflowRunId: text("workflow_run_id"),
+    triggeredBy: text("triggered_by").notNull().default("cron"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (t) => [
+    uniqueIndex("dag_runs_dag_branch_logical_unique").on(
+      t.dagId,
+      t.branch,
+      t.logicalDatetime
+    ),
+    index("idx_dag_runs_status").on(t.status),
+  ]
+);
+
+/**
+ * One row per (run × task × attempt). `attempt` is 1-indexed; retries are
+ * not yet wired so every row today has `attempt=1`. Keeping the column
+ * makes adding retries later a non-event.
+ *
+ * `logUrl` and `logToken` are split at rest so a generic "log_url" audit
+ * dump doesn't leak the per-attempt secret. The browser-facing URL is
+ * composed at serialization time as `${logUrl}?t=${logToken}`.
+ */
+export const taskAttempts = pgTable(
+  "task_attempt",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    dagRunId: text("dag_run_id").notNull(),
+    taskId: text("task_id").notNull(),
+    attempt: integer("attempt").notNull(),
+    /** queued | running | succeeded | failed | skipped */
+    status: text("status").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    errorMessage: text("error_message"),
+    sandboxId: text("sandbox_id"),
+    logUrl: text("log_url"),
+    logToken: text("log_token"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (t) => [
+    uniqueIndex("task_attempts_run_task_attempt_unique").on(
+      t.dagRunId,
+      t.taskId,
+      t.attempt
+    ),
+  ]
+);
+
+export type Dag = typeof dags.$inferSelect;
+export type DagInsert = typeof dags.$inferInsert;
+export type DagRun = typeof dagRuns.$inferSelect;
+export type DagRunInsert = typeof dagRuns.$inferInsert;
+export type TaskAttempt = typeof taskAttempts.$inferSelect;
+export type TaskAttemptInsert = typeof taskAttempts.$inferInsert;
