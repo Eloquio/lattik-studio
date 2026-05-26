@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -51,6 +50,9 @@ interface WorkflowRunCardProps {
   stepChains: StepChain[];
   onStepClick: (stepId: string) => void;
   selectedStepId: string | null;
+  /** Controlled open/closed state — the parent persists it in the URL. */
+  isOpen: boolean;
+  onToggle: () => void;
 }
 
 function StepIcon({ status }: { status: string }) {
@@ -149,8 +151,10 @@ export function WorkflowRunCard({
   stepChains,
   onStepClick,
   selectedStepId,
+  isOpen,
+  onToggle,
 }: WorkflowRunCardProps) {
-  const [open, setOpen] = useState(false);
+  const open = isOpen;
   const hasDetails =
     added.length > 0 ||
     modified.length > 0 ||
@@ -170,7 +174,7 @@ export function WorkflowRunCard({
     <div className="group rounded-lg border border-stone-400 bg-[#f3eada] transition-shadow hover:shadow-sm">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={onToggle}
         className="flex w-full items-start gap-2 p-3 text-left"
         aria-expanded={open}
       >
