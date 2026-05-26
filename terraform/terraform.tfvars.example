@@ -1,0 +1,20 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored.
+
+# AWS region used for IAM (global), Firehose, and S3.
+aws_region = "us-east-1"
+
+# Vercel team slug — the path segment in your team URL.
+# Example: https://vercel.com/eloquio → "eloquio"
+vercel_team_slug = "REPLACE-ME"
+
+# Vercel project slug. Must match the project Lattik Studio is deployed to.
+vercel_project_name = "lattik-studio"
+
+# Which Vercel environment this role is for. Re-run terraform with a
+# different value (and a separate state file) to provision additional
+# environments — e.g. environment = "preview".
+environment = "production"
+
+# Optional: explicit Firehose/SDK bucket name. Globally unique.
+# If unset, defaults to "lattik-studio-firehose-<account-id>".
+# firehose_bucket_name = "lattik-studio-firehose-prod"

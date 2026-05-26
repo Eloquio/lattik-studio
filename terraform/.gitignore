@@ -1,0 +1,23 @@
+# Local Terraform working files
+.terraform/
+.terraform.lock.hcl.bak
+
+# Secrets / local overrides
+terraform.tfvars
+*.auto.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# State files — state lives in the S3 backend, never on disk
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Crash logs
+crash.log
+crash.*.log
+
+# Plan output
+*.tfplan
