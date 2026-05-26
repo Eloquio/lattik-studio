@@ -45,14 +45,21 @@ export function WorkflowsView({
   succeededCount,
   failedCount,
 }: WorkflowsViewProps) {
-  // Persist the open step in `?step=<id>` so refresh / share-by-URL
-  // restores the panel. The initial value is read once from the URL
-  // on mount; subsequent transitions update the URL via
-  // history.replaceState so we don't trigger a Next server re-fetch
-  // every time the user clicks a step.
+  // Persist UI state in URL query params so refresh / share-by-URL
+  // restores the view: `?step=<id>` for the side-panel selection,
+  // `?open=<id1>,<id2>` for the set of expanded run cards. Initial
+  // values are read once on mount; subsequent transitions update the
+  // URL via history.replaceState so we don't trigger a Next server
+  // re-fetch on every click.
   const searchParams = useSearchParams();
   const [selectedStepId, setSelectedStepId] = useState<string | null>(
     () => searchParams.get("step"),
+  );
+  const [openRunIds, setOpenRunIds] = useState<Set<string>>(
+    () =>
+      new Set(
+        (searchParams.get("open") ?? "").split(",").filter(Boolean),
+      ),
   );
   const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
 
@@ -61,32 +68,54 @@ export function WorkflowsView({
     [selectedStepId, stepDetails],
   );
 
-  const syncUrl = useCallback((stepId: string | null) => {
-    if (typeof window === "undefined") return;
-    const url = new URL(window.location.href);
-    if (stepId) {
-      url.searchParams.set("step", stepId);
-    } else {
-      url.searchParams.delete("step");
-    }
-    window.history.replaceState(null, "", url.toString());
-  }, []);
+  const syncSearchParam = useCallback(
+    (key: string, value: string | null) => {
+      if (typeof window === "undefined") return;
+      const url = new URL(window.location.href);
+      if (value) {
+        url.searchParams.set(key, value);
+      } else {
+        url.searchParams.delete(key);
+      }
+      window.history.replaceState(null, "", url.toString());
+    },
+    [],
+  );
 
   const handleStepClick = useCallback(
     (stepId: string) => {
       setSelectedStepId((prev) => {
         const next = prev === stepId ? null : stepId;
-        syncUrl(next);
+        syncSearchParam("step", next);
         return next;
       });
     },
-    [syncUrl],
+    [syncSearchParam],
   );
 
   const handleClose = useCallback(() => {
     setSelectedStepId(null);
-    syncUrl(null);
-  }, [syncUrl]);
+    syncSearchParam("step", null);
+  }, [syncSearchParam]);
+
+  const handleToggleOpen = useCallback(
+    (runId: string) => {
+      setOpenRunIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(runId)) {
+          next.delete(runId);
+        } else {
+          next.add(runId);
+        }
+        syncSearchParam(
+          "open",
+          next.size > 0 ? Array.from(next).join(",") : null,
+        );
+        return next;
+      });
+    },
+    [syncSearchParam],
+  );
 
   useEffect(() => {
     if (!selectedStep) return;
@@ -103,9 +132,32 @@ export function WorkflowsView({
   useEffect(() => {
     if (selectedStepId && !stepDetails[selectedStepId]) {
       setSelectedStepId(null);
-      syncUrl(null);
+      syncSearchParam("step", null);
     }
-  }, [selectedStepId, stepDetails, syncUrl]);
+  }, [selectedStepId, stepDetails, syncSearchParam]);
+
+  // Drop any `?open=...` ids that don't match a currently-visible run
+  // (the 100-row window scrolled past, or the row was deleted). Keeps
+  // the URL honest after a refresh.
+  useEffect(() => {
+    const visibleIds = new Set(cards.map((c) => c.id));
+    let changed = false;
+    const next = new Set<string>();
+    for (const id of openRunIds) {
+      if (visibleIds.has(id)) {
+        next.add(id);
+      } else {
+        changed = true;
+      }
+    }
+    if (changed) {
+      setOpenRunIds(next);
+      syncSearchParam(
+        "open",
+        next.size > 0 ? Array.from(next).join(",") : null,
+      );
+    }
+  }, [cards, openRunIds, syncSearchParam]);
 
   const isDragging = useRef(false);
   const handlersRef = useRef<{
@@ -231,6 +283,8 @@ export function WorkflowsView({
                   stepChains={card.stepChains}
                   onStepClick={handleStepClick}
                   selectedStepId={selectedStepId}
+                  isOpen={openRunIds.has(card.id)}
+                  onToggle={() => handleToggleOpen(card.id)}
                 />
               ))}
             </div>
