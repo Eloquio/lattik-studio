@@ -116,7 +116,13 @@ async function runLoggerTableStepsStep(
   );
 
   for (const d of loggerTables) {
-    const parsed = loggerTableSchema.safeParse(d.spec);
+    // The webhook handler ships `spec: {}` to keep the workflow input lean
+    // (see post-pipeline-pr-merge handler comment). Re-read from the DB.
+    const row = await getDb().query.definitions.findFirst({
+      where: eq(schema.definitions.id, d.id),
+      columns: { spec: true },
+    });
+    const parsed = loggerTableSchema.safeParse(row?.spec);
     if (!parsed.success) {
       // If the spec doesn't parse, fail every step in this chain with the
       // same message so the UI shows the same diagnostic on each row.
