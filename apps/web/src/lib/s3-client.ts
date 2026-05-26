@@ -7,28 +7,42 @@ import {
   ListObjectsV2Command,
   type _Object,
 } from "@aws-sdk/client-s3";
+import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider";
 
-const s3 = new S3Client({
-  endpoint: process.env.S3_ENDPOINT ?? "http://localhost:9000",
-  region: process.env.S3_REGION ?? "us-east-1",
-  credentials: {
-    accessKeyId: process.env.S3_ACCESS_KEY_ID ?? "lattik",
-    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? "lattik-local",
-  },
-  forcePathStyle: true,
-});
+// On Vercel (AWS_ROLE_ARN present), assume the Lattik Studio role via OIDC
+// and talk to real AWS S3 — no endpoint override, no path-style. Locally,
+// keep the MinIO configuration the dev cluster has always used. The DAG
+// reconciler, generated SDK uploader, and any other S3 caller in this app
+// all funnel through this client.
+const AWS_ROLE_ARN = process.env.AWS_ROLE_ARN;
+
+const s3 = AWS_ROLE_ARN
+  ? new S3Client({
+      region: process.env.AWS_REGION ?? "us-east-1",
+      credentials: awsCredentialsProvider({ roleArn: AWS_ROLE_ARN }),
+    })
+  : new S3Client({
+      endpoint: process.env.S3_ENDPOINT ?? "http://localhost:9000",
+      region: process.env.S3_REGION ?? "us-east-1",
+      credentials: {
+        accessKeyId: process.env.S3_ACCESS_KEY_ID ?? "lattik",
+        secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? "lattik-local",
+      },
+      forcePathStyle: true,
+    });
 
 export async function putObject(
   bucket: string,
   key: string,
   body: string,
+  contentType: string = "text/yaml",
 ): Promise<void> {
   await s3.send(
     new PutObjectCommand({
       Bucket: bucket,
       Key: key,
       Body: body,
-      ContentType: "text/yaml",
+      ContentType: contentType,
     }),
   );
 }

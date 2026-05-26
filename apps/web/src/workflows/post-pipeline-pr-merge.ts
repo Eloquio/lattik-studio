@@ -1,16 +1,22 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
+import {
+  loggerTableSchema,
+  type LoggerTable,
+} from "@/extensions/data-architect/schema";
+import { createLoggerDeliveryStream } from "@/lib/firehose";
 import { log } from "@/lib/log";
+import { generateAndPublishLoggerSdk } from "@/lib/logger-sdk-generator";
 
 /**
  * Walking-skeleton workflow for the post-merge pipeline.
  *
- * Today: per added/modified logger_table, we seed a checklist of
- * provisioning steps (proto descriptor, schema registry, Kafka topic,
- * Iceberg sink) and walk through them — currently as no-ops that just
- * record state so the /workflows card can render a checked status line
- * per step. Real side-effects land step-by-step in follow-ups.
+ * Per added/modified logger_table we walk a 2-step provisioning chain:
+ * create the Firehose delivery stream, then publish a typed TypeScript
+ * SDK client for it. Each step writes its outcome (and any error) back to
+ * the `pipelineWorkflowSteps` row so the /workflows card can render
+ * progress in real time.
  *
  * The webhook handler inserts the run row before start() and passes
  * `pipelineRunId` in — WDK 4.x doesn't surface its own runId from inside
@@ -42,11 +48,11 @@ export interface PostPipelineMergeResult {
  * what the user sees on the workflow card. Keep them short.
  */
 const LOGGER_TABLE_STEPS = [
-  "Generate Protobuf descriptor",
-  "Register schema with Schema Registry",
-  "Create Kafka topic",
-  "Create Iceberg sink table",
+  "Create Amazon Firehose Stream",
+  "Generate TypeScript SDK client",
 ] as const;
+
+type StepRunner = (table: LoggerTable) => Promise<void>;
 
 export async function postPipelineMergeWorkflow(
   input: PostPipelineMergeInput,
@@ -108,22 +114,89 @@ async function runLoggerTableStepsStep(
   const loggerTables = input.definitions.filter(
     (d) => d.kind === "logger_table",
   );
-  const db = getDb();
+
   for (const d of loggerTables) {
-    for (let i = 0; i < LOGGER_TABLE_STEPS.length; i++) {
-      const now = new Date();
-      await db
-        .update(schema.pipelineWorkflowSteps)
-        .set({ status: "succeeded", startedAt: now, finishedAt: now })
-        .where(
-          and(
-            eq(schema.pipelineWorkflowSteps.runId, input.pipelineRunId),
-            eq(schema.pipelineWorkflowSteps.definitionId, d.id),
-            eq(schema.pipelineWorkflowSteps.stepOrder, i),
-          ),
-        );
+    const parsed = loggerTableSchema.safeParse(d.spec);
+    if (!parsed.success) {
+      // If the spec doesn't parse, fail every step in this chain with the
+      // same message so the UI shows the same diagnostic on each row.
+      const msg = `logger_table spec failed to parse: ${parsed.error.message}`;
+      for (let i = 0; i < LOGGER_TABLE_STEPS.length; i++) {
+        await markStep(input.pipelineRunId, d.id, i, "failed", msg);
+      }
+      continue;
+    }
+    const table = parsed.data;
+
+    const runners: StepRunner[] = [
+      async (t) => {
+        const result = await createLoggerDeliveryStream(t.name);
+        log.info("post_pipeline_pr_merge.firehose_stream", {
+          pipeline_run_id: input.pipelineRunId,
+          definition_id: d.id,
+          table_name: t.name,
+          stream_name: result.streamName,
+          s3_prefix: result.s3Prefix,
+          already_existed: result.alreadyExisted,
+          skipped: result.skipped,
+        });
+      },
+      async (t) => {
+        const result = await generateAndPublishLoggerSdk(t);
+        log.info("post_pipeline_pr_merge.sdk_client", {
+          pipeline_run_id: input.pipelineRunId,
+          definition_id: d.id,
+          table_name: t.name,
+          s3_uri: result.s3Uri,
+          byte_length: result.byteLength,
+        });
+      },
+    ];
+
+    for (let i = 0; i < runners.length; i++) {
+      await markStep(input.pipelineRunId, d.id, i, "running");
+      try {
+        await runners[i]!(table);
+        await markStep(input.pipelineRunId, d.id, i, "succeeded");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        await markStep(input.pipelineRunId, d.id, i, "failed", msg);
+        // Don't run later steps in this chain — they depend on the earlier
+        // ones (the SDK references the stream name). Other tables continue.
+        break;
+      }
     }
   }
+}
+
+async function markStep(
+  runId: string,
+  definitionId: string,
+  stepOrder: number,
+  status: "running" | "succeeded" | "failed",
+  errorMessage?: string,
+): Promise<void> {
+  const now = new Date();
+  const patch: {
+    status: typeof status;
+    startedAt?: Date;
+    finishedAt?: Date;
+    errorMessage?: string;
+  } = { status };
+  if (status === "running") patch.startedAt = now;
+  if (status === "succeeded" || status === "failed") patch.finishedAt = now;
+  if (errorMessage) patch.errorMessage = errorMessage;
+
+  await getDb()
+    .update(schema.pipelineWorkflowSteps)
+    .set(patch)
+    .where(
+      and(
+        eq(schema.pipelineWorkflowSteps.runId, runId),
+        eq(schema.pipelineWorkflowSteps.definitionId, definitionId),
+        eq(schema.pipelineWorkflowSteps.stepOrder, stepOrder),
+      ),
+    );
 }
 
 async function markRunSucceededStep(pipelineRunId: string): Promise<void> {

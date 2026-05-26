@@ -154,6 +154,19 @@ Set in `apps/web/.env` (gitignored):
 - `DUCKDB_EXTENSION_PATH` — (optional) path to the `lattik_stitch_duckdb.duckdb_extension` file. When set, the DuckDB client loads it on startup to enable `lattik_scan()` queries
 - `LATTIK_WAREHOUSE_PATH` — S3 path prefix for Lattik Tables (default: `s3://warehouse/lattik`)
 
+### Production (Vercel) — AWS Firehose
+
+These are set on the deployed Vercel project (`eloquio/lattik-studio`, **Production environment only**), not in `apps/web/.env`. Local dev leaves them unset, which makes `FIREHOSE_ENABLED` short-circuit and the post-merge workflow keeps its no-op behavior. The static infrastructure they reference is provisioned by [`terraform/`](terraform/); see [`terraform/README.md`](terraform/README.md) for the bootstrap and the values come from `terraform output` after `apply`.
+
+- `AWS_ROLE_ARN` — IAM role Lattik Studio assumes via Vercel OIDC. Read by `@vercel/oidc-aws-credentials-provider` in [`apps/web/src/lib/firehose.ts`](apps/web/src/lib/firehose.ts) and [`apps/web/src/lib/s3-client.ts`](apps/web/src/lib/s3-client.ts). Trust policy is scoped to `environment:production` — preview and development deployments will fail STS if this is set there
+- `AWS_REGION` — AWS region for the Firehose + S3 SDK clients (default in code: `us-east-1`)
+- `FIREHOSE_ENABLED` — `"true"` to actually call AWS Firehose from the post-merge workflow. Anything else (including unset) makes the workflow skip the real call but still record the step as succeeded with a deterministic stream name + S3 prefix so the SDK generator still emits a valid client
+- `FIREHOSE_ROLE_ARN` — IAM role Firehose itself assumes when writing events to S3. Passed in `CreateDeliveryStream` — NOT assumed by Lattik Studio
+- `FIREHOSE_S3_BUCKET_ARN` — destination bucket ARN for Firehose-delivered events
+- `FIREHOSE_SDK_BUCKET` — bucket name (not ARN) where generated TypeScript SDK clients are uploaded under `firehose-sdks/<table>.ts`. Same bucket as `FIREHOSE_S3_BUCKET_ARN` by default
+- `FIREHOSE_S3_PREFIX` — (optional) S3 key prefix for delivered events (default: `lattik-logger/`)
+- `FIREHOSE_SDK_PREFIX` — (optional) S3 key prefix for generated SDK files (default: `firehose-sdks/`)
+
 ### agent-service env layering
 
 `apps/web/.env` is the **single source of truth** for shared dev creds. The agent-service (a separate Nitro process) loads them at startup via [`apps/agent-service/scripts/with-env.mjs`](apps/agent-service/scripts/with-env.mjs), which uses Node's `process.loadEnvFile()` to layer:

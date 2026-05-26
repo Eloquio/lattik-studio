@@ -326,10 +326,8 @@ export const pipelineWorkflowRuns = pgTable(
  * Sub-steps of a `pipelineWorkflowRuns` row. Each new/modified
  * logger_table (and, later, other kinds) gets its own per-definition
  * provisioning chain — e.g. for a logger_table:
- *   1. Generate Protobuf descriptor
- *   2. Register schema with Schema Registry
- *   3. Create Kafka topic
- *   4. Create Iceberg sink table
+ *   1. Create Amazon Firehose Stream
+ *   2. Generate TypeScript SDK client
  *
  * Steps are seeded up front (status="pending") when the workflow starts
  * so the /workflows card can render the full checklist before any step
@@ -352,7 +350,7 @@ export const pipelineWorkflowSteps = pgTable(
     definitionKind: text("definitionKind").notNull(),
     /** Display name of the definition, e.g. "events.evt_conversation". */
     definitionName: text("definitionName").notNull(),
-    /** Short label shown in the checklist row, e.g. "Create Kafka topic". */
+    /** Short label shown in the checklist row, e.g. "Create Amazon Firehose Stream". */
     stepName: text("stepName").notNull(),
     /** Display order within this (run, definition) chain, 0-based. */
     stepOrder: integer("stepOrder").notNull(),
