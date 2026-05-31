@@ -130,6 +130,19 @@ const DEFAULT_REPOSITORY_URL =
   "git+https://github.com/Eloquio/lattik-studio.git";
 const GH_PACKAGES_REGISTRY = "https://npm.pkg.github.com";
 
+/**
+ * Escape a comment-terminating star-slash in free-text (column description and
+ * tags) so it can't close the generated JSDoc block comment early and emit
+ * invalid TypeScript into the published `.d.ts`. The replacement `*\/` is not a
+ * terminator — the backslash breaks the two-char sequence — and reads the same
+ * to a human. description/tags are arbitrary free text (validateDescription
+ * allows up to 500 chars of any content), so this is the only place
+ * untrusted-shaped text reaches emitted code.
+ */
+function escapeBlockComment(text: string): string {
+  return text.replace(/\*\//g, "*\\/");
+}
+
 /** Render the `<Name>Event` interface body (shared doc-comment formatting). */
 function renderInterfaceBody(table: LoggerTable): string {
   return table.columns
@@ -138,7 +151,9 @@ function renderInterfaceBody(table: LoggerTable): string {
       if (c.description) docLines.push(c.description);
       if (c.tags?.length) docLines.push(`tags: ${c.tags.join(", ")}`);
       const doc =
-        docLines.length > 0 ? `  /** ${docLines.join(" — ")} */\n` : "";
+        docLines.length > 0
+          ? `  /** ${escapeBlockComment(docLines.join(" — "))} */\n`
+          : "";
       return `${doc}  ${c.name}: ${tsTypeFor(c.type)};`;
     })
     .join("\n");

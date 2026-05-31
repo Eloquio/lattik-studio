@@ -91,6 +91,31 @@ describe("renderLoggerPackage", () => {
     assert.match(dts, /export declare class IngestImpressionsLogger/);
   });
 
+  it("escapes */ in free-text docs so the JSDoc comment can't terminate early", () => {
+    // description + tags are arbitrary free text (validateDescription allows up
+    // to 500 chars of any content). A raw "*/" would close the generated JSDoc
+    // block comment early and emit invalid TypeScript into the published .d.ts.
+    const evil: LoggerTable = {
+      ...table,
+      columns: [
+        { name: "x", type: "string", description: "danger */ leak", tags: ["a*/b"] },
+      ],
+    };
+    const dts = fileMap(
+      renderLoggerPackage(evil, { version: "1.0.0", scope: "@eloquio" }),
+    ).get("index.d.ts")!;
+    // The raw star-slash from description + tags is escaped to "*\/" (a
+    // backslash breaks the two-char terminator), and the doc comment closes
+    // cleanly right before the property declaration.
+    assert.ok(
+      dts.includes("/** danger *\\/ leak — tags: a*\\/b */\n  x: string;"),
+      `comment not escaped as expected; got:\n${dts}`,
+    );
+    // The verbatim, un-escaped form must NOT appear — that would terminate the
+    // block comment early and emit invalid TypeScript.
+    assert.ok(!dts.includes("danger */ leak"));
+  });
+
   it("index.js carries the runtime class and the resolved stream name", () => {
     const js = map.get("index.js")!;
     assert.match(js, /export const STREAM_NAME = "lattik-ingest\.impressions";/);
