@@ -89,4 +89,19 @@ describe("renderLoggerPackage", () => {
     assert.match(js, /export class IngestImpressionsLogger/);
     assert.match(js, /PutRecordBatchCommand/);
   });
+
+  it("README .npmrc instructions track the package scope, not a literal", () => {
+    // README is generated from the package name, so a non-default scope must
+    // produce matching .npmrc install instructions — otherwise consumers are
+    // told to configure the wrong @scope:registry and `pnpm add` won't resolve.
+    assert.match(map.get("README.md")!, /@eloquio:registry=/);
+
+    const scoped = fileMap(
+      renderLoggerPackage(table, { version: "1.2.3", scope: "@acme" }),
+    );
+    const readme = scoped.get("README.md")!;
+    assert.match(readme, /@acme:registry=https:\/\/npm\.pkg\.github\.com/);
+    assert.match(readme, /under the `@acme` scope/);
+    assert.doesNotMatch(readme, /@eloquio:registry=/);
+  });
 });

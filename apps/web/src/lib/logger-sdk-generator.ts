@@ -197,6 +197,9 @@ function renderReadme(
   streamName: string,
 ): string {
   const s3Prefix = firehoseS3Prefix(table.name);
+  // Derive the scope from the package name (e.g. "@eloquio/logger-x" → "@eloquio")
+  // so the .npmrc instructions track GITHUB_PACKAGES_SCOPE instead of a literal.
+  const scope = packageName.split("/")[0];
   return `# ${packageName}
 
 Typed Firehose logger client for the **\`${table.name}\`** Logger Table.
@@ -209,11 +212,11 @@ Typed Firehose logger client for the **\`${table.name}\`** Logger Table.
 
 ## Install
 
-This package is published to GitHub Packages under the \`@eloquio\` scope. Add
+This package is published to GitHub Packages under the \`${scope}\` scope. Add
 an \`.npmrc\` to your project:
 
 \`\`\`
-@eloquio:registry=${GH_PACKAGES_REGISTRY}
+${scope}:registry=${GH_PACKAGES_REGISTRY}
 //npm.pkg.github.com/:_authToken=\${GITHUB_TOKEN}
 \`\`\`
 
