@@ -260,6 +260,10 @@ export async function publishLoggerSdk(
   const files = renderLoggerPackage(table, {
     version: decision.version,
     scope: SCOPE,
+    // Thread the configured registry through so the generated package's
+    // publishConfig + README install instructions name the same host we
+    // actually publish to (honors a GITHUB_PACKAGES_REGISTRY override).
+    registry: REGISTRY,
   });
   const manifest = JSON.parse(
     files.find((f) => f.path === "package.json")!.content,

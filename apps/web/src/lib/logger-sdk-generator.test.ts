@@ -137,4 +137,39 @@ describe("renderLoggerPackage", () => {
     assert.match(readme, /under the `@acme` scope/);
     assert.doesNotMatch(readme, /@eloquio:registry=/);
   });
+
+  it("threads a registry override into publishConfig and both README .npmrc lines", () => {
+    // A GITHUB_PACKAGES_REGISTRY override (e.g. a GitHub Enterprise package
+    // registry) must reach the generated package: publishConfig.registry, the
+    // @scope:registry line, AND the //host/:_authToken line all key on it.
+    // Otherwise the package self-describes a host it wasn't published to and
+    // consumers following the README configure the wrong registry.
+    const ghe = "https://npm.pkg.github.example.com";
+    const files = fileMap(
+      renderLoggerPackage(table, {
+        version: "1.0.0",
+        scope: "@eloquio",
+        registry: ghe,
+      }),
+    );
+    const pkg = JSON.parse(files.get("package.json")!);
+    assert.equal(pkg.publishConfig.registry, ghe);
+
+    const readme = files.get("README.md")!;
+    assert.match(readme, /@eloquio:registry=https:\/\/npm\.pkg\.github\.example\.com/);
+    // The auth line keys on the host (no protocol), derived from the registry.
+    assert.match(readme, /\/\/npm\.pkg\.github\.example\.com\/:_authToken=/);
+    // The public default host must NOT leak into the auth line when overridden.
+    assert.doesNotMatch(readme, /\/\/npm\.pkg\.github\.com\/:_authToken/);
+  });
+
+  it("defaults publishConfig + README to the public GitHub Packages host", () => {
+    // No registry passed → both must fall back to npm.pkg.github.com so the
+    // common path (no override) is unchanged.
+    assert.equal(
+      JSON.parse(map.get("package.json")!).publishConfig.registry,
+      "https://npm.pkg.github.com",
+    );
+    assert.match(map.get("README.md")!, /\/\/npm\.pkg\.github\.com\/:_authToken=/);
+  });
 });

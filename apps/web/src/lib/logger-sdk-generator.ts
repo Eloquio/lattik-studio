@@ -118,6 +118,15 @@ export interface RenderOptions {
    * see `DEFAULT_REPOSITORY_URL` for why the bare https form won't do.
    */
   repositoryUrl?: string;
+  /**
+   * Registry the package is published to. Flows into `publishConfig.registry`
+   * and the README's `.npmrc` install instructions so the generated package
+   * self-describes the same host it's actually published to. Defaults to
+   * `GH_PACKAGES_REGISTRY`; the caller passes the env-configured registry so a
+   * `GITHUB_PACKAGES_REGISTRY` override (e.g. a GitHub Enterprise package
+   * registry) reaches consumers instead of being silently dropped.
+   */
+  registry?: string;
 }
 
 // GitHub Packages links a package to its repo via the `repository` field and
@@ -221,11 +230,16 @@ function renderReadme(
   packageName: string,
   className: string,
   streamName: string,
+  registry: string,
 ): string {
   const s3Prefix = firehoseS3Prefix(table.name);
   // Derive the scope from the package name (e.g. "@eloquio/logger-x" → "@eloquio")
   // so the .npmrc instructions track GITHUB_PACKAGES_SCOPE instead of a literal.
   const scope = packageName.split("/")[0];
+  // The .npmrc auth line keys on the registry HOST (no protocol), so it must
+  // track the registry too — otherwise an override points the scope at one
+  // host while the token is configured for another.
+  const registryHost = new URL(registry).host;
   return `# ${packageName}
 
 Typed Firehose logger client for the **\`${table.name}\`** Logger Table.
@@ -242,8 +256,8 @@ This package is published to GitHub Packages under the \`${scope}\` scope. Add
 an \`.npmrc\` to your project:
 
 \`\`\`
-${scope}:registry=${GH_PACKAGES_REGISTRY}
-//npm.pkg.github.com/:_authToken=\${GITHUB_TOKEN}
+${scope}:registry=${registry}
+//${registryHost}/:_authToken=\${GITHUB_TOKEN}
 \`\`\`
 
 (In CI the built-in \`GITHUB_TOKEN\` works for internal packages within the org;
@@ -282,6 +296,7 @@ export function renderLoggerPackage(
   const className = `${pascalCase(table.name)}Logger`;
   const streamName = firehoseStreamName(table.name);
   const packageName = packageNameFor(table.name, opts.scope);
+  const registry = opts.registry ?? GH_PACKAGES_REGISTRY;
 
   const pkg = {
     name: packageName,
@@ -294,7 +309,7 @@ export function renderLoggerPackage(
       ".": { types: "./index.d.ts", import: "./index.js" },
     },
     files: ["index.js", "index.d.ts", "README.md"],
-    publishConfig: { registry: GH_PACKAGES_REGISTRY },
+    publishConfig: { registry },
     // Object form (not a bare string) — required by GitHub Packages; see
     // DEFAULT_REPOSITORY_URL above.
     repository: {
@@ -313,7 +328,7 @@ export function renderLoggerPackage(
     { path: "index.js", content: renderJs(className, streamName) },
     {
       path: "README.md",
-      content: renderReadme(table, packageName, className, streamName),
+      content: renderReadme(table, packageName, className, streamName, registry),
     },
   ];
 }
