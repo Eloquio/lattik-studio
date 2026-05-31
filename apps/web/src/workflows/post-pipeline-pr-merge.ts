@@ -52,7 +52,12 @@ const LOGGER_TABLE_STEPS = [
   "Generate TypeScript SDK client",
 ] as const;
 
-type StepRunner = (table: LoggerTable) => Promise<void>;
+/**
+ * Runs a single provisioning step and returns a structured summary of what
+ * it did. The summary is persisted on the step row (`detail`) so the run
+ * detail panel can show real output instead of placeholder text.
+ */
+type StepRunner = (table: LoggerTable) => Promise<Record<string, unknown>>;
 
 export async function postPipelineMergeWorkflow(
   input: PostPipelineMergeInput,
@@ -146,6 +151,12 @@ async function runLoggerTableStepsStep(
           already_existed: result.alreadyExisted,
           skipped: result.skipped,
         });
+        return {
+          streamName: result.streamName,
+          s3Prefix: result.s3Prefix,
+          alreadyExisted: result.alreadyExisted,
+          skipped: result.skipped,
+        };
       },
       async (t) => {
         const result = await generateAndPublishLoggerSdk(t);
@@ -156,14 +167,15 @@ async function runLoggerTableStepsStep(
           s3_uri: result.s3Uri,
           byte_length: result.byteLength,
         });
+        return { s3Uri: result.s3Uri, byteLength: result.byteLength };
       },
     ];
 
     for (let i = 0; i < runners.length; i++) {
       await markStep(input.pipelineRunId, d.id, i, "running");
       try {
-        await runners[i]!(table);
-        await markStep(input.pipelineRunId, d.id, i, "succeeded");
+        const detail = await runners[i]!(table);
+        await markStep(input.pipelineRunId, d.id, i, "succeeded", undefined, detail);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         await markStep(input.pipelineRunId, d.id, i, "failed", msg);
@@ -187,6 +199,7 @@ async function markStep(
   stepOrder: number,
   status: "running" | "succeeded" | "failed" | "skipped",
   errorMessage?: string,
+  detail?: Record<string, unknown>,
 ): Promise<void> {
   const now = new Date();
   const patch: {
@@ -194,10 +207,12 @@ async function markStep(
     startedAt?: Date;
     finishedAt?: Date;
     errorMessage?: string;
+    detail?: Record<string, unknown>;
   } = { status };
   if (status === "running") patch.startedAt = now;
   if (status === "succeeded" || status === "failed") patch.finishedAt = now;
   if (errorMessage) patch.errorMessage = errorMessage;
+  if (detail) patch.detail = detail;
 
   await getDb()
     .update(schema.pipelineWorkflowSteps)

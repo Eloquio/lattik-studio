@@ -358,6 +358,13 @@ export const pipelineWorkflowSteps = pgTable(
     startedAt: timestamp("startedAt", { mode: "date" }),
     finishedAt: timestamp("finishedAt", { mode: "date" }),
     errorMessage: text("errorMessage"),
+    /**
+     * Structured result of a successful step, surfaced in the run detail
+     * panel's execution log (e.g. the Firehose stream name + S3 prefix, or
+     * the generated SDK's S3 URI + byte length). Null for steps that haven't
+     * succeeded yet and for runs created before this column existed.
+     */
+    detail: jsonb("detail").$type<Record<string, unknown>>(),
   },
   (t) => [
     index("idx_pipeline_workflow_steps_runId").on(t.runId),
