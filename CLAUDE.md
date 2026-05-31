@@ -163,9 +163,16 @@ These are set on the deployed Vercel project (`eloquio/lattik-studio`, **Product
 - `FIREHOSE_ENABLED` — `"true"` to actually call AWS Firehose from the post-merge workflow. Anything else (including unset) makes the workflow skip the real call but still record the step as succeeded with a deterministic stream name + S3 prefix so the SDK generator still emits a valid client
 - `FIREHOSE_ROLE_ARN` — IAM role Firehose itself assumes when writing events to S3. Passed in `CreateDeliveryStream` — NOT assumed by Lattik Studio
 - `FIREHOSE_S3_BUCKET_ARN` — destination bucket ARN for Firehose-delivered events
-- `FIREHOSE_SDK_BUCKET` — bucket name (not ARN) where generated TypeScript SDK clients are uploaded under `firehose-sdks/<table>.ts`. Same bucket as `FIREHOSE_S3_BUCKET_ARN` by default
 - `FIREHOSE_S3_PREFIX` — (optional) S3 key prefix for delivered events (default: `lattik-logger/`)
-- `FIREHOSE_SDK_PREFIX` — (optional) S3 key prefix for generated SDK files (default: `firehose-sdks/`)
+
+### Production (Vercel) — Logger SDK publishing (GitHub Packages)
+
+The post-merge workflow's second logger-table step publishes a typed SDK as a versioned npm package per logger table (`@eloquio/logger-<table>`) to GitHub Packages, via [`apps/web/src/lib/github-packages.ts`](apps/web/src/lib/github-packages.ts) (it used to upload a single `.ts` file to S3 — that's gone). Version is derived from the schema diff against the last-published package; an unchanged schema is a no-op. GitHub Packages' npm registry rejects GitHub App installation tokens, so this uses a classic PAT. Set on **Production only**; unset locally → publishing short-circuits to a no-op (step still succeeds, records a `0.0.0-dev` would-be version), mirroring `FIREHOSE_ENABLED`. See [`plans/logger-sdk-github-packages.md`](plans/logger-sdk-github-packages.md).
+
+- `GITHUB_PACKAGES_PUBLISH_ENABLED` — `"true"` to actually publish. Anything else (incl. unset) makes the SDK step a no-op
+- `GITHUB_PACKAGES_TOKEN` — classic PAT with `write:packages`, owned by a dedicated machine user in the org (App installation tokens don't work for the npm registry). Store as a Vercel **Sensitive** env var
+- `GITHUB_PACKAGES_REGISTRY` — (optional) registry URL (default: `https://npm.pkg.github.com`)
+- `GITHUB_PACKAGES_SCOPE` — (optional) npm scope = org namespace (default: `@eloquio`)
 
 ### agent-service env layering
 

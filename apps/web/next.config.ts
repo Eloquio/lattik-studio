@@ -4,7 +4,16 @@ import { withWorkflow } from "workflow/next";
 const nextConfig: NextConfig = {
   allowedDevOrigins: ["lattik-studio.dev"],
   transpilePackages: ["@eloquio/lattik-expression"],
-  serverExternalPackages: ["duckdb"],
+  // libnpmpublish / npm-registry-fetch are npm-cli packages with dynamic
+  // requires; keep them out of the webpack bundle so the server build doesn't
+  // choke on them. They (and tar) are only used server-side by the post-merge
+  // SDK publish step (@/lib/github-packages).
+  serverExternalPackages: [
+    "duckdb",
+    "libnpmpublish",
+    "npm-registry-fetch",
+    "tar",
+  ],
   async headers() {
     return [
       {

@@ -8,7 +8,7 @@ import {
 } from "@/extensions/data-architect/schema";
 import { createLoggerDeliveryStream } from "@/lib/firehose";
 import { log } from "@/lib/log";
-import { generateAndPublishLoggerSdk } from "@/lib/logger-sdk-generator";
+import { publishLoggerSdk } from "@/lib/github-packages";
 
 /**
  * Walking-skeleton workflow for the post-merge pipeline.
@@ -50,7 +50,7 @@ export interface PostPipelineMergeResult {
  */
 const LOGGER_TABLE_STEPS = [
   "Create Amazon Firehose Stream",
-  "Generate TypeScript SDK client",
+  "Publish TypeScript SDK package",
 ] as const;
 
 /**
@@ -160,15 +160,21 @@ async function runLoggerTableStepsStep(
         };
       },
       async (t) => {
-        const result = await generateAndPublishLoggerSdk(t);
-        log.info("post_pipeline_pr_merge.sdk_client", {
+        const result = await publishLoggerSdk(t);
+        log.info("post_pipeline_pr_merge.sdk_package", {
           pipeline_run_id: input.pipelineRunId,
           definition_id: d.id,
           table_name: t.name,
-          s3_uri: result.s3Uri,
-          byte_length: result.byteLength,
+          package_name: result.packageName,
+          version: result.version,
+          action: result.action,
         });
-        return { s3Uri: result.s3Uri, byteLength: result.byteLength };
+        return {
+          packageName: result.packageName,
+          version: result.version,
+          action: result.action,
+          packageUrl: result.packageUrl,
+        };
       },
     ];
 

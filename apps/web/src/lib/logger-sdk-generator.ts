@@ -1,9 +1,18 @@
 import type { LoggerTable } from "@/extensions/data-architect/schema";
 import { firehoseS3Prefix, firehoseStreamName } from "@/lib/firehose";
-import { putObject } from "@/lib/s3-client";
 
-const SDK_BUCKET = process.env.FIREHOSE_SDK_BUCKET ?? "warehouse";
-const SDK_PREFIX = process.env.FIREHOSE_SDK_PREFIX ?? "firehose-sdks/";
+/**
+ * Pure renderer for a Logger Table's npm package. Given a table spec and a
+ * target version, it produces the in-memory file set of a publishable,
+ * self-contained npm package (`@<scope>/logger-<table>`) for that table's
+ * Firehose stream.
+ *
+ * We emit JavaScript + `.d.ts` directly (no `tsc` build step) — the runtime is
+ * tiny (a typed event interface plus a class wrapping `PutRecordBatchCommand`),
+ * so hand-emitting both keeps the publish step a lightweight, deterministic,
+ * I/O-free function. The actual packing + publish lives in
+ * `@/lib/github-packages`; this module stays pure so it's trivially testable.
+ */
 
 /** lattik-expression column types → TypeScript types for the event interface. */
 function tsTypeFor(columnType: string): string {
@@ -38,76 +47,169 @@ function pascalCase(name: string): string {
     .join("");
 }
 
-export interface GeneratedSdk {
-  /** S3 key the source was written to. */
-  key: string;
-  /** Full S3 URI for display. */
-  s3Uri: string;
-  /** Bytes of the generated TS source. */
-  byteLength: number;
+/**
+ * Map a logger table name to its scoped npm package name, e.g.
+ * ("ingest.impressions", "@eloquio") → "@eloquio/logger-ingest-impressions".
+ * The unscoped part is restricted to npm-safe `[a-z0-9-]` (dots and
+ * underscores in the table name become hyphens).
+ */
+export function packageNameFor(tableName: string, scope: string): string {
+  const slug = tableName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `${scope}/logger-${slug}`;
+}
+
+/** A single column's identity for diffing — name + type + sensitivity. */
+export interface ColumnSig {
+  name: string;
+  type: string;
+  /**
+   * Stable, sorted CSV of the column's set sensitivity flags
+   * (e.g. "financial,pii"), omitted when the column has no classification.
+   * Part of the signature so a compliance reclassification bumps the version
+   * instead of being silently treated as "unchanged".
+   */
+  classification?: string;
+}
+
+/** Stable CSV of a column's set classification flags, or undefined if none. */
+function classificationSig(c: LoggerTable["columns"][number]): string | undefined {
+  if (!c.classification) return undefined;
+  const flags = Object.entries(c.classification)
+    .filter(([, v]) => v)
+    .map(([k]) => k)
+    .sort();
+  return flags.length ? flags.join(",") : undefined;
 }
 
 /**
- * Renders a typed, self-contained TypeScript client for a Logger Table's
- * Firehose stream. The generated module exports the event interface plus a
- * small class wrapping `PutRecordBatchCommand`. Consumers install
- * `@aws-sdk/client-firehose`, drop this file into their project, and
- * `new EventsClickEventsLogger(client).send([...])`.
+ * Normalized, order-independent signature of a table's columns. Embedded in
+ * the published `package.json` (as `lattikSchema`) so the next publish can
+ * diff against the last-published schema to derive the semver bump. Sorted by
+ * name so column reordering alone never looks like a change.
  */
-export function renderLoggerSdkSource(table: LoggerTable): string {
-  const ifaceName = `${pascalCase(table.name)}Event`;
-  const className = `${pascalCase(table.name)}Logger`;
-  const streamName = firehoseStreamName(table.name);
-  const s3Prefix = firehoseS3Prefix(table.name);
+export function schemaSignature(table: LoggerTable): ColumnSig[] {
+  return table.columns
+    .map((c) => {
+      const cls = classificationSig(c);
+      const sig: ColumnSig = { name: c.name, type: c.type };
+      if (cls) sig.classification = cls;
+      return sig;
+    })
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
 
-  const fields = table.columns
+/** One file in the generated package, `path` relative to the package root. */
+export interface PackageFile {
+  path: string;
+  content: string;
+}
+
+export interface RenderOptions {
+  /** semver for this package.json. */
+  version: string;
+  /** npm scope, including the leading "@" (e.g. "@eloquio"). */
+  scope: string;
+  /**
+   * Git URL for the package.json `repository.url` field. Must be a git URL
+   * GitHub Packages accepts (e.g. "git+https://github.com/OWNER/REPO.git") —
+   * see `DEFAULT_REPOSITORY_URL` for why the bare https form won't do.
+   */
+  repositoryUrl?: string;
+  /**
+   * Registry the package is published to. Flows into `publishConfig.registry`
+   * and the README's `.npmrc` install instructions so the generated package
+   * self-describes the same host it's actually published to. Defaults to
+   * `GH_PACKAGES_REGISTRY`; the caller passes the env-configured registry so a
+   * `GITHUB_PACKAGES_REGISTRY` override (e.g. a GitHub Enterprise package
+   * registry) reaches consumers instead of being silently dropped.
+   */
+  registry?: string;
+}
+
+// GitHub Packages links a package to its repo via the `repository` field and
+// rejects a publish whose repo host it can't parse ("invalid repo host ''").
+// We publish through `libnpmpublish`, NOT the `npm publish` CLI — and
+// libnpmpublish only runs the `fixName` normalize step, so (unlike the CLI) it
+// does NOT coerce a string `repository` into the `{ type, url }` object form.
+// So we must emit the object form ourselves, with a `git+` prefix + `.git`.
+const DEFAULT_REPOSITORY_URL =
+  "git+https://github.com/Eloquio/lattik-studio.git";
+const GH_PACKAGES_REGISTRY = "https://npm.pkg.github.com";
+
+/**
+ * Escape a comment-terminating star-slash in free-text (column description and
+ * tags) so it can't close the generated JSDoc block comment early and emit
+ * invalid TypeScript into the published `.d.ts`. The replacement `*\/` is not a
+ * terminator — the backslash breaks the two-char sequence — and reads the same
+ * to a human. description/tags are arbitrary free text (validateDescription
+ * allows up to 500 chars of any content), so this is the only place
+ * untrusted-shaped text reaches emitted code.
+ */
+function escapeBlockComment(text: string): string {
+  return text.replace(/\*\//g, "*\\/");
+}
+
+/** Render the `<Name>Event` interface body (shared doc-comment formatting). */
+function renderInterfaceBody(table: LoggerTable): string {
+  return table.columns
     .map((c) => {
       const docLines: string[] = [];
       if (c.description) docLines.push(c.description);
-      const tags = c.tags?.length ? `tags: ${c.tags.join(", ")}` : null;
-      if (tags) docLines.push(tags);
+      if (c.tags?.length) docLines.push(`tags: ${c.tags.join(", ")}`);
       const doc =
-        docLines.length > 0 ? `  /** ${docLines.join(" — ")} */\n` : "";
+        docLines.length > 0
+          ? `  /** ${escapeBlockComment(docLines.join(" — "))} */\n`
+          : "";
       return `${doc}  ${c.name}: ${tsTypeFor(c.type)};`;
     })
     .join("\n");
+}
 
+function renderDts(
+  ifaceName: string,
+  className: string,
+  table: LoggerTable,
+): string {
   return `// Generated by Lattik Studio — do not edit by hand.
-// Logger Table:    ${table.name}
-// Firehose Stream: ${streamName}
-// S3 Output:       s3://<bucket>/${s3Prefix}
-//
-// Install: npm i @aws-sdk/client-firehose
-//
-// Usage:
-//   import { FirehoseClient } from "@aws-sdk/client-firehose";
-//   import { ${className} } from "./${table.name}";
-//
-//   const logger = new ${className}(new FirehoseClient({ region: "us-east-1" }));
-//   await logger.send([{ /* typed event */ }]);
-
-import {
-  type FirehoseClient,
-  PutRecordBatchCommand,
-  type PutRecordBatchCommandOutput,
+import type {
+  FirehoseClient,
+  PutRecordBatchCommandOutput,
 } from "@aws-sdk/client-firehose";
 
 export interface ${ifaceName} {
-${fields}
+${renderInterfaceBody(table)}
 }
 
-export const STREAM_NAME = ${JSON.stringify(streamName)};
+export declare const STREAM_NAME: string;
 
-export class ${className} {
-  constructor(private readonly client: FirehoseClient) {}
-
+export declare class ${className} {
+  constructor(client: FirehoseClient);
   /**
    * Send a batch of events. Firehose accepts up to 500 records or 4 MiB per
    * call; this method does NOT chunk — callers with larger batches should
    * split first. Returns the raw SDK response so callers can inspect
    * \`FailedPutCount\` and retry partial failures.
    */
-  async send(events: ${ifaceName}[]): Promise<PutRecordBatchCommandOutput> {
+  send(events: ${ifaceName}[]): Promise<PutRecordBatchCommandOutput>;
+}
+`;
+}
+
+function renderJs(className: string, streamName: string): string {
+  return `// Generated by Lattik Studio — do not edit by hand.
+import { PutRecordBatchCommand } from "@aws-sdk/client-firehose";
+
+export const STREAM_NAME = ${JSON.stringify(streamName)};
+
+export class ${className} {
+  constructor(client) {
+    this.client = client;
+  }
+
+  async send(events) {
     const encoder = new TextEncoder();
     const records = events.map((event) => ({
       Data: encoder.encode(JSON.stringify(event) + "\\n"),
@@ -123,20 +225,110 @@ export class ${className} {
 `;
 }
 
-/**
- * Generates the typed SDK module and uploads it to S3 at a deterministic
- * key derived from the table name. Returns the location for the workflow
- * card to display.
- */
-export async function generateAndPublishLoggerSdk(
+function renderReadme(
   table: LoggerTable,
-): Promise<GeneratedSdk> {
-  const source = renderLoggerSdkSource(table);
-  const key = `${SDK_PREFIX}${table.name}.ts`;
-  await putObject(SDK_BUCKET, key, source, "application/typescript");
-  return {
-    key,
-    s3Uri: `s3://${SDK_BUCKET}/${key}`,
-    byteLength: Buffer.byteLength(source, "utf8"),
+  packageName: string,
+  className: string,
+  streamName: string,
+  registry: string,
+): string {
+  const s3Prefix = firehoseS3Prefix(table.name);
+  // Derive the scope from the package name (e.g. "@eloquio/logger-x" → "@eloquio")
+  // so the .npmrc instructions track GITHUB_PACKAGES_SCOPE instead of a literal.
+  const scope = packageName.split("/")[0];
+  // The .npmrc auth line keys on the registry HOST (no protocol), so it must
+  // track the registry too — otherwise an override points the scope at one
+  // host while the token is configured for another.
+  const registryHost = new URL(registry).host;
+  return `# ${packageName}
+
+Typed Firehose logger client for the **\`${table.name}\`** Logger Table.
+
+> Generated by Lattik Studio — do not edit by hand. A new version is published
+> automatically whenever the table's definition changes.
+
+- **Firehose stream:** \`${streamName}\`
+- **S3 output:** \`s3://<bucket>/${s3Prefix}\`
+
+## Install
+
+This package is published to GitHub Packages under the \`${scope}\` scope. Add
+an \`.npmrc\` to your project:
+
+\`\`\`
+${scope}:registry=${registry}
+//${registryHost}/:_authToken=\${GITHUB_TOKEN}
+\`\`\`
+
+(In CI the built-in \`GITHUB_TOKEN\` works for internal packages within the org;
+locally use a personal access token with \`read:packages\`.)
+
+\`\`\`sh
+pnpm add ${packageName} @aws-sdk/client-firehose
+\`\`\`
+
+\`@aws-sdk/client-firehose\` is a peer dependency.
+
+## Usage
+
+\`\`\`ts
+import { FirehoseClient } from "@aws-sdk/client-firehose";
+import { ${className} } from "${packageName}";
+
+const logger = new ${className}(new FirehoseClient({ region: "us-east-1" }));
+await logger.send([{ /* typed event */ }]);
+\`\`\`
+
+The AWS client must have credentials with \`firehose:PutRecordBatch\` on the
+\`${streamName}\` stream.
+`;
+}
+
+/**
+ * Render the full package file set for a logger table at the given version.
+ * Pure — returns in-memory files; the caller packs + publishes them.
+ */
+export function renderLoggerPackage(
+  table: LoggerTable,
+  opts: RenderOptions,
+): PackageFile[] {
+  const ifaceName = `${pascalCase(table.name)}Event`;
+  const className = `${pascalCase(table.name)}Logger`;
+  const streamName = firehoseStreamName(table.name);
+  const packageName = packageNameFor(table.name, opts.scope);
+  const registry = opts.registry ?? GH_PACKAGES_REGISTRY;
+
+  const pkg = {
+    name: packageName,
+    version: opts.version,
+    description: `Typed Firehose logger client for the "${table.name}" Logger Table. Generated by Lattik Studio.`,
+    type: "module",
+    main: "./index.js",
+    types: "./index.d.ts",
+    exports: {
+      ".": { types: "./index.d.ts", import: "./index.js" },
+    },
+    files: ["index.js", "index.d.ts", "README.md"],
+    publishConfig: { registry },
+    // Object form (not a bare string) — required by GitHub Packages; see
+    // DEFAULT_REPOSITORY_URL above.
+    repository: {
+      type: "git",
+      url: opts.repositoryUrl ?? DEFAULT_REPOSITORY_URL,
+    },
+    peerDependencies: { "@aws-sdk/client-firehose": "^3" },
+    // Embedded column signature — diffed by the next publish to derive the
+    // semver bump. Not read at runtime.
+    lattikSchema: schemaSignature(table),
   };
+
+  return [
+    { path: "package.json", content: JSON.stringify(pkg, null, 2) + "\n" },
+    { path: "index.d.ts", content: renderDts(ifaceName, className, table) },
+    { path: "index.js", content: renderJs(className, streamName) },
+    {
+      path: "README.md",
+      content: renderReadme(table, packageName, className, streamName, registry),
+    },
+  ];
 }

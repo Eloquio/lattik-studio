@@ -54,6 +54,24 @@ function formatDetailValue(value: unknown): string {
     : String(value);
 }
 
+/** Like formatDetailValue, but renders http(s) URLs (e.g. a published
+ *  package's page) as a clickable link instead of plain text. */
+function renderDetailValue(value: unknown) {
+  if (typeof value === "string" && /^https?:\/\//.test(value)) {
+    return (
+      <a
+        href={value}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-amber-700 underline underline-offset-2 hover:text-amber-800"
+      >
+        {value}
+      </a>
+    );
+  }
+  return formatDetailValue(value);
+}
+
 interface StepDetailPanelProps {
   step: StepDetail;
   onClose: () => void;
@@ -175,7 +193,7 @@ export function StepDetailPanel({ step, onClose }: StepDetailPanelProps) {
                 {Object.entries(step.detail).map(([k, v]) => (
                   <div key={k} className="flex flex-wrap gap-x-2">
                     <dt className="text-stone-500">{formatDetailKey(k)}</dt>
-                    <dd className="break-all">{formatDetailValue(v)}</dd>
+                    <dd className="break-all">{renderDetailValue(v)}</dd>
                   </div>
                 ))}
               </dl>
