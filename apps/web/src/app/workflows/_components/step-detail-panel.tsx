@@ -39,10 +39,19 @@ export interface StepDetail {
   detail: Record<string, unknown> | null;
 }
 
-/** "streamName" → "Stream name", "s3Uri" → "S3 uri". */
+/** "streamName" → "Stream Name", "s3Uri" → "S3 Uri". */
 function formatDetailKey(key: string): string {
   const spaced = key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/_/g, " ");
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/** Render a detail value; JSON-encode nested objects/arrays so they don't
+ *  stringify to "[object Object]". The runners emit flat primitives today,
+ *  but `detail` is typed `Record<string, unknown>`, so guard for it. */
+function formatDetailValue(value: unknown): string {
+  return typeof value === "object" && value !== null
+    ? JSON.stringify(value)
+    : String(value);
 }
 
 interface StepDetailPanelProps {
@@ -166,7 +175,7 @@ export function StepDetailPanel({ step, onClose }: StepDetailPanelProps) {
                 {Object.entries(step.detail).map(([k, v]) => (
                   <div key={k} className="flex flex-wrap gap-x-2">
                     <dt className="text-stone-500">{formatDetailKey(k)}</dt>
-                    <dd className="break-all">{String(v)}</dd>
+                    <dd className="break-all">{formatDetailValue(v)}</dd>
                   </div>
                 ))}
               </dl>
