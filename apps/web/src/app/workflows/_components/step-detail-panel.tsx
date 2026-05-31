@@ -152,9 +152,31 @@ export function StepDetailPanel({ step, onClose }: StepDetailPanelProps) {
           </h3>
         </div>
         <div className="mt-3 rounded-md border border-dashed border-stone-400 bg-stone-50/40 p-4 text-[11px] text-stone-500">
-          Execution logs will appear here once the workflow stops being a
-          walking skeleton — today this step is a no-op that just records
-          its status row, so there is nothing to stream.
+          {step.status === "succeeded" ? (
+            <>
+              Step completed successfully
+              {durationMs !== null ? ` in ${formatDuration(durationMs)}` : ""}
+              {step.finishedAt
+                ? ` at ${TIME_FORMAT.format(step.finishedAt)}`
+                : ""}
+              . Detailed step output (e.g. the Firehose stream name and the
+              generated SDK&apos;s S3 URI) is emitted to the Vercel runtime
+              logs — this panel does not stream per-step logs yet.
+            </>
+          ) : step.status === "failed" ? (
+            <>
+              Step failed — see the error above. Full context is in the Vercel
+              runtime logs.
+            </>
+          ) : step.status === "running" ? (
+            <>Step is running…</>
+          ) : step.status === "skipped" ? (
+            <>
+              Step was skipped because an earlier step in the chain failed.
+            </>
+          ) : (
+            <>Step has not started yet.</>
+          )}
         </div>
       </div>
     </div>
