@@ -87,6 +87,7 @@ export default async function WorkflowsPage() {
     startedAt: Date | null;
     finishedAt: Date | null;
     errorMessage: string | null;
+    detail: Record<string, unknown> | null;
     stepOrder: number;
   };
   type ChainAccumulator = StepChain & {
@@ -123,6 +124,7 @@ export default async function WorkflowsPage() {
         startedAt: s.startedAt,
         finishedAt: s.finishedAt,
         errorMessage: s.errorMessage,
+        detail: (s.detail as Record<string, unknown> | null) ?? null,
         stepOrder: s.stepOrder,
       });
     }
@@ -160,6 +162,7 @@ export default async function WorkflowsPage() {
           startedAt: step.startedAt,
           finishedAt: step.finishedAt,
           errorMessage: step.errorMessage,
+          detail: step.detail,
         };
       }
     }

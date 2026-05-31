@@ -35,6 +35,14 @@ export interface StepDetail {
   startedAt: Date | null;
   finishedAt: Date | null;
   errorMessage: string | null;
+  /** Structured result of a successful step (e.g. stream name, S3 URI). */
+  detail: Record<string, unknown> | null;
+}
+
+/** "streamName" → "Stream name", "s3Uri" → "S3 uri". */
+function formatDetailKey(key: string): string {
+  const spaced = key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/_/g, " ");
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
 interface StepDetailPanelProps {
@@ -153,16 +161,28 @@ export function StepDetailPanel({ step, onClose }: StepDetailPanelProps) {
         </div>
         <div className="mt-3 rounded-md border border-dashed border-stone-400 bg-stone-50/40 p-4 text-[11px] text-stone-500">
           {step.status === "succeeded" ? (
-            <>
-              Step completed successfully
-              {durationMs !== null ? ` in ${formatDuration(durationMs)}` : ""}
-              {step.finishedAt
-                ? ` at ${TIME_FORMAT.format(step.finishedAt)}`
-                : ""}
-              . Detailed step output (e.g. the Firehose stream name and the
-              generated SDK&apos;s S3 URI) is emitted to the Vercel runtime
-              logs — this panel does not stream per-step logs yet.
-            </>
+            step.detail && Object.keys(step.detail).length > 0 ? (
+              <dl className="space-y-1.5 font-mono text-stone-800">
+                {Object.entries(step.detail).map(([k, v]) => (
+                  <div key={k} className="flex flex-wrap gap-x-2">
+                    <dt className="text-stone-500">{formatDetailKey(k)}</dt>
+                    <dd className="break-all">{String(v)}</dd>
+                  </div>
+                ))}
+              </dl>
+            ) : (
+              <>
+                Step completed successfully
+                {durationMs !== null
+                  ? ` in ${formatDuration(durationMs)}`
+                  : ""}
+                {step.finishedAt
+                  ? ` at ${TIME_FORMAT.format(step.finishedAt)}`
+                  : ""}
+                . No structured output was recorded for this step (this run
+                predates per-step detail capture).
+              </>
+            )
           ) : step.status === "failed" ? (
             <>
               Step failed — see the error above. Full context is in the Vercel
