@@ -5,6 +5,11 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { WorkflowRunCard, type StepChain } from "./workflow-run-card";
 import { StepDetailPanel, type StepDetail } from "./step-detail-panel";
+import {
+  parseOpenParam,
+  serializeOpenParam,
+  toggleOpenRun,
+} from "./open-run-state";
 
 export interface RunCardData {
   id: string;
@@ -47,7 +52,7 @@ export function WorkflowsView({
 }: WorkflowsViewProps) {
   // Persist UI state in URL query params so refresh / share-by-URL
   // restores the view: `?step=<id>` for the side-panel selection,
-  // `?open=<id1>,<id2>` for the set of expanded run cards. Initial
+  // `?open=<id>` for the single expanded run card (accordion). Initial
   // values are read once on mount; subsequent transitions update the
   // URL via history.replaceState so we don't trigger a Next server
   // re-fetch on every click.
@@ -55,11 +60,8 @@ export function WorkflowsView({
   const [selectedStepId, setSelectedStepId] = useState<string | null>(
     () => searchParams.get("step"),
   );
-  const [openRunIds, setOpenRunIds] = useState<Set<string>>(
-    () =>
-      new Set(
-        (searchParams.get("open") ?? "").split(",").filter(Boolean),
-      ),
+  const [openRunIds, setOpenRunIds] = useState<Set<string>>(() =>
+    parseOpenParam(searchParams.get("open")),
   );
   const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
 
@@ -101,16 +103,8 @@ export function WorkflowsView({
   const handleToggleOpen = useCallback(
     (runId: string) => {
       setOpenRunIds((prev) => {
-        const next = new Set(prev);
-        if (next.has(runId)) {
-          next.delete(runId);
-        } else {
-          next.add(runId);
-        }
-        syncSearchParam(
-          "open",
-          next.size > 0 ? Array.from(next).join(",") : null,
-        );
+        const next = toggleOpenRun(prev, runId);
+        syncSearchParam("open", serializeOpenParam(next));
         return next;
       });
     },
@@ -152,10 +146,7 @@ export function WorkflowsView({
     }
     if (changed) {
       setOpenRunIds(next);
-      syncSearchParam(
-        "open",
-        next.size > 0 ? Array.from(next).join(",") : null,
-      );
+      syncSearchParam("open", serializeOpenParam(next));
     }
   }, [cards, openRunIds, syncSearchParam]);
 
