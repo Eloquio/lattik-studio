@@ -66,7 +66,7 @@ export async function postPipelineMergeWorkflow(
   const result = await acknowledgeMergeStep(input);
   await seedLoggerTableStepsStep(input);
   await runLoggerTableStepsStep(input);
-  await markRunSucceededStep(input.pipelineRunId);
+  await markRunFinishedStep(input.pipelineRunId);
   return result;
 }
 
@@ -226,10 +226,52 @@ async function markStep(
     );
 }
 
-async function markRunSucceededStep(pipelineRunId: string): Promise<void> {
+/**
+ * Finalize the run status by rolling up its step outcomes: the run is
+ * "failed" if any step chain ended in a failure, otherwise "succeeded".
+ * A run with no steps (e.g. a PR that touched no logger_tables) is a clean
+ * "succeeded". Previously this always wrote "succeeded", which masked
+ * per-step failures on the /workflows card.
+ */
+async function markRunFinishedStep(pipelineRunId: string): Promise<void> {
   "use step";
+  const steps = await getDb()
+    .select({
+      definitionId: schema.pipelineWorkflowSteps.definitionId,
+      stepOrder: schema.pipelineWorkflowSteps.stepOrder,
+      status: schema.pipelineWorkflowSteps.status,
+    })
+    .from(schema.pipelineWorkflowSteps)
+    .where(eq(schema.pipelineWorkflowSteps.runId, pipelineRunId));
+
+  // Dedupe by (definitionId, stepOrder), keeping the most advanced status —
+  // mirrors the run-detail page so a step that failed then succeeded on a
+  // retry isn't counted as a failure.
+  const priority: Record<string, number> = {
+    succeeded: 4,
+    failed: 3,
+    running: 2,
+    pending: 1,
+    skipped: 0,
+  };
+  const winning = new Map<string, string>();
+  for (const s of steps) {
+    const key = `${s.definitionId ?? ""}:${s.stepOrder}`;
+    const prev = winning.get(key);
+    if (
+      prev === undefined ||
+      (priority[s.status] ?? -1) > (priority[prev] ?? -1)
+    ) {
+      winning.set(key, s.status);
+    }
+  }
+  const anyFailed = Array.from(winning.values()).includes("failed");
+
   await getDb()
     .update(schema.pipelineWorkflowRuns)
-    .set({ status: "succeeded", finishedAt: new Date() })
+    .set({
+      status: anyFailed ? "failed" : "succeeded",
+      finishedAt: new Date(),
+    })
     .where(eq(schema.pipelineWorkflowRuns.id, pipelineRunId));
 }
