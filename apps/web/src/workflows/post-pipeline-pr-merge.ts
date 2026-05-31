@@ -167,8 +167,14 @@ async function runLoggerTableStepsStep(
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         await markStep(input.pipelineRunId, d.id, i, "failed", msg);
-        // Don't run later steps in this chain — they depend on the earlier
-        // ones (the SDK references the stream name). Other tables continue.
+        // Later steps in this chain depend on the earlier ones (the SDK
+        // references the stream name), so they can't run once a predecessor
+        // fails. Mark them skipped rather than leaving them "pending" — a
+        // pending row reads as "not started yet" in the UI, which is wrong
+        // for a step that will never start. Other tables continue.
+        for (let j = i + 1; j < runners.length; j++) {
+          await markStep(input.pipelineRunId, d.id, j, "skipped");
+        }
         break;
       }
     }
@@ -179,7 +185,7 @@ async function markStep(
   runId: string,
   definitionId: string,
   stepOrder: number,
-  status: "running" | "succeeded" | "failed",
+  status: "running" | "succeeded" | "failed" | "skipped",
   errorMessage?: string,
 ): Promise<void> {
   const now = new Date();
