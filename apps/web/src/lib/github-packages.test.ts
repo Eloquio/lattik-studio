@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  fetchEmbeddedSchema,
   packTarball,
   packageUrlFor,
   publishLoggerSdk,
@@ -60,5 +61,29 @@ describe("publishLoggerSdk (publishing disabled)", () => {
     assert.equal(result.version, "0.0.0-dev");
     assert.equal(result.packageName, "@eloquio/logger-ingest-impressions");
     assert.equal(result.registryUrl, "https://npm.pkg.github.com");
+    // packageUrl is the one result field the workflow runner forwards that no
+    // other test asserts — pin it so the detail shape the UI renders is covered.
+    assert.equal(
+      result.packageUrl,
+      "https://github.com/orgs/eloquio/packages/npm/package/logger-ingest-impressions",
+    );
+  });
+});
+
+describe("fetchEmbeddedSchema HTTP handling", () => {
+  it("returns null on 404 (tarball absent → schema unknown, not a hard failure)", async (t) => {
+    t.mock.method(globalThis, "fetch", async () => new Response(null, { status: 404 }));
+    assert.equal(await fetchEmbeddedSchema("https://example.test/pkg.tgz"), null);
+  });
+
+  it("throws on a non-404 failure rather than silently churning the version", async (t) => {
+    // A 401/403/5xx must be fatal: degrading to null here would read as
+    // "schema unknown" and spuriously bump the version on a transient/auth
+    // error — exactly what fetchPublishedState guards against for the packument.
+    t.mock.method(globalThis, "fetch", async () => new Response(null, { status: 503 }));
+    await assert.rejects(
+      () => fetchEmbeddedSchema("https://example.test/pkg.tgz"),
+      /HTTP 503/,
+    );
   });
 });

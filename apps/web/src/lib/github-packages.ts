@@ -114,17 +114,28 @@ export function readPackageJsonFromTarball(
  * Read the embedded `lattikSchema` from a published version's tarball. We read
  * it from the tarball rather than the packument's version metadata because
  * custom top-level package.json fields are not guaranteed to survive a
- * registry's packument response — the tarball is the source of truth. Returns
- * null if the tarball can't be read or carries no signature (caller then
- * treats the schema as unknown → a change rather than a skip).
+ * registry's packument response — the tarball is the source of truth.
+ *
+ * Returns null when the tarball is genuinely absent (404) or carries no
+ * signature (an older package predating `lattikSchema`); the caller then treats
+ * the schema as unknown → a change rather than a skip. Any other non-ok status
+ * (401/403/5xx) is fatal for the same reason a non-404 packument read is in
+ * `fetchPublishedState`: we must NOT silently degrade to a spurious version
+ * bump on an auth/transient failure — failing the step surfaces the problem.
+ * Exported for tests.
  */
-async function fetchEmbeddedSchema(
+export async function fetchEmbeddedSchema(
   tarballUrl: string,
 ): Promise<ColumnSig[] | null> {
   const res = await fetch(tarballUrl, {
     headers: { Authorization: `Bearer ${TOKEN}` },
   });
-  if (!res.ok) return null;
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new Error(
+      `Failed to read published tarball (HTTP ${res.status}) from ${tarballUrl}`,
+    );
+  }
   const buf = Buffer.from(await res.arrayBuffer());
   const pkg = await readPackageJsonFromTarball(buf);
   return Array.isArray(pkg?.lattikSchema)
