@@ -22,12 +22,17 @@ overrides:
   fast-xml-parser: ^5.7.0
   undici: ^7.24.0
   fast-uri: ^3.1.2
-  # brace-expansion ReDoS (CVE-2025-5889): pin patched patch-levels. A blanket
-  # `brace-expansion: ^5.0.6` breaks the older minimatch majors — they do
-  # `require('brace-expansion')()` expecting the module to *be* the function (1.x/2.x),
-  # but 5.x exposes a named `exports.expand`, giving "TypeError: expand is not a function"
-  # (crashes `eslint`). minimatch is the only consumer in the tree, so scope per major:
-  # 3.x→1.x, 5.x/9.x→2.x (all function-export, patched), 10.x→5.x (named export, what it wants).
+  # brace-expansion ReDoS (CVE-2025-5889): keep every consumer on a patched level.
+  # Two layers — pnpm applies the more-specific selector, so the per-major carve-outs
+  # win for minimatch while the blanket still covers anything else (incl. future
+  # consumers / new minimatch majors):
+  #   1. Blanket default: latest patched major (5.x).
+  #   2. Carve-outs for the older minimatch majors, which do `require('brace-expansion')()`
+  #      expecting the module to *be* the function. 5.x exposes a named `exports.expand`,
+  #      so a blanket-only 5.x gives "TypeError: expand is not a function" (crashes `eslint`).
+  #      Map each to a patched major whose export shape it expects:
+  #      3.x→1.x, 5.x/9.x→2.x (function-export, patched), 10.x→5.x (named export, what it wants).
+  brace-expansion: ^5.0.6
   'minimatch@3>brace-expansion': ^1.1.14
   'minimatch@5>brace-expansion': ^2.1.0
   'minimatch@9>brace-expansion': ^2.1.0
