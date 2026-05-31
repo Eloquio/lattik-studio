@@ -2,9 +2,9 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { publish } from "libnpmpublish";
-import npmFetch from "npm-registry-fetch";
-import * as tar from "tar";
+// Type-only import (erased at build): the `tar` value is loaded lazily inside
+// the functions that use it — see the lazy-import note below.
+import type * as Tar from "tar";
 
 import type { LoggerTable } from "@/extensions/data-architect/schema";
 import {
@@ -28,6 +28,14 @@ import { decidePublishAction } from "@/lib/logger-sdk-version";
  * GITHUB_TOKEN) — it rejects GitHub App installation tokens — so this uses a
  * long-lived `write:packages` classic PAT, supplied via env, ideally owned by
  * a dedicated machine user. See plans/logger-sdk-github-packages.md.
+ *
+ * IMPORTANT: the npm-cli deps (`libnpmpublish`, `npm-registry-fetch`, `tar`)
+ * are `await import()`ed *inside* the functions that use them, never at module
+ * top level. This module is pulled into the GitHub-webhook route's graph (via
+ * the post-merge workflow), and eagerly loading those heavy
+ * `serverExternalPackages` during the route's serverless cold-start init
+ * crashed the entire webhook in production. Lazy-loading keeps them out of the
+ * route's load path — they're only required when a publish actually runs.
  */
 
 const PUBLISH_ENABLED = process.env.GITHUB_PACKAGES_PUBLISH_ENABLED === "true";
@@ -82,13 +90,14 @@ function is404(err: unknown): boolean {
  * Extract `package/package.json` from a gzipped npm tarball buffer without
  * touching disk. tar auto-detects the gzip on read. Exported for tests.
  */
-export function readPackageJsonFromTarball(
+export async function readPackageJsonFromTarball(
   buf: Buffer,
 ): Promise<Record<string, unknown> | null> {
+  const tar = await import("tar");
   return new Promise((resolve, reject) => {
     let parsed: Record<string, unknown> | null = null;
     const parser = tar.t({
-      onentry(entry: tar.ReadEntry) {
+      onentry(entry: Tar.ReadEntry) {
         if (entry.path !== "package/package.json") {
           entry.resume();
           return;
@@ -155,6 +164,7 @@ export async function fetchEmbeddedSchema(
 async function fetchPublishedState(
   packageName: string,
 ): Promise<PublishedState | null> {
+  const { default: npmFetch } = await import("npm-registry-fetch");
   // npm-registry-fetch wants the escaped name as the URI path; for a scoped
   // package the "/" is percent-encoded but the "@" is kept.
   const escapedName = packageName.replace("/", "%2f");
@@ -187,6 +197,7 @@ async function fetchPublishedState(
  * `finally`), so there's no read-after-delete race.
  */
 export async function packTarball(files: PackageFile[]): Promise<Buffer> {
+  const tar = await import("tar");
   const dir = await mkdtemp(join(tmpdir(), "lattik-sdk-"));
   try {
     const pkgDir = join(dir, "package");
@@ -270,6 +281,7 @@ export async function publishLoggerSdk(
   ) as Record<string, unknown>;
   const tarball = await packTarball(files);
 
+  const { publish } = await import("libnpmpublish");
   try {
     await publish(manifest, tarball, {
       registry: REGISTRY,
