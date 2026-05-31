@@ -112,11 +112,22 @@ export interface RenderOptions {
   version: string;
   /** npm scope, including the leading "@" (e.g. "@eloquio"). */
   scope: string;
-  /** Value for the package.json `repository` field. */
+  /**
+   * Git URL for the package.json `repository.url` field. Must be a git URL
+   * GitHub Packages accepts (e.g. "git+https://github.com/OWNER/REPO.git") —
+   * see `DEFAULT_REPOSITORY_URL` for why the bare https form won't do.
+   */
   repositoryUrl?: string;
 }
 
-const DEFAULT_REPOSITORY_URL = "https://github.com/Eloquio/lattik-studio";
+// GitHub Packages links a package to its repo via the `repository` field and
+// rejects a publish whose repo host it can't parse ("invalid repo host ''").
+// We publish through `libnpmpublish`, NOT the `npm publish` CLI — and
+// libnpmpublish only runs the `fixName` normalize step, so (unlike the CLI) it
+// does NOT coerce a string `repository` into the `{ type, url }` object form.
+// So we must emit the object form ourselves, with a `git+` prefix + `.git`.
+const DEFAULT_REPOSITORY_URL =
+  "git+https://github.com/Eloquio/lattik-studio.git";
 const GH_PACKAGES_REGISTRY = "https://npm.pkg.github.com";
 
 /** Render the `<Name>Event` interface body (shared doc-comment formatting). */
@@ -269,7 +280,12 @@ export function renderLoggerPackage(
     },
     files: ["index.js", "index.d.ts", "README.md"],
     publishConfig: { registry: GH_PACKAGES_REGISTRY },
-    repository: opts.repositoryUrl ?? DEFAULT_REPOSITORY_URL,
+    // Object form (not a bare string) — required by GitHub Packages; see
+    // DEFAULT_REPOSITORY_URL above.
+    repository: {
+      type: "git",
+      url: opts.repositoryUrl ?? DEFAULT_REPOSITORY_URL,
+    },
     peerDependencies: { "@aws-sdk/client-firehose": "^3" },
     // Embedded column signature — diffed by the next publish to derive the
     // semver bump. Not read at runtime.

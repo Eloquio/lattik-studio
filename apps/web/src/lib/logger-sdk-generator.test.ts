@@ -71,6 +71,14 @@ describe("renderLoggerPackage", () => {
     assert.ok(pkg.peerDependencies["@aws-sdk/client-firehose"]);
     // Embedded signature must equal the schema signature for diff-based bumps.
     assert.deepEqual(pkg.lattikSchema, schemaSignature(table));
+    // `repository` MUST be the git-object form, not a bare string. We publish
+    // via libnpmpublish (no `npm publish` CLI normalization), and GitHub
+    // Packages rejects a publish whose repository host it can't parse from a
+    // string field ("invalid repo host ''").
+    assert.deepEqual(pkg.repository, {
+      type: "git",
+      url: "git+https://github.com/Eloquio/lattik-studio.git",
+    });
   });
 
   it("index.d.ts declares the typed interface, stream const, and class", () => {

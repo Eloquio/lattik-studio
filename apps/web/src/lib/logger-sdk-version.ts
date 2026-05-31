@@ -29,8 +29,10 @@ export function sigsEqual(a: ColumnSig[], b: ColumnSig[]): boolean {
 
 /**
  * Classify a schema change: a removed/renamed/retyped column is breaking
- * (major), a purely additive change is minor, anything else (no signature
- * change — e.g. only description/tags moved) is patch.
+ * (major), a purely additive change is minor, anything else is patch. Since
+ * this only compares name+type, the patch case is reached when those match but
+ * `sigsEqual` already found a difference — i.e. a classification-only change.
+ * (description/tags aren't in the signature, so they never reach here.)
  */
 export function diffBump(prev: ColumnSig[], next: ColumnSig[]): Bump {
   const prevByName = new Map(prev.map((c) => [c.name, c.type]));
