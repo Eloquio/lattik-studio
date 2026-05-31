@@ -174,7 +174,6 @@ export async function executeQuery(
     const allRows: unknown[][] = [];
     let truncated = false;
 
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       if (response.error) {
         throw new TrinoQueryError(

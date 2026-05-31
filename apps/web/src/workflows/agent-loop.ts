@@ -328,7 +328,6 @@ const definitionKindEnum = z.enum([
   "metric",
 ]);
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 // Every entry uses `strictTool` instead of the AI SDK's `tool`. That
 // runs `.strict()` on the top-level zod object before wrapping it in
 // the SDK's Schema, so unknown keys cause an `InvalidToolInputError`

@@ -5,8 +5,6 @@ import { TrinoQueryError } from "./trino-client";
 const S3_ENDPOINT = process.env.S3_ENDPOINT ?? "http://localhost:9000";
 const S3_ACCESS_KEY = process.env.S3_ACCESS_KEY_ID ?? "lattik";
 const S3_SECRET_KEY = process.env.S3_SECRET_ACCESS_KEY ?? "lattik-local";
-const LATTIK_WAREHOUSE_PATH =
-  process.env.LATTIK_WAREHOUSE_PATH ?? "s3://warehouse/lattik";
 
 const MAX_ROWS = 10_000;
 const QUERY_TIMEOUT_MS = 30_000;

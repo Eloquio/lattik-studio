@@ -100,7 +100,6 @@ async function proxy(req: Request, path: string[]): Promise<Response> {
       body: req.method === "GET" || req.method === "HEAD" ? null : req.body,
       // Required by undici when streaming a Request body — without it the
       // fetch implementation refuses the duplex stream.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       duplex: "half",
     } as RequestInit & { duplex: "half" });
   } catch (err) {

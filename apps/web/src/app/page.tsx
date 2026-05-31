@@ -23,6 +23,11 @@ interface ChatState {
 
 export default function Home() {
   const canvas = useCanvas();
+  // These are stable (each is a useCallback([]) inside useCanvas). Destructure
+  // them so hook dependency arrays reference the stable identifiers directly
+  // rather than `canvas.x` member expressions, which the React Hooks compiler
+  // rules can't track as memoization-preserving.
+  const { applyStreamSpec, open, setCanvasSpec } = canvas;
   const sendMessageRef = useRef<((text: string) => void) | null>(null);
   const [activeExtensionId, setActiveExtensionId] = useState<string | null>(null);
   const [taskStack, setTaskStack] = useState<TaskStackEntry[]>([]);
@@ -52,7 +57,7 @@ export default function Home() {
         // consistent extension/task-stack pair when it (re)mounts.
         setActiveExtensionId(conv.activeExtensionId ?? null);
         setTaskStack((conv.taskStack as TaskStackEntry[]) ?? []);
-        canvas.setCanvasSpec((conv.canvasState as Spec) ?? null);
+        setCanvasSpec((conv.canvasState as Spec) ?? null);
         setChat({
           id: savedId,
           renderKey: 1,
@@ -66,7 +71,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [setCanvasSpec]);
 
   // Persist active chat ID
   useEffect(() => {
@@ -77,18 +82,18 @@ export default function Home() {
   // applyStreamSpec so any locally-edited paths (form input, accepted
   // suggestion patches) are preserved instead of clobbered by the rebuild.
   const handleSpecFromStream = useCallback((spec: unknown) => {
-    canvas.applyStreamSpec(spec);
+    applyStreamSpec(spec);
     if (spec !== null) {
-      canvas.open();
+      open();
     }
-  }, [canvas.applyStreamSpec, canvas.open]);
+  }, [applyStreamSpec, open]);
 
   const handleNewChat = useCallback(() => {
     setChat((prev) => ({ id: generateId(), renderKey: prev.renderKey + 1 }));
-    canvas.setCanvasSpec(null);
+    setCanvasSpec(null);
     setActiveExtensionId(null);
     setTaskStack([]);
-  }, [canvas.setCanvasSpec]);
+  }, [setCanvasSpec]);
 
   const handleSelectChat = useCallback(async (id: string) => {
     try {
@@ -100,14 +105,14 @@ export default function Home() {
           initialMessages: conv.messages as UIMessage[],
           savedTitle: conv.title,
         }));
-        canvas.setCanvasSpec((conv.canvasState as Spec) ?? null);
+        setCanvasSpec((conv.canvasState as Spec) ?? null);
         setActiveExtensionId(conv.activeExtensionId ?? null);
         setTaskStack((conv.taskStack as TaskStackEntry[]) ?? []);
       }
     } catch (error) {
       console.error("Failed to load conversation:", error);
     }
-  }, [canvas.setCanvasSpec]);
+  }, [setCanvasSpec]);
 
   const handleConversationChange = useCallback(() => {
     setHistoryRefreshKey((k) => k + 1);
