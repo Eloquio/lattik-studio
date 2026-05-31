@@ -344,17 +344,27 @@ function SourceTableCombobox({ value, onChange, onColumnsLoaded }: {
     setActiveIdx(-1);
   };
 
+  // Reset the keyboard-nav highlight when the dropdown opens or the filtered
+  // list changes. Pure UI coordination, one-shot per input change; not a render
+  // loop. React Compiler is not enabled.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (open && filtered.length > 0) setActiveIdx(0);
     else setActiveIdx(-1);
   }, [open, filtered.length, value]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
-  // Resolve table status when value changes
+  // Resolve table status when value changes. Deliberately keyed on
+  // [value, loaded] only — re-running on the callback identities (checkCatalog,
+  // onColumnsLoaded) or defMatch would thrash this status sync. React Compiler
+  // is not enabled.
+  /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
   useEffect(() => {
     if (!value.trim() || !loaded) { setCatalogStatus("idle"); return; }
     if (defMatch) { onColumnsLoaded(defMatch.columns); setCatalogStatus("definition"); }
     else checkCatalog(value);
   }, [value, loaded]);
+  /* eslint-enable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") { setOpen(false); return; }
@@ -1395,7 +1405,7 @@ export const { registry, handlers } = defineRegistry(catalog, {
           {(showAddCol || editIdx !== null) && (
             <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/10 backdrop-blur-[1px] rounded-lg" onClick={closePopup}>
               <div className="w-[22rem] rounded-xl border border-stone-200 bg-white shadow-xl" onClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => { if (e.key === "Escape") closePopup(); if (e.key === "Enter") { e.preventDefault(); editIdx !== null ? saveEdit() : addCol(); } }}>
+                onKeyDown={(e) => { if (e.key === "Escape") closePopup(); if (e.key === "Enter") { e.preventDefault(); if (editIdx !== null) { saveEdit(); } else { addCol(); } } }}>
                 {/* Header */}
                 <div className="flex items-center justify-between px-4 py-2 bg-amber-50 border-b border-amber-100 rounded-t-xl">
                   <span className="text-[11px] font-medium text-amber-700">{editIdx !== null ? "Edit Column" : "Add Column"}</span>
@@ -1865,7 +1875,7 @@ export const { registry, handlers } = defineRegistry(catalog, {
                     className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 ring-1 ring-amber-300 px-2 py-0.5 text-[10px] font-medium text-stone-700 transition-all">
                     <input ref={pkColRef} type="text" value={pk.column}
                       onChange={(e) => updatePk(i, { column: e.target.value })}
-                      onBlur={(e) => { setTimeout(() => { if (!pkPillRef.current?.contains(document.activeElement) && !document.querySelector("[data-entity-popover]")) setEditPkIdx(null); }, 100); }}
+                      onBlur={() => { setTimeout(() => { if (!pkPillRef.current?.contains(document.activeElement) && !document.querySelector("[data-entity-popover]")) setEditPkIdx(null); }, 100); }}
                       onKeyDown={(e) => { if (e.key === "Escape") setEditPkIdx(null); if (e.key === "Enter") { e.preventDefault(); setEditPkIdx(null); } }}
                       placeholder="column" autoFocus autoComplete="off" data-1p-ignore data-lpignore="true" data-form-type="other"
                       className="w-16 bg-transparent font-mono text-[10px] text-stone-800 placeholder:text-stone-400 focus:outline-none" />

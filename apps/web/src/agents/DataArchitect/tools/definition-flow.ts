@@ -31,9 +31,6 @@ const definitionKindEnum = z.enum([
   "metric",
 ]);
 
-const noteStub = (note = "Real implementation pending — bigger port in a follow-up slice.") =>
-  ({ stub: true, note });
-
 // ---------------------------------------------------------------------------
 // Real read tools
 // ---------------------------------------------------------------------------

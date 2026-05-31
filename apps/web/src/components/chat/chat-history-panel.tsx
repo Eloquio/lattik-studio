@@ -30,7 +30,7 @@ export function ChatHistoryPanel({
 }: ChatHistoryPanelProps) {
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
 
   useEffect(() => {
     startTransition(async () => {
