@@ -47,7 +47,7 @@ export function WorkflowsView({
 }: WorkflowsViewProps) {
   // Persist UI state in URL query params so refresh / share-by-URL
   // restores the view: `?step=<id>` for the side-panel selection,
-  // `?open=<id1>,<id2>` for the set of expanded run cards. Initial
+  // `?open=<id>` for the single expanded run card (accordion). Initial
   // values are read once on mount; subsequent transitions update the
   // URL via history.replaceState so we don't trigger a Next server
   // re-fetch on every click.
@@ -55,12 +55,12 @@ export function WorkflowsView({
   const [selectedStepId, setSelectedStepId] = useState<string | null>(
     () => searchParams.get("step"),
   );
-  const [openRunIds, setOpenRunIds] = useState<Set<string>>(
-    () =>
-      new Set(
-        (searchParams.get("open") ?? "").split(",").filter(Boolean),
-      ),
-  );
+  const [openRunIds, setOpenRunIds] = useState<Set<string>>(() => {
+    // Accordion: at most one card open. Tolerate older `?open=a,b` links by
+    // keeping only the first id.
+    const [first] = (searchParams.get("open") ?? "").split(",").filter(Boolean);
+    return new Set(first ? [first] : []);
+  });
   const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
 
   const selectedStep = useMemo(
@@ -101,12 +101,10 @@ export function WorkflowsView({
   const handleToggleOpen = useCallback(
     (runId: string) => {
       setOpenRunIds((prev) => {
-        const next = new Set(prev);
-        if (next.has(runId)) {
-          next.delete(runId);
-        } else {
-          next.add(runId);
-        }
+        // Accordion behavior: at most one card open at a time. Clicking
+        // the already-open card closes it; clicking any other card opens
+        // it and collapses whatever was open before.
+        const next = prev.has(runId) ? new Set<string>() : new Set([runId]);
         syncSearchParam(
           "open",
           next.size > 0 ? Array.from(next).join(",") : null,
