@@ -5,6 +5,11 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { WorkflowRunCard, type StepChain } from "./workflow-run-card";
 import { StepDetailPanel, type StepDetail } from "./step-detail-panel";
+import {
+  parseOpenParam,
+  serializeOpenParam,
+  toggleOpenRun,
+} from "./open-run-state";
 
 export interface RunCardData {
   id: string;
@@ -55,12 +60,9 @@ export function WorkflowsView({
   const [selectedStepId, setSelectedStepId] = useState<string | null>(
     () => searchParams.get("step"),
   );
-  const [openRunIds, setOpenRunIds] = useState<Set<string>>(() => {
-    // Accordion: at most one card open. Tolerate older `?open=a,b` links by
-    // keeping only the first id.
-    const [first] = (searchParams.get("open") ?? "").split(",").filter(Boolean);
-    return new Set(first ? [first] : []);
-  });
+  const [openRunIds, setOpenRunIds] = useState<Set<string>>(() =>
+    parseOpenParam(searchParams.get("open")),
+  );
   const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
 
   const selectedStep = useMemo(
@@ -101,14 +103,8 @@ export function WorkflowsView({
   const handleToggleOpen = useCallback(
     (runId: string) => {
       setOpenRunIds((prev) => {
-        // Accordion behavior: at most one card open at a time. Clicking
-        // the already-open card closes it; clicking any other card opens
-        // it and collapses whatever was open before.
-        const next = prev.has(runId) ? new Set<string>() : new Set([runId]);
-        syncSearchParam(
-          "open",
-          next.size > 0 ? Array.from(next).join(",") : null,
-        );
+        const next = toggleOpenRun(prev, runId);
+        syncSearchParam("open", serializeOpenParam(next));
         return next;
       });
     },
@@ -150,10 +146,7 @@ export function WorkflowsView({
     }
     if (changed) {
       setOpenRunIds(next);
-      syncSearchParam(
-        "open",
-        next.size > 0 ? Array.from(next).join(",") : null,
-      );
+      syncSearchParam("open", serializeOpenParam(next));
     }
   }, [cards, openRunIds, syncSearchParam]);
 
