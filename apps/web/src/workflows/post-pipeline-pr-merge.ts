@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
+import type { PipelineWorkflowStepStatus } from "@/db/schema";
 import {
   loggerTableSchema,
   type LoggerTable,
@@ -66,7 +67,7 @@ export async function postPipelineMergeWorkflow(
   const result = await acknowledgeMergeStep(input);
   await seedLoggerTableStepsStep(input);
   await runLoggerTableStepsStep(input);
-  await markRunSucceededStep(input.pipelineRunId);
+  await markRunFinishedStep(input.pipelineRunId);
   return result;
 }
 
@@ -226,10 +227,82 @@ async function markStep(
     );
 }
 
-async function markRunSucceededStep(pipelineRunId: string): Promise<void> {
+/**
+ * Step fields the run-status rollup needs — a subset of a
+ * `pipelineWorkflowSteps` row.
+ */
+export interface RollupStep {
+  definitionId: string | null;
+  definitionName: string;
+  stepOrder: number;
+  status: PipelineWorkflowStepStatus;
+}
+
+/**
+ * Priority for picking a step's "winning" status when webhook redelivery
+ * has left duplicate rows for the same (definition, stepOrder). Higher wins.
+ * Mirrors `statusPriority` on the run-detail page (apps/web/src/app/workflows/
+ * page.tsx) so the rollup and the rendered checklist agree on which attempt
+ * is canonical.
+ */
+const STEP_STATUS_PRIORITY: Record<PipelineWorkflowStepStatus, number> = {
+  succeeded: 4,
+  failed: 3,
+  running: 2,
+  pending: 1,
+  skipped: 0,
+};
+
+/**
+ * Roll a run's step rows up into a terminal run status. Dedupe by
+ * (definitionId, definitionName, stepOrder) — the same chain key the
+ * run-detail page uses — keeping the most advanced status, so a step that
+ * failed then succeeded on a retry isn't counted as a failure. The run is
+ * "failed" if any winning status is "failed", otherwise "succeeded"
+ * (including a run with no steps, e.g. a PR that touched no logger_tables).
+ *
+ * Pure and synchronous so it can be unit-tested without a database; the
+ * `"use step"` finalizer below just feeds it the rows it reads.
+ */
+export function rollUpRunStatus(
+  steps: readonly RollupStep[],
+): "succeeded" | "failed" {
+  const winning = new Map<string, PipelineWorkflowStepStatus>();
+  for (const s of steps) {
+    const key = `${s.definitionId ?? ""}::${s.definitionName}:${s.stepOrder}`;
+    const prev = winning.get(key);
+    if (
+      prev === undefined ||
+      STEP_STATUS_PRIORITY[s.status] > STEP_STATUS_PRIORITY[prev]
+    ) {
+      winning.set(key, s.status);
+    }
+  }
+  for (const status of winning.values()) {
+    if (status === "failed") return "failed";
+  }
+  return "succeeded";
+}
+
+/**
+ * Finalize the run status by rolling up its step outcomes. Previously this
+ * always wrote "succeeded", which masked per-step failures on the
+ * /workflows card. See {@link rollUpRunStatus} for the rollup rules.
+ */
+async function markRunFinishedStep(pipelineRunId: string): Promise<void> {
   "use step";
+  const steps = await getDb()
+    .select({
+      definitionId: schema.pipelineWorkflowSteps.definitionId,
+      definitionName: schema.pipelineWorkflowSteps.definitionName,
+      stepOrder: schema.pipelineWorkflowSteps.stepOrder,
+      status: schema.pipelineWorkflowSteps.status,
+    })
+    .from(schema.pipelineWorkflowSteps)
+    .where(eq(schema.pipelineWorkflowSteps.runId, pipelineRunId));
+
   await getDb()
     .update(schema.pipelineWorkflowRuns)
-    .set({ status: "succeeded", finishedAt: new Date() })
+    .set({ status: rollUpRunStatus(steps), finishedAt: new Date() })
     .where(eq(schema.pipelineWorkflowRuns.id, pipelineRunId));
 }
