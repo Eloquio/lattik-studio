@@ -86,4 +86,24 @@ describe("fetchEmbeddedSchema HTTP handling", () => {
       /HTTP 503/,
     );
   });
+
+  it("withholds the auth token from a tarball host that isn't the registry", async (t) => {
+    // dist.tarball comes from the registry's packument response. The PAT is a
+    // long-lived write:packages credential, so it must NOT be forwarded to a
+    // host derived from that response unless it matches the registry host —
+    // otherwise a compromised/misconfigured registry could exfiltrate it.
+    const seen: { url: string; auth: string | null }[] = [];
+    t.mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      seen.push({ url, auth: headers.get("authorization") });
+      return new Response(null, { status: 404 });
+    });
+
+    await fetchEmbeddedSchema("https://evil.example/pkg.tgz");
+    // Same host as the default REGISTRY (npm.pkg.github.com) → auth allowed.
+    await fetchEmbeddedSchema("https://npm.pkg.github.com/@eloquio/x/-/x-1.0.0.tgz");
+
+    assert.equal(seen[0]!.auth, null, "no token to a foreign tarball host");
+    assert.ok(seen[1]!.auth?.startsWith("Bearer "), "token sent to the registry host");
+  });
 });

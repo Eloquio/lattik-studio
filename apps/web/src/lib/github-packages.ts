@@ -127,8 +127,16 @@ export function readPackageJsonFromTarball(
 export async function fetchEmbeddedSchema(
   tarballUrl: string,
 ): Promise<ColumnSig[] | null> {
+  // `tarballUrl` comes from the registry's packument response (`dist.tarball`).
+  // Only forward the write-scoped PAT when the tarball is served by the same
+  // host as the configured registry — otherwise a compromised/misconfigured
+  // registry (or an unexpected GITHUB_PACKAGES_REGISTRY override) could
+  // exfiltrate the credential to an arbitrary host. GitHub Packages always
+  // co-locates tarballs on the registry host, so the happy path is unaffected;
+  // a foreign host is fetched without auth and will surface as a non-ok status.
+  const sameHost = new URL(tarballUrl).host === new URL(REGISTRY).host;
   const res = await fetch(tarballUrl, {
-    headers: { Authorization: `Bearer ${TOKEN}` },
+    headers: sameHost ? { Authorization: `Bearer ${TOKEN}` } : {},
   });
   if (res.status === 404) return null;
   if (!res.ok) {
