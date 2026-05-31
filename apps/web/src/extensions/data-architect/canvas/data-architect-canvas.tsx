@@ -50,6 +50,8 @@ export function DataArchitectCanvas({ spec, loading, onStateChange, onSendMessag
   const prevStateJsonRef = useRef<string | null>(null);
 
   const sendRef = useRef(onSendMessage);
+  // Latest-ref mirror so the stable `actions` memo always calls the freshest
+  // onSendMessage from its deferred callback, without re-creating `actions`.
   sendRef.current = onSendMessage;
   const actions = useMemo(() => ({
     sendChatMessage: (text: string) => sendRef.current?.(text),
@@ -60,6 +62,11 @@ export function DataArchitectCanvas({ spec, loading, onStateChange, onSendMessag
   // form state stringified on every keystroke during streaming. Pre-empts
   // both the sanitize walk and the JSON.stringify, which together scale
   // linearly with column count and dominate render time on wide tables.
+  // The narrow [spec?.state] dep is the whole point — re-sanitize+stringify
+  // only when that reference changes, not on every streaming-token re-render.
+  // Disabling the memoization analysis here also quiets the React Compiler
+  // `refs` check on this deliberate ref-based cache (shared pass; compiler off).
+  /* eslint-disable react-hooks/exhaustive-deps */
   const stableState = useMemo(() => {
     if (!spec) return null;
     const sanitized = sanitizeState(spec.state ?? EMPTY_STATE);
@@ -70,6 +77,7 @@ export function DataArchitectCanvas({ spec, loading, onStateChange, onSendMessag
     }
     return prevStateRef.current;
   }, [spec?.state]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   if (!spec || !stableState) return null;
 

@@ -18,14 +18,19 @@ export function useCanvas() {
   // emits a structural change (i.e. renders a different form).
   const locallyEditedPathsRef = useRef<Set<string>>(new Set());
 
-  // Hydrate layout prefs from localStorage after mount
+  // Hydrate layout prefs from localStorage after mount. SSR-safe: localStorage
+  // is unavailable during render, so this can't be a lazy useState initializer;
+  // the post-mount setState is the standard pattern (runs once). React Compiler
+  // is not enabled.
   useEffect(() => {
     try {
       const stored = localStorage.getItem("canvas-layout");
       if (stored) {
         const { isOpen: savedOpen, width: savedWidth } = JSON.parse(stored);
+        /* eslint-disable react-hooks/set-state-in-effect */
         if (typeof savedOpen === "boolean") setIsOpen(savedOpen);
         if (typeof savedWidth === "number") setWidth(savedWidth);
+        /* eslint-enable react-hooks/set-state-in-effect */
       }
     } catch {}
   }, []);

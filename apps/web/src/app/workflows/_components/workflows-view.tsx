@@ -125,6 +125,9 @@ export function WorkflowsView({
   // carry a phantom selection.
   useEffect(() => {
     if (selectedStepId && !stepDetails[selectedStepId]) {
+      // Reconcile a stale `?step=` (deleted step / old share link) against the
+      // loaded data. One-shot correction, not a render loop. Compiler is off.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedStepId(null);
       syncSearchParam("step", null);
     }
@@ -145,6 +148,9 @@ export function WorkflowsView({
       }
     }
     if (changed) {
+      // Reconcile stale `?open=` ids against the visible run window. One-shot
+      // correction when the data changes, not a render loop. Compiler is off.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setOpenRunIds(next);
       syncSearchParam("open", serializeOpenParam(next));
     }

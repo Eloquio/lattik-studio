@@ -45,6 +45,10 @@ export function EntityRegistryProvider({ children }: { children: React.ReactNode
 
   useEffect(() => {
     mountedRef.current = true;
+    // Fetch-on-mount: refresh()'s setEntities runs after an `await`, not
+    // synchronously, so it doesn't cause cascading renders. The rule can't see
+    // past the await. React Compiler is not enabled.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh();
     return () => { mountedRef.current = false; };
   }, [refresh]);

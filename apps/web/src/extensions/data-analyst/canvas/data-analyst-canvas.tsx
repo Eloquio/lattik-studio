@@ -26,6 +26,11 @@ export function DataAnalystCanvas({
   // state reference. Re-running this on every parent render (which fires per
   // token during streaming) was paying the JSON.stringify cost on query
   // result tables that can be megabytes.
+  // The narrow [spec?.state] dep is the whole point — re-stringify only when
+  // that reference changes, not on every streaming-token re-render. Disabling
+  // the memoization analysis here also quiets the React Compiler `refs` check
+  // on this deliberate ref-based cache (shared analysis pass; compiler is off).
+  /* eslint-disable react-hooks/exhaustive-deps */
   const stableState = useMemo(() => {
     if (!spec) return null;
     const stateObj = (spec.state ?? EMPTY_STATE) as Record<string, unknown>;
@@ -36,6 +41,7 @@ export function DataAnalystCanvas({
     }
     return prevStateRef.current;
   }, [spec?.state]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   if (!spec || !stableState) return null;
 

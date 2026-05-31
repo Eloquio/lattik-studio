@@ -1,5 +1,16 @@
 "use client";
 
+/* eslint-disable react-hooks/refs --
+ * This component coordinates chat/canvas/handoff state through refs that mirror
+ * the freshest props/state for use in *deferred* callbacks: the transport's
+ * `prepareSendMessagesRequest` builder, `useChat` lifecycle handlers, and the
+ * handoff/spec effects. None of these refs are read synchronously to compute
+ * render output, so the `react-hooks/refs` "access during render" rule (a
+ * React Compiler readiness check — the compiler is NOT enabled here) flags an
+ * intentional, correct idiom. Suppressed file-wide because the pattern is
+ * pervasive (40+ ref accesses); revisit if/when React Compiler is adopted.
+ */
+
 import { useChat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
 import { DefaultChatTransport } from "ai";
@@ -10,7 +21,6 @@ import { buildSpecFromParts } from "@json-render/react";
 import { intentToSpec } from "@eloquio/json-render-adapter";
 import {
   renderIntentSchema,
-  type ReviewSuggestion,
   type ReviewSuggestionsWidget,
 } from "@eloquio/render-intents";
 import { ToolResult } from "./tool-result";
