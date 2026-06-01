@@ -2,7 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { DefinitionKind } from "@eloquio/db-schema";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
-import { SYSTEM_USER_ID } from "@/db/system-user";
+import { SYSTEM_USER_ID, upsertSystemUser } from "@/db/system-user";
 import { validateShape } from "@/agents/DataArchitect/lib/validation";
 import { getFileAtRef, listPullRequestFiles } from "./github-client";
 import { parseDefinitionPath, parseDefinitionYaml } from "./definitions-from-yaml";
@@ -118,6 +118,13 @@ export async function reconcileDefinitionsFromPR(args: {
   }
 
   const db = getDb();
+  // Self-heal the FK target before any insert. Reconcile attributes
+  // hand-edited / webhook-authored definitions to SYSTEM_USER_ID
+  // (definitions.createdBy → user.id), but that user is otherwise only created
+  // by `pnpm db:seed`. Without this, the first brand-new definition insert in
+  // an unseeded environment (fresh DB, new branch, reset) FK-fails and the
+  // whole reconcile throws. Idempotent: selects first, inserts only if missing.
+  await upsertSystemUser(db);
   const prMergedAt = new Date();
   const result: ReconcileResult = {
     added: [],
