@@ -98,4 +98,18 @@ describe("upsertSystemUser", () => {
     assert.equal(calls.selects, 2, "must re-read after losing the race");
     assert.equal((row as Row).id, SYSTEM_USER_ID);
   });
+
+  it("throws when the row is still missing after the conflict re-read", async () => {
+    // insert swallowed a conflict (insertReturns: []) but the re-read finds no
+    // row — e.g. the conflict was on the unique email for a different id. The
+    // system user still doesn't exist, so this must fail loudly rather than
+    // return undefined and let the caller's next FK insert blow up silently.
+    const { db, calls } = fakeDb({
+      existing: [],
+      insertReturns: [],
+      afterInsertSelect: [],
+    });
+    await assert.rejects(() => upsertSystemUser(db), /still missing/);
+    assert.equal(calls.selects, 2, "must attempt the re-read before throwing");
+  });
 });

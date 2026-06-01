@@ -37,5 +37,16 @@ export async function upsertSystemUser(db: ReturnType<typeof getDb>) {
     .select()
     .from(schema.users)
     .where(eq(schema.users.id, SYSTEM_USER_ID));
+  // The re-read should surface the row the race winner inserted. If it doesn't,
+  // the conflict was on the unique `email` for a row carrying a *different* id
+  // (or a winner that rolled back) — the system user still doesn't exist. Fail
+  // loudly instead of returning undefined: a silent return here would let the
+  // caller's very next definition insert FK-fail on createdBy, which is exactly
+  // the failure this helper exists to prevent.
+  if (!raced) {
+    throw new Error(
+      `upsertSystemUser: system user ${SYSTEM_USER_ID} still missing after conflict re-read`,
+    );
+  }
   return raced;
 }
