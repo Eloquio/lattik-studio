@@ -1,6 +1,9 @@
 {
   "name": "lattik-studio",
   "private": true,
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "dev": "pnpm dev:up",
     "build": "turbo build",
